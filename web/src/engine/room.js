@@ -208,6 +208,7 @@ export function createRoom(engine) {
     if (!parts.length) return null;
     const m = new THREE.Mesh(merge(parts), material);
     m.name = 'room.' + name; m.matrixAutoUpdate = false; m.updateMatrix();
+    m.renderOrder = 5;                 // помещение рисуется после пультов: они перекрывают его и экономят заливку
     group.add(m);
     return m;
   };

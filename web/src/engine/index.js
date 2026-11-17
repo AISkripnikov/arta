@@ -61,13 +61,13 @@ function buildEnvironment(renderer) {
 
 /**
  * Создаёт движок. Ждёт загрузки шрифта Oswald.
- * opts: { debug=false, maxPixelRatio=2, exposure=1.0 }
+ * opts: { debug=false, maxPixelRatio=2, exposure=1.0, antialias=true }
  */
 export async function createEngine(canvas, opts = {}) {
   await loadFonts();
 
   const renderer = new THREE.WebGLRenderer({
-    canvas, antialias: true, alpha: false, stencil: false, powerPreference: 'high-performance',
+    canvas, antialias: opts.antialias !== false, alpha: false, stencil: false, powerPreference: 'high-performance',
   });
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = opts.exposure || 1.0;
@@ -222,7 +222,7 @@ export async function createEngine(canvas, opts = {}) {
   // --- кадр ---
   const stats = { calls: 0, triangles: 0, frameMs: 0, fps: 0, frames: 0 };
   let fpsT = 0, fpsN = 0;
-  function step(dt) {
+  function step(dt, render = true) {
     const t0 = performance.now();
     time += dt;
     checkResize(false);
@@ -231,9 +231,11 @@ export async function createEngine(canvas, opts = {}) {
     }
     updateRig(dt);
     for (const st of stations) if (st.group.visible) safeCall(st, 'update', dt, time);
-    renderer.render(scene, camera);
-    stats.calls = renderer.info.render.calls;
-    stats.triangles = renderer.info.render.triangles;
+    if (render) {
+      renderer.render(scene, camera);
+      stats.calls = renderer.info.render.calls;
+      stats.triangles = renderer.info.render.triangles;
+    } else scene.updateMatrixWorld();
     const ms = performance.now() - t0;
     stats.frameMs += (ms - stats.frameMs) * (stats.frames < 5 ? 1 : 0.08);
     stats.frames++;
@@ -360,8 +362,8 @@ export async function createEngine(canvas, opts = {}) {
           programs: renderer.info.programs ? renderer.info.programs.length : 0,
         };
       },
-      /** Один кадр вручную (для тестов и снимков при остановленном цикле). */
-      step(dt = 1 / 60) { step(dt); },
+      /** Один кадр вручную (для тестов и снимков при остановленном цикле); render=false — только логика, без отрисовки. */
+      step(dt = 1 / 60, render = true) { step(dt, render); },
       /** Рамка зоны управления (|x| ≤ 0.85, 0.74 ≤ y ≤ 1.46, z = 0) и габарит поста у текущего поста. */
       guides(show = true) {
         if (engine.debug._guides) { engine.debug._guides.removeFromParent(); engine.debug._guides.geometry.dispose(); engine.debug._guides = null; }

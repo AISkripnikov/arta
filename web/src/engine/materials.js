@@ -42,26 +42,27 @@ function grayCanvas(size, data /* Float32 0..1 */) {
 /** Карта износа краски: [цвет (множитель), ORM (G — шероховатость, B — металличность)]. */
 function makeWear(level, seed) {
   const S = 512, rnd = mulberry32(seed);
-  const big = fbm(S, 3, 3, 4, rnd);               // пятна
-  const fine = fbm(S, 28, 28, 3, rnd);            // сколы
-  const streak = fbm(S, 48, 2, 2, rnd);           // вертикальные потёки
+  const big = fbm(S, 3, 3, 4, rnd);               // крупные пятна выгорания/грязи
+  const mid = fbm(S, 12, 12, 3, rnd);
+  const fine = fbm(S, 56, 56, 2, rnd);            // мелкие сколы
+  const streak = fbm(S, 40, 2, 2, rnd);           // вертикальные потёки
   const grit = tileNoise(S, 256, 256, rnd);
   const col = makeCanvas(S, S), orm = makeCanvas(S, S);
   const cc = col.getContext('2d'), oc = orm.getContext('2d');
   const ci = cc.createImageData(S, S), oi = oc.createImageData(S, S);
-  const thr = 0.74 - 0.12 * level;
+  const thr = 0.80 - 0.07 * level;                // порог скола: чем изношеннее, тем их больше
   for (let i = 0; i < S * S; i++) {
-    let v = WEAR_BASE + (big[i] - 0.5) * (0.14 + 0.14 * level) + (grit[i] - 0.5) * 0.035;
-    const drip = Math.max(0, streak[i] - 0.56) * (0.25 + 0.5 * level);
+    let v = WEAR_BASE + (big[i] - 0.5) * (0.10 + 0.10 * level) + (mid[i] - 0.5) * 0.05 + (grit[i] - 0.5) * 0.03;
+    const drip = Math.max(0, streak[i] - 0.6) * (0.12 + 0.3 * level);
     v -= drip;
-    let rough = 0.56 + (big[i] - 0.5) * 0.3 + drip * 0.8, metal = 0.1;
-    const chip = fine[i] * 0.75 + big[i] * 0.25;
-    if (chip > thr) {                              // скол до металла
-      const e = Math.min(1, (chip - thr) / 0.02);
-      v = v * (1 - e) + (1.0 + (grit[i] - 0.5) * 0.1) * e;
-      rough = rough * (1 - e) + 0.36 * e; metal = 0.1 + 0.75 * e;
-    } else if (chip > thr - 0.022) {               // тёмная кромка скола
-      v *= 0.84;
+    let rough = 0.6 + (big[i] - 0.5) * 0.22 + (mid[i] - 0.5) * 0.12 + drip * 0.6, metal = 0.08;
+    const chip = fine[i] * 0.62 + mid[i] * 0.38;
+    if (chip > thr) {                              // скол до металла — мелкий и светлый
+      const e = Math.min(1, (chip - thr) / 0.015);
+      v = v * (1 - e) + (0.99 + (grit[i] - 0.5) * 0.06) * e;
+      rough = rough * (1 - e) + 0.42 * e; metal = 0.08 + 0.4 * e;
+    } else if (chip > thr - 0.012) {               // тонкая тёмная кромка скола
+      v *= 0.93;
     }
     const k = i * 4;
     ci.data[k] = ci.data[k + 1] = ci.data[k + 2] = Math.max(0, Math.min(255, v * 255)); ci.data[k + 3] = 255;
@@ -69,15 +70,15 @@ function makeWear(level, seed) {
   }
   cc.putImageData(ci, 0, 0); oc.putImageData(oi, 0, 0);
   // царапины (с заворотом через края)
-  const n = Math.round(10 + 50 * level);
+  const n = Math.round(6 + 34 * level);
   for (let s = 0; s < n; s++) {
-    const x = rnd() * S, y = rnd() * S, a = (rnd() - 0.5) * 1.2 + (rnd() < 0.5 ? 0 : Math.PI / 2), len = 10 + rnd() * 60;
-    const dx = Math.cos(a) * len, dy = Math.sin(a) * len, al = 0.12 + rnd() * 0.3;
+    const x = rnd() * S, y = rnd() * S, a = (rnd() - 0.5) * 1.2 + (rnd() < 0.5 ? 0 : Math.PI / 2), len = 8 + rnd() * 46;
+    const dx = Math.cos(a) * len, dy = Math.sin(a) * len, al = 0.08 + rnd() * 0.2;
     for (const ox of [-S, 0, S]) for (const oy of [-S, 0, S]) {
       if (x + ox + Math.abs(dx) < -4 || x + ox - Math.abs(dx) > S + 4 || y + oy + Math.abs(dy) < -4 || y + oy - Math.abs(dy) > S + 4) continue;
-      cc.strokeStyle = 'rgba(255,255,255,' + al.toFixed(3) + ')'; cc.lineWidth = 0.6 + rnd() * 0.7;
+      cc.strokeStyle = 'rgba(255,255,255,' + al.toFixed(3) + ')'; cc.lineWidth = 0.6 + rnd() * 0.6;
       cc.beginPath(); cc.moveTo(x + ox, y + oy); cc.lineTo(x + ox + dx, y + oy + dy); cc.stroke();
-      oc.strokeStyle = 'rgba(255,90,170,' + (al * 0.8).toFixed(3) + ')'; oc.lineWidth = 1;
+      oc.strokeStyle = 'rgba(255,110,90,' + (al * 0.8).toFixed(3) + ')'; oc.lineWidth = 1;
       oc.beginPath(); oc.moveTo(x + ox, y + oy); oc.lineTo(x + ox + dx, y + oy + dy); oc.stroke();
     }
   }

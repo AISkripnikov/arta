@@ -11,7 +11,7 @@ const path = require('path');
   const p = await ctx.newPage();
   p.on('pageerror', e => console.log('PAGEERROR:', e.message));
   p.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') console.log('CONSOLE.' + m.type() + ':', m.text()); });
-  await p.goto('file://' + target);
+  await p.goto('file://' + target + (opt.q ? '' : '') + (process.env.Q || ''));
   await p.waitForFunction('window.__dev', null, { timeout: 60000 });
   for (const js of evals) await p.evaluate('(async()=>{' + js + '})()');
   const r = await p.evaluate(async () => {
@@ -20,8 +20,8 @@ const path = require('path');
     const out = {};
     for (const id of e.stations.map(s => s.id)) {
       e.gotoStation(id, { instant: true });
-      e.debug.step(0.016); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
-      const t0 = performance.now(), N = 3;
+      for (let i = 0; i < 3; i++) { e.debug.step(0.016); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); }
+      const t0 = performance.now(), N = 4;
       for (let i = 0; i < N; i++) { e.debug.step(0.016); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); }
       const s = e.debug.stats();
       out[id] = { ms: +((performance.now() - t0) / N).toFixed(1), calls: s.calls, tris: s.triangles };

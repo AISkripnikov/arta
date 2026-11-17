@@ -13,7 +13,7 @@ function consoleA(engine) {
   const group = new THREE.Group();
   const put = (p, x, y, z, rx = 0) => { p.object3D.position.set(x, y, z); p.object3D.rotation.x = rx; group.add(p.object3D); return p; };
   put(ui.panel({ w: 1.76, h: 0.74, d: 0.5, color: '#2b343d', rivets: 0.12, wear: 0.8 }), 0, 0.37, -0.25);
-  put(ui.panel({ w: 1.72, h: 0.78, d: 0.2, color: '#2b343d', rivets: false, wear: 0.8 }), 0, 1.1, -0.27);
+  put(ui.panel({ w: 1.72, h: 0.78, d: 0.2, color: '#2b343d', rivets: false, wear: 0.8 }), 0, 1.1, -0.37);
   const desk = put(ui.panel({ w: 1.76, h: 0.40, d: 0.045, rivets: 0.1 }), 0, 0.8496, 0.0768, -45 * DEG);
   const main = put(ui.panel({ w: 1.76, h: 0.49, d: 0.05, rivets: 0.1 }), 0, 1.2586, -0.1166, -8 * DEG);
   return { group, main, desk };
@@ -25,7 +25,7 @@ function consoleB(engine) {
   const group = new THREE.Group();
   const put = (p, x, y, z, rx = 0) => { p.object3D.position.set(x, y, z); p.object3D.rotation.x = rx; group.add(p.object3D); return p; };
   put(ui.panel({ w: 1.76, h: 0.70, d: 0.45, color: '#2b343d', rivets: 0.12, wear: 0.8 }), 0, 0.35, -0.33);
-  put(ui.panel({ w: 1.72, h: 0.8, d: 0.2, color: '#2b343d', rivets: false, wear: 0.8 }), 0, 1.1, -0.36);
+  put(ui.panel({ w: 1.72, h: 0.8, d: 0.2, color: '#2b343d', rivets: false, wear: 0.8 }), 0, 1.1, -0.38);
   const main = put(ui.panel({ w: 1.76, h: 0.84, d: 0.06, rivets: 0.1 }), 0, 1.0983, -0.026, -12 * DEG);
   return { group, main };
 }
@@ -287,7 +287,7 @@ function fireStation(engine) {
 (async () => {
   const canvas = document.getElementById('stage');
   const debug = /[?&]debug/.test(location.search);
-  const engine = await createEngine(canvas, { debug });
+  const engine = await createEngine(canvas, { debug, antialias: !/[?&]noaa/.test(location.search) });
   const factories = [plotStation, computerStation, loadingStation, traverseStation, elevationStation, fireStation];
   const stations = {};
   const log = [];
