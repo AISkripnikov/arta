@@ -182,7 +182,7 @@ export function createMaterials() {
       return memo('nickel', () => new THREE.MeshStandardMaterial({ color: toColor(PALETTE.nickel).multiplyScalar(1.25), roughness: 0.24, metalness: 1 }));
     },
     get bakelite() {
-      return memo('bakelite', () => new THREE.MeshStandardMaterial({ color: toColor(PALETTE.bakelite), roughness: 0.3, metalness: 0.0 }));
+      return memo('bakelite', () => new THREE.MeshStandardMaterial({ color: toColor(PALETTE.bakelite), roughness: 0.42, metalness: 0.0, envMapIntensity: 0.55 }));
     },
     get ivory() {
       return memo('ivory', () => new THREE.MeshStandardMaterial({ color: toColor(PALETTE.ivory), roughness: 0.55, metalness: 0.0 }));

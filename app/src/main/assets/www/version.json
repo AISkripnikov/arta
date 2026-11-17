@@ -1,7 +1,8 @@
 {
- "version": 1,
- "minApp": 2,
+ "version": 29915537,
+ "minApp": 3,
  "orientation": "portrait",
+ "confirm": false,
  "files": [
   {
    "path": "css/style.css",

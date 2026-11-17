@@ -10,12 +10,16 @@ android {
         applicationId 'com.arta.game'
         minSdk 24
         targetSdk 34
-        versionCode 2
-        versionName '2.0'
+        versionCode 3
+        versionName '2.1'
 
-        // Откуда приложение берёт обновления игры «по воздуху» (каталог ota/ в репозитории).
+        // Откуда приложение берёт обновления игры «по воздуху»: каталог ota/ в репозитории.
+        // Адреса через «|», пробуются по порядку. Первый следует за веткой по умолчанию (HEAD) —
+        // если основная ветка сменится, обновления продолжат приходить из неё. Второй — запасной:
+        // ветка, из которой собран этот APK. Эти ветки НЕЛЬЗЯ удалять, пока стоят старые APK;
+        // при переезде укажите новый адрес в поле "moved" манифеста ota/version.json.
         // Пустая строка отключает обновления.
-        buildConfigField 'String', 'UPDATE_URL', '"https://raw.githubusercontent.com/AISkripnikov/arta/claude/kind-darwin-oxqzge/ota/"'
+        buildConfigField 'String', 'UPDATE_URLS', '"https://raw.githubusercontent.com/AISkripnikov/arta/HEAD/ota/|https://raw.githubusercontent.com/AISkripnikov/arta/refs/heads/claude/kind-darwin-oxqzge/ota/"'
     }
 
     buildTypes {

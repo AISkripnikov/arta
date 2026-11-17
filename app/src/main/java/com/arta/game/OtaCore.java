@@ -26,8 +26,10 @@ import java.util.regex.Pattern;
  * Ядро обновления игры «по воздуху»: манифест версии, загрузка файлов, проверка целостности.
  * Не зависит от Android (кроме org.json) — проверяется обычным JVM-тестом.
  *
- * Манифest version.json:
- * { "version": 3, "minApp": 2, "orientation": "landscape",
+ * Канал обновлений: &lt;base&gt;/version.json — единственный изменяемый файл; сами файлы версии лежат
+ * в неизменяемом каталоге &lt;base&gt;/v&lt;version&gt;/…, поэтому кэш CDN не может подсунуть смесь версий.
+ * Манифест version.json:
+ * { "version": 3, "minApp": 3, "orientation": "landscape", "confirm": true,
  *   "files": [ { "path": "app.js", "size": 123, "sha256": "…" }, … ] }
  */
 public final class OtaCore {
@@ -49,6 +51,10 @@ public final class OtaCore {
     public static final class Manifest {
         public int version, minApp;
         public String orientation;
+        /** Игра сама подтверждает успешный запуск (ArtaNative.ready()); иначе версия считается неисправной. */
+        public boolean confirm;
+        /** Новый адрес канала обновлений (или null). */
+        public String moved;
         public final List<Entry> files = new ArrayList<>();
         public String raw;
     }
@@ -62,6 +68,9 @@ public final class OtaCore {
             m.version = o.getInt("version");
             m.minApp = o.optInt("minApp", 1);
             m.orientation = "portrait".equals(o.optString("orientation")) ? "portrait" : "landscape";
+            m.confirm = o.optBoolean("confirm", false);
+            String moved = o.optString("moved", "");
+            m.moved = moved.isEmpty() ? null : moved;
             if (m.version < 1) throw new IOException("bad version");
             JSONArray arr = o.getJSONArray("files");
             if (arr.length() == 0 || arr.length() > MAX_FILES) throw new IOException("bad file count");
@@ -122,7 +131,7 @@ public final class OtaCore {
     }
 
     public static Manifest fetchManifest(String baseUrl, boolean allowHttp) throws IOException {
-        return parse(fetchText(baseUrl + MANIFEST + "?t=" + System.currentTimeMillis(), MAX_MANIFEST_BYTES, allowHttp));
+        return parse(fetchText(baseUrl + MANIFEST, MAX_MANIFEST_BYTES, allowHttp));
     }
 
     private static String hex(byte[] b) {
@@ -185,6 +194,9 @@ public final class OtaCore {
 
     public static String dirName(int version) { return "www-" + version; }
 
+    /** Неизменяемый каталог файлов версии в канале обновлений. */
+    public static String filesBase(String baseUrl, int version) { return baseUrl + "v" + version + "/"; }
+
     /**
      * Скачивает версию m в root/www-&lt;version&gt;. Сначала во временный каталог, каждый файл сверяется
      * по размеру и SHA-256; при любой ошибке временный каталог удаляется и бросается IOException.
@@ -200,7 +212,7 @@ public final class OtaCore {
                 File out = resolve(tmp, e.path);
                 File parent = out.getParentFile();
                 if (parent != null && !parent.isDirectory() && !parent.mkdirs()) throw new IOException("cannot create " + parent);
-                HttpURLConnection c = open(baseUrl + e.path + "?v=" + m.version, allowHttp);
+                HttpURLConnection c = open(filesBase(baseUrl, m.version) + e.path, allowHttp);
                 long got = 0;
                 MessageDigest md = MessageDigest.getInstance("SHA-256");
                 try (InputStream in = c.getInputStream(); OutputStream os = new FileOutputStream(out)) {
@@ -227,7 +239,7 @@ public final class OtaCore {
         } catch (java.security.NoSuchAlgorithmException ex) {
             deleteTree(tmp);
             throw new IOException(ex);
-        } catch (IOException | RuntimeException ex) {
+        } catch (IOException | RuntimeException | Error ex) {
             deleteTree(tmp);
             throw ex;
         }

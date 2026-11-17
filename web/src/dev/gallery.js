@@ -47,7 +47,7 @@ function plotStation(engine) {
   const bRecord = main.add(ui.pushButton({
     color: 'ochre', label: 'ЗАПИСАТЬ', radius: 0.032,
     onPress() { bRecord.setLit(true); audio.clunk(); setTimeout(() => bRecord.setLit(false), 600); },
-  }), -0.14, -0.14);
+  }), -0.14, -0.125);
   const nudge = (key, d, counter) => () => { s[key] = Math.max(0, Math.min(20, fix(s[key] + d, 2))); counter.setValue(s[key]); check(); };
   const bXm = main.add(ui.pushButton({ label: 'X −', hold: true, radius: 0.027, onPress: nudge('x', -0.01, cX) }), 0.29, -0.14);
   const bXp = main.add(ui.pushButton({ label: 'X +', hold: true, radius: 0.027, onPress: nudge('x', 0.01, cX) }), 0.43, -0.14);
@@ -253,9 +253,9 @@ function fireStation(engine) {
   const ready = names.map((n, i) => main.add(ui.lamp({ color: i === 4 ? 'red' : 'green', label: n, state: i < 4 }), -0.72 + i * 0.16, 0.2));
   const gWatch = main.add(ui.gauge({ radius: 0.13, min: 0, max: 60, sweep: 360, start: 0, wrap: false, majorStep: 10, minorStep: 1, caption: 'ВРЕМЯ ПОЛЁТА', unit: 'С', speed: 40, damping: 0.9 }), 0.6, 0.17);
   const cShots = main.add(ui.drumCounter({ digits: 3, label: 'ВЫСТРЕЛОВ', sound: true }), 0.22, 0.19);
-  main.add(ui.plate('ЦЕПЬ СТРЕЛЬБЫ', { style: 'red', size: 0.024, screws: false }), -0.58, -0.02);
-  const tArm = main.add(ui.toggle({ labels: ['', ''], onChange(i) { s.armed = !!i; ready[4].set(s.armed ? 'blink' : false); } }), -0.58, -0.17);
-  const guard = main.add(ui.cover({ w: 0.1, h: 0.13, guards: [tArm], onChange(open) { if (!open && s.armed) { tArm.set(0); s.armed = false; ready[4].set(false); } } }), -0.58, -0.17);
+  main.add(ui.plate('ЦЕПЬ СТРЕЛЬБЫ', { style: 'red', size: 0.024, screws: false }), -0.58, -0.3);
+  const tArm = main.add(ui.toggle({ labels: ['', ''], onChange(i) { s.armed = !!i; ready[4].set(s.armed ? 'blink' : false); } }), -0.58, -0.14);
+  const guard = main.add(ui.cover({ w: 0.1, h: 0.13, guards: [tArm], onChange(open) { if (!open && s.armed) { tArm.set(0); s.armed = false; ready[4].set(false); } } }), -0.58, -0.14);
   const trigger = main.add(ui.lever({
     mode: 'momentary', length: 0.22, color: '#8f1d14', labels: ['СПУСК'],
     onPull() {

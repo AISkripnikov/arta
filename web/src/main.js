@@ -27,6 +27,8 @@ const storage = {
     createShell({ engine, game });
     engine.start();
     window.__arta = { engine, game };
+    // Сообщаем приложению, что эта версия игры запустилась: иначе после двух неудач оно вернёт прежнюю.
+    setTimeout(() => { try { window.ArtaNative.ready(); } catch (e) { /* не в приложении */ } }, 1500);
   } catch (err) {
     console.error(err);
     if (msg) msg.textContent = 'НЕ УДАЛОСЬ ЗАПУСТИТЬ 3D-ГРАФИКУ: ' + (err && err.message ? err.message : err);

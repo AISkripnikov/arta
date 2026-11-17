@@ -59,9 +59,9 @@ export function createShell({ engine, game }) {
     $('diffHint').textContent = DIFF_HINT[s.difficulty];
   }
   function showMenu() {
-    // скачанное обновление игры применяем, когда игрок вышел в меню
-    if (pendingUpdate) { pendingUpdate = 0; location.href = 'arta://apply-update'; return; }
     $('hud').classList.add('hidden'); refreshMenu(); show('menu'); sfx('ambient', false);
+    // скачанное обновление игры применяем, когда игрок вышел в меню
+    if (pendingUpdate) { pendingUpdate = 0; try { window.ArtaNative.applyUpdate(); } catch (e) { /* не в приложении */ } }
   }
   function showMissions() {
     const grid = $('missionGrid'); grid.innerHTML = '';
@@ -287,6 +287,7 @@ export function createShell({ engine, game }) {
     return false;
   };
   window.onAppInfo = (info) => { const el = $('verInfo'); if (el && info) el.textContent = 'ВЕРСИЯ ИГРЫ ' + info.game + (info.bundled ? '' : ' · ОБНОВЛЕНО ПО СЕТИ'); };
+  if (window.__appInfo) window.onAppInfo(window.__appInfo);
 
   sfx('setMuted', game.save.muted);
   showMenu();

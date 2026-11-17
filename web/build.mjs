@@ -4,10 +4,10 @@
 //   node build.mjs --publish     — выпустить обновление: скопировать собранную игру в ../ota (оттуда её
 //                                  скачивают установленные приложения после git push)
 import { build } from 'esbuild';
-import { cpSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { cpSync, mkdirSync, writeFileSync, existsSync, rmSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { writeManifest, readManifest } from './tools/manifest.mjs';
+import { writeManifest, readManifest, matches, describe } from './tools/manifest.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -35,20 +35,32 @@ if (dev) {
     '</head><body><canvas id="stage"></canvas><script src="app.js"></script></body></html>');
   console.log('dev build →', out);
 } else if (args.includes('--publish')) {
+  // Канал обновлений: ota/version.json (единственный изменяемый файл) + ota/v<версия>/… (неизменяемые файлы).
   const m = readManifest(www);
   if (!m) throw new Error('Сначала соберите игру: node build.mjs');
+  if (!matches(www)) throw new Error('Файлы в assets/www не совпадают с их version.json — пересоберите игру (node build.mjs)');
   const pub = readManifest(ota);
-  if (pub && pub.version >= m.version) { console.log('ota/ уже содержит версию', pub.version, '— публиковать нечего'); process.exit(0); }
-  if (existsSync(ota)) rmSync(ota, { recursive: true });
-  cpSync(www, ota, { recursive: true });
-  console.log('опубликована версия', m.version, '→', ota, '(не забудьте git commit && git push)');
+  if (pub && pub.version === m.version) { console.log('ota/ уже содержит версию', pub.version, '— публиковать нечего'); process.exit(0); }
+  if (pub && pub.version > m.version) throw new Error(`В ota/ версия ${pub.version} новее собранной ${m.version}`);
+  const dst = join(ota, 'v' + m.version);
+  mkdirSync(ota, { recursive: true });
+  if (existsSync(dst)) rmSync(dst, { recursive: true });
+  cpSync(www, dst, { recursive: true });
+  rmSync(join(dst, 'version.json'));
+  if (JSON.stringify(describe(dst)) !== JSON.stringify(m.files)) throw new Error('Копия в ota/ не совпала с манифестом');
+  cpSync(join(www, 'version.json'), join(ota, 'version.json'));
+  // оставляем две последние версии: новую и предыдущую (её ещё могут докачивать)
+  const keep = new Set(['v' + m.version, pub ? 'v' + pub.version : '']);
+  for (const name of readdirSync(ota)) if (/^v\d+$/.test(name) && !keep.has(name)) rmSync(join(ota, name), { recursive: true });
+  console.log('опубликована версия', m.version, '→', dst, '\nОсталось: git add -A && git commit && git push — приложения скачают её сами (задержка кэша GitHub до 5 минут).');
 } else {
   const out = www;
+  const prevBuilt = readManifest(www);
   if (existsSync(out)) rmSync(out, { recursive: true });
   mkdirSync(out, { recursive: true });
   await build({ ...common, entryPoints: [join(root, 'src/main.js')], outfile: join(out, 'app.js'), minify: true, legalComments: 'none' });
   cpSync(join(root, 'static'), out, { recursive: true });
-  const m = writeManifest(out, { orientation: 'landscape', minApp: 2, published: readManifest(ota) });
+  const m = writeManifest(out, { orientation: 'landscape', minApp: 3, confirm: true, known: [prevBuilt, readManifest(ota)] });
   console.log('версия игры', m.version);
   console.log('prod build →', out);
 }

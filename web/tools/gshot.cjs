@@ -17,7 +17,7 @@ const path = require('path');
   await p.evaluate('window.__dev.engine.stop()');
   for (const id of opt.ids.split(',')) {
     const r = await p.evaluate('(async()=>{ const e = window.__dev.engine; e.gotoStation("' + id + '", { instant: true });' + opt.eval +
-      '; for (let i = 0; i < 12; i++) e.debug.step(0.1, false); e.debug.step(0.016); return e.debug.stats(); })()');
+      '; for (let i = 0; i < (' + (opt.nostep ? 0 : 12) + '); i++) e.debug.step(0.1, false); e.debug.step(0.0001); return e.debug.stats(); })()');
     await p.waitForTimeout(200);
     const file = prefix + '_' + id + '.png';
     await p.screenshot({ path: file, timeout: 180000 });

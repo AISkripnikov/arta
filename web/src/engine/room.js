@@ -179,7 +179,7 @@ export function createRoom(engine) {
       const box = new THREE.BoxGeometry(0.24, 0.32, 0.09);
       darkParts.push(place(box, a, rr, 0.92));
       const lid = new THREE.BoxGeometry(0.2, 0.28, 0.012);
-      steelParts.push(place(lid, a, rr - 0.05, 0.92));
+      darkParts.push(place(lid, a, rr - 0.05, 0.92));
       for (const [sx, sy] of [[-0.085, -0.125], [0.085, -0.125], [-0.085, 0.125], [0.085, 0.125]]) {
         steelParts.push(place(xf(rivetGeometry(0.009, 6), { p: [sx, sy, 0] }), a, rr - 0.056, 0.92));
       }
