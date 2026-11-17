@@ -147,6 +147,21 @@ export function createInput(engine, canvas) {
     }
   }
 
+  // страховка: окно потеряло фокус посреди жеста — завершаем его как отменённый
+  function cancelActive() {
+    if (!active) return;
+    const a = active;
+    active = null;
+    if (a.item) {
+      call(a.item, 'onUp', {
+        x: a.lastX, y: a.lastY, dx: 0, dy: 0, startX: a.startX, startY: a.startY, totalDx: a.lastX - a.startX, totalDy: a.lastY - a.startY,
+        dragging: a.dragging, duration: performance.now() - a.t0, pointerType: a.type, ray: raycaster.ray.clone(), point: null,
+        object: a.item.object, cancelled: true,
+      });
+    }
+  }
+  window.addEventListener('blur', cancelActive);
+
   const onUp = ev => finish(ev, false);
   const onCancel = ev => finish(ev, true);
   const onCtx = ev => ev.preventDefault();
@@ -193,6 +208,9 @@ export function createInput(engine, canvas) {
       return out;
     },
 
+    /** Принудительно завершить текущий жест (например, при открытии меню поверх сцены). */
+    cancel: cancelActive,
+
     /** Идёт ли сейчас перетаскивание какого-либо органа. */
     get busy() { return !!(active && active.item); },
 
@@ -203,6 +221,7 @@ export function createInput(engine, canvas) {
       canvas.removeEventListener('pointercancel', onCancel);
       canvas.removeEventListener('lostpointercapture', onCancel);
       canvas.removeEventListener('contextmenu', onCtx);
+      window.removeEventListener('blur', cancelActive);
       items.clear(); active = null;
     },
   };

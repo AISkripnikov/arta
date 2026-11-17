@@ -1,0 +1,177 @@
+# engine — движок «АРТА: Башня»
+
+Реализация контракта из `docs/DESIGN.md` §4–§5: рендер (three.js), круглое помещение башни, камера с перелётами между
+постами, ввод, материалы, синтезированный звук и все органы управления `engine.ui`.
+Ниже — фактические сигнатуры. Всё, чего нет в DESIGN.md, помечено **(расш.)**.
+
+```
+engine/
+  index.js        createEngine: рендерер, свет, окружение, камера, посты, кадр, события, отладка
+  room.js         помещение (стена, настил, потолок, трубы, плафоны) — не более 16 вызовов отрисовки
+  materials.js    engine.mat
+  input.js        engine.input
+  audio.js        engine.audio
+  fonts.js        Oswald (встроен), textures.js — canvas-текст/шум, geom.js — геометрические помощники
+  controls/       engine.ui (panel, plate, handwheel, drumCounter, lamp, lever, slewLever, rotarySelector,
+                  gauge, pushButton, toggle, cover, pipe, cageLamp, rivetRow, cable)
+```
+
+Стенд: `node build.mjs --dev gallery` → `.dev/gallery/index.html#<id>` (←/→ и свайп — посты, `D` — рамка зоны
+управления, `M` — звук, `?debug` — плашка с к/с и числом вызовов отрисовки).
+Тест взаимодействия: `node tools/itest.cjs`; снимки: `node tools/gshot.cjs <префикс> [--ids …] [--w --h --dpr]`;
+замер кадра: `node tools/perf.cjs .dev/gallery`.
+
+## Минимальный пост
+
+```js
+import { createEngine } from './engine/index.js';
+
+function createDemoStation({ engine, THREE, ui, mat, audio }) {
+  const group = new THREE.Group();
+  // корпус: тыл панели на z = 0, лицо на z = d; ставим лицом на z = 0
+  const main = ui.panel({ w: 1.7, h: 0.8, d: 0.06 });
+  main.object3D.position.set(0, 1.1, -0.06);
+  group.add(main.object3D);
+
+  let km = 8.4;
+  main.add(ui.plate('ДАЛЬНОСТЬ', { size: 0.03 }), 0, 0.3);            // add(ctrl, x, y) — координаты на лице панели
+  const counter = main.add(ui.drumCounter({ digits: 4, decimals: 2, unit: 'КМ', value: km }), 0, 0.18);
+  const lamp = main.add(ui.lamp({ color: 'green', label: 'ГОТОВО' }), 0.4, 0.18);
+  main.add(ui.handwheel({
+    radius: 0.16,
+    onTurn(d) { km = Math.max(0, km + d / (2 * Math.PI) * 0.5); counter.setValue(km); lamp.set(km > 10); },
+  }), 0, -0.12);
+
+  return {
+    id: 'demo', title: 'ПРИМЕР', group,
+    camera: { position: [0, 1.42, 1.25], target: [0, 1.08, 0], fov: 46 },   // можно опустить — это значения по умолчанию
+    update(dt, time) {}, onEnter() { audio.clunk(); }, onLeave() {},
+  };
+}
+
+const engine = await createEngine(document.getElementById('stage'), { debug: false });
+const ctx = { engine, THREE: engine.THREE, ui: engine.ui, mat: engine.mat, audio: engine.audio, game: null };
+engine.addStation(createDemoStation(ctx));
+engine.on('swipe', dir => { /* оболочка: перейти к соседнему посту */ });
+engine.start();
+```
+
+## createEngine(canvas, opts) → Promise<engine>
+
+`opts`: `{ debug=false, maxPixelRatio=2, exposure=1.0, antialias=true }`. Ждёт загрузки Oswald (при неудаче — sans-serif).
+Рендерер: ACES, sRGB, без теней; свет — полусферический + ключевой точечный (следует за текущим постом) + два заполняющих
+(плафон в центре потолка и холодный контровой). `scene.environment` — процедурная PMREM-карта, интенсивность 0.5.
+
+| Член | Описание |
+|---|---|
+| `THREE, scene, camera, renderer, canvas` | как в DESIGN |
+| `mat, ui, audio, input` | см. ниже |
+| `addStation(station)` → station | Порядок добавления = порядок по кольцу (по часовой, вид сверху). Движок ставит `group` на кольцо (R = 2.05 м, шаг 60°), пишет `station.index`, `station.angle`, `group.userData.stationId`. Первый добавленный пост — текущий. |
+| `gotoStation(id, { instant })` → `Promise<boolean>` | **Сразу** (до перелёта): `onLeave()` прежнего → `current = id` → `onEnter()` нового → событие `'station'(id)`. Затем перелёт 0.7 с (+0.16 с за каждый лишний пост) по дуге вокруг центра помещения; по прилёте — событие `'arrive'(id)` **(расш.)**, Promise → `true` (`false`, если перелёт перебит другим). Повторный вызов для текущего поста возвращает основной вид (0.4 с). |
+| `current` | id текущего поста. `station` — его объект, `stations`, `getStation(id)` **(расш.)** |
+| `flying` **(расш.)** | `true`, пока идёт перелёт между постами. В это время органы на касания не реагируют (свайп работает). |
+| `setCameraPose(pose\|null, seconds=0.5)` → Promise | Доп. вид в локальных координатах текущего поста: `{ position, target, fov }`, любое поле можно опустить. `null` — основной вид. |
+| `onFrame(fn)` → `off()` | `fn(dt, time)` каждый кадр; `dt` ограничен 0.05 с. |
+| `on(name, fn)` → `off()`, `off(name, fn)`, `emit(name, …)` | События: `'station'(id)`, `'swipe'(dir)`, `'arrive'(id)`, `'resize'(w, h)`. |
+| `start()` / `stop()` | Цикл кадров. Первый `start()` «входит» в текущий пост (onEnter + `'station'`), если этого ещё не сделал `gotoStation`. |
+| `shake(amount=1, seconds=0.6)` | Тряска камеры; заодно мигают лампы помещения. `amount` 1 ≈ выстрел. |
+| `room` **(расш.)** | `{ group, setLampLevel(0..1), flicker(amount, seconds), lampLevel }` |
+| `lights` **(расш.)** | `{ hemi, key, fillCeil, fillCool }` — для тонкой настройки, новые источники не добавлять. |
+| `stationToWorld(id, [x,y,z])` **(расш.)** | Точка из локальных координат поста в мировые. |
+| `geom`, `textures`, `fonts` **(расш.)** | Помощники: `geom.slab/lathe/extrude/merge/boxUV/pipeGeometry/hitBox/hitCylinder…`, `textures.canvasTexture/drawLabel/measureLabel/textTexture…`, `fonts.loaded/capRatio`. |
+| `debug` **(расш.)** | `stats()` → `{ calls, triangles, frameMs, fps, geometries, textures, programs }`; `step(dt, render=true)` — кадр вручную; `guides(show)` — рамка зоны управления и габарита у текущего поста. |
+| `dispose()` **(расш.)** | Снять обработчики, освободить ресурсы. |
+
+Правила для постов:
+- `update(dt, time)` вызывается только для **видимых** постов (текущий и два соседних); скрытые не обновляются.
+- Камера: если экран уже 16:9, вертикальный угол автоматически увеличивается, чтобы ширина кадра не уменьшалась.
+- Декор стены занимает до ~0.1 м от стены: в секторе поста безопасно `z ≥ −0.85`. Плафоны и стояки стоят в простенках (±30° от оси поста).
+- Посты не добавляют источников света; лампы — `ui.lamp` / `ui.cageLamp` / `mat.emissive`.
+
+## engine.input
+
+```js
+const remove = engine.input.add(object3D, { onTap(e), onDown(e), onDrag(e), onUp(e) }, { priority: 0 });
+engine.input.planePoint(e, planeNormalWorld, planePointWorld) → Vector3 | null
+engine.input.toScreen(worldVec3) → { x, y, behind }      // (расш.) CSS px холста
+engine.input.enabled = false                              // (расш.) глобально отключить ввод (меню)
+engine.input.busy                                         // (расш.) идёт перетаскивание органа
+engine.input.cancel()                                     // (расш.) принудительно завершить текущий жест
+```
+`e = { x, y, dx, dy, ray, point, object }` + **(расш.)** `startX, startY, totalDx, totalDy, dragging, duration (мс), pointerType, cancelled`.
+- `point` — точка попадания в объект (мировая); при перетаскивании за пределами объекта — `null`.
+- Луч бросается только по зарегистрированным объектам **текущего** поста (и объектам вне постов); учитывается `visible` всей цепочки родителей. Объект может быть группой — ловятся все её меши; годятся невидимые объёмы `geom.hitBox()/hitCylinder()`.
+- `onDrag` приходит на каждое движение; `e.dragging` становится `true` после сдвига на 10 px (мышь — 5 px). `onTap` — при отпускании без такого сдвига и быстрее 0.7 с. Порядок: `onDown` → `onDrag…` → `onUp` → `onTap`.
+- Один активный указатель: второй палец игнорируется. `pointercancel` → `onUp` с `e.cancelled = true`.
+- `priority` **(расш.)**: из пересечённых объектов берётся больший приоритет, затем ближний (так крышка перекрывает тумблер).
+- Свайп: по пустому месту, > 70 px по горизонтали, быстрее 0.6 с → `'swipe'(dir)`; **палец влево → `dir = +1`** (следующий по кольцу пост), вправо → `−1`. Жест, начатый на органе, свайпом не считается.
+
+## engine.mat
+
+Свойства (не функции): `steel`, `darkSteel`, `nickel`, `bakelite`, `ivory`, `copper`, `rubber`, `glass`, `ochre`, `floor`, `wall`.
+Функции: `paint(hex='#3d4a57', { wear=0.5 })`, `emissive(hex, intensity=1)`. Одинаковые вызовы возвращают один объект.
+Цвет — hex-строка, число или имя (`'green'|'red'|'amber'|'white'|'ochre'|'black'|'ivory'|'steel'|'panel'`).
+- `paint`, `wall`, `floor` — `MeshPhongMaterial` с процедурной картой износа (без карты окружения: крашеные поверхности
+  занимают почти весь экран, так заливка примерно вдвое дешевле). `wear` квантуется в три ступени (<0.34, <0.7, выше).
+  Геометрии нужны UV «в метрах»: `engine.geom.boxUV(geometry, mat.WEAR_REPEAT)`.
+- Металлы, бакелит, стекло, охра — `MeshStandardMaterial` (отражают окружение). `emissive` — `MeshBasicMaterial`.
+- **(расш.)** `PALETTE` (цвета §3), `glowTexture`, `glowSprite(hex, opacity)`, `lens(hex, on)`, `memo(key, make)`.
+
+## engine.ui
+
+Все фабрики возвращают объект с `object3D`, **(расш.)** `enabled` (false — орган не реагирует) и `dispose()`.
+Элемент «смотрит» в `+Z`, начало координат — центр основания на панели. Методы `set(...)` событий **не вызывают**
+(для синхронизации с `game.state`); события приходят только от действий игрока. Размеры — в метрах.
+Подписи (`label`, `labels`, `plate`) рисуются ПРОПИСНЫМИ; `size`/`labelSize` — высота прописной буквы (0.024–0.026 м ≈ 9 px на экране).
+
+| Фабрика | Параметры (умолчания) | API |
+|---|---|---|
+| `panel(o)` | `w=1, h=0.6, d=0.05, color='#3d4a57', rivets=true\|false\|шаг, bevel=0.012`, расш.: `radius, wear, material`. Тыл на z=0, лицо на z=d. | `w, h, d`, **`add(child, x, y, rotZ)`** — поставить орган/Object3D на лицо панели (расш.) |
+| `plate(text, o)` | `w, h` (по тексту), `style='black'\|'ivory'\|'red'\|'ochre'`, `size=0.026`, расш.: `screws=true, weight` | `setText(t)`, `text, w, h` |
+| `handwheel(o)` | `radius=0.16, spokes=4, color` (охра), `knob=true, onTurn(deltaRad), onStart(), onEnd()`, расш.: `standoff, knobAngle=135, tickAngle=15°` | `angle`, `spin(deltaRad)`, расш.: `turning, radius, wheel` |
+| `drumCounter(o)` | `digits=4` (всего разрядов, включая дробные), `decimals=0, unit, digitH=0.05, signed=false`, расш.: `value, wrap` (напр. 360), `label, labelSize, sound` | `setValue(v, {instant})`, `value`, расш.: `shown, w, h` |
+| `lamp(o)` | `color='green', radius=0.022, label`, расш.: `labelSize, state` | `set(false\|true\|'blink')`, `state` |
+| `lever(o)` | `length=0.22, color` (рукоять; по умолч. бакелит), `mode='momentary'\|'toggle', labels, onPull(), onChange(on)`, расш.: `on, labelSide='right'\|'left'\|'ends', labelSize` | `set(on)`, `on`, расш.: `travel` (0 верх … 1 низ), `handle` |
+| `slewLever(o)` | `length=0.2, onInput(v)`, расш.: `labels=['ВЛЕВО','ВПРАВО']\|false, deadZone=0.08` | `value`, расш.: `held, position, handle` |
+| `rotarySelector(o)` | `positions=6, labels, radius=0.045, value=0, onChange(i)`, расш.: `step` (°), `labelSize` | `set(i)`, `value`, расш.: `positions, labelPoint(i)` |
+| `gauge(o)` | `radius=0.09, min=0, max=100, label, unit, zones:[{from,to,color}], majorStep, minorStep`, расш.: `sweep=270, start, wrap, caption, value, numbers, damping, speed` | `setValue(v, {instant})`, `setBug(v\|null)`, расш.: `value, shown` |
+| `pushButton(o)` | `radius=0.03, color='black', label, onPress(n), hold=false`, расш.: `labelPos='bottom'\|'top'\|'none', labelSize, lit` | `setLit(b)`, расш.: `lit, pressed` |
+| `toggle(o)` | `labels:[a,b], value=0, onChange(i)`, расш.: `orient='v'\|'h', size=1, labelSize` | `set(i)`, `value` |
+| `cover(o)` | `w=0.1, h=0.13, onChange(open)`, расш.: `depth=0.1, open, label, guards:[органы]` | `open`, `set(b)`, расш.: `guard(ctrl), lid` |
+| `pipe(points, radius=0.02, material=mat.copper, o)` | ломаная `[[x,y,z],…]` со скруглёнными коленами; `o: { flanges=true, bend }` | `object3D` |
+| `cable(points, o)` | `radius=0.008, sag=0, material=mat.rubber` | `object3D` |
+| `rivetRow(from, to, o)` | `count \| spacing=0.06, radius=0.007, material=mat.steel` | `object3D` |
+| `cageLamp(o)` | `color='white', scale=1, on=true` | `set(on)`, `on` |
+
+Поведение:
+- **handwheel** — круговое движение пальца вокруг ступицы; угол считается в плоскости маховика (экран → плоскость, аффинно),
+  ход 1:1, рукоятка идёт за пальцем. Внутри 0.3·R от ступицы — «вязкая» зона: проход пальца через центр не даёт скачка.
+  `onTurn(delta)`: по часовой для игрока = `+`. `spin()` крутит визуально без события.
+- **drumCounter** — одометр: младший разряд катится плавно, старшие переносятся на последней десятой. `wrap: 360` — круговая
+  величина (359.9 → 0.0 идёт через ноль). Значение обрезается диапазоном разрядов.
+- **lever** — торчит к игроку, верх — исходное положение. `momentary`: `onPull()` один раз за протяжку ≥ 88 % хода, взводится
+  снова после возврата; касание без протяжки только «качает» рычаг. `toggle`: низ = `on`; перетаскивание или касание.
+  `labels: [верх, низ]` — сбоку от прорези; одна подпись (строка) — под основанием.
+- **slewLever** — `onInput(v)` каждый кадр, пока рычаг удерживается (`v ∈ [−1, 1]`, вправо `+`, мёртвая зона ±0.08);
+  при отпускании — один вызов `onInput(0)`, `value = 0`, рычаг возвращается пружиной.
+- **rotarySelector** — круговое перетаскивание ручки (щелчки по фиксаторам), касание подписи — выбор, касание ручки —
+  следующее положение по кругу.
+- **gauge** — стрелка-пружина с лёгким перебросом и упорами шкалы. `sweep: 360, start: 0` — круговая шкала с нулём сверху
+  (стрелка идёт кратчайшим путём). `label`/`unit` — мелкие надписи на циферблате; для читаемой на телефоне подписи — `caption`.
+- **pushButton** — `onPress(n)` в момент нажатия (n = 0); при `hold: true` повторяется через 0.42 с, затем с ускорением до ~20/с.
+- **toggle** — `orient 'v'`: `labels[0]` снизу (value 0), `labels[1]` сверху; `'h'`: слева/справа. Касание тумблера — переключить,
+  касание подписи — выбрать её, перетаскивание — в сторону движения.
+- **cover** — ставится в ту же точку, что и элемент под ней. Закрытая крышка перехватывает касания (приоритет) и отключает
+  органы из `guards`. Касание — открыть/закрыть, перетаскивание вверх/вниз.
+
+Затраты на отрисовку (вызовов): panel 1, plate 1, handwheel 4, drumCounter 4 (+1 с подписью), lamp 2–4, lever 4–6,
+slewLever 4, rotarySelector 4, gauge 4–6, pushButton 2–4, toggle 2–4, cover 3–4.
+
+## engine.audio
+
+`tick()`, `ratchet()`, `clunk()`, `leverPull()`, `switchFlip()`, `buzz()`, `servo(level 0..1)`, `hoist()`, `ram()`, `breech()`,
+`fire()`, `impactFar()`, `radio()`, `alarm(on)`, `ambient(on)`, `setMuted(b)`; **(расш.)** `setVolume(0..1)`, `muted`, `ready`,
+`unlock()`, `suspend()`, `resume()`. Контекст создаётся при первом касании/клавише; до этого вызовы молча игнорируются
+(`ambient(true)`/`alarm(true)` запоминаются и стартуют после разблокировки). Ни одна функция не бросает исключений.
+`servo(level)` — непрерывный гул: вызывать каждый кадр или при изменении, `servo(0)` — затихает.
+Органы сами издают звук: маховик — `ratchet`, рычаги — `leverPull`/`clunk`, тумблер и крышка — `switchFlip`, кнопки и галетник — `tick`.

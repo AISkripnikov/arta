@@ -237,6 +237,9 @@ export function createAudio() {
         }
       } catch (e) { /* тихо */ }
     },
+    /** Приостановить/возобновить весь звук (сворачивание приложения). */
+    suspend() { try { if (ctx && ctx.state === 'running') ctx.suspend(); } catch (e) { /* тихо */ } },
+    resume() { try { if (ctx && ctx.state === 'suspended') ctx.resume(); } catch (e) { /* тихо */ } },
     /** Освободить контекст. */
     dispose() { try { if (ctx) ctx.close(); } catch (e) { /* тихо */ } ctx = null; servoNode = alarmNode = ambientNode = null; },
   };

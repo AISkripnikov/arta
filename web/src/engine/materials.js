@@ -39,7 +39,7 @@ function grayCanvas(size, data /* Float32 0..1 */) {
   return c;
 }
 
-/** Карта износа краски: [цвет (множитель), ORM (G — шероховатость, B — металличность)]. */
+/** Карта износа краски: [цвет (множитель), блеск (R — сила блика для specularMap)]. */
 function makeWear(level, seed) {
   const S = 512, rnd = mulberry32(seed);
   const big = fbm(S, 3, 3, 4, rnd);               // крупные пятна выгорания/грязи
@@ -50,23 +50,23 @@ function makeWear(level, seed) {
   const col = makeCanvas(S, S), orm = makeCanvas(S, S);
   const cc = col.getContext('2d'), oc = orm.getContext('2d');
   const ci = cc.createImageData(S, S), oi = oc.createImageData(S, S);
-  const thr = 0.80 - 0.07 * level;                // порог скола: чем изношеннее, тем их больше
+  const thr = 0.835 - 0.075 * level;                // порог скола: чем изношеннее, тем их больше
   for (let i = 0; i < S * S; i++) {
     let v = WEAR_BASE + (big[i] - 0.5) * (0.10 + 0.10 * level) + (mid[i] - 0.5) * 0.05 + (grit[i] - 0.5) * 0.03;
     const drip = Math.max(0, streak[i] - 0.6) * (0.12 + 0.3 * level);
     v -= drip;
-    let rough = 0.6 + (big[i] - 0.5) * 0.22 + (mid[i] - 0.5) * 0.12 + drip * 0.6, metal = 0.08;
+    let gloss = 0.42 - (big[i] - 0.5) * 0.3 - (mid[i] - 0.5) * 0.16 - drip * 0.9;
     const chip = fine[i] * 0.62 + mid[i] * 0.38;
     if (chip > thr) {                              // скол до металла — мелкий и светлый
       const e = Math.min(1, (chip - thr) / 0.015);
-      v = v * (1 - e) + (0.99 + (grit[i] - 0.5) * 0.06) * e;
-      rough = rough * (1 - e) + 0.42 * e; metal = 0.08 + 0.4 * e;
+      v = v * (1 - e) + (0.95 + (grit[i] - 0.5) * 0.06) * e;
+      gloss = gloss * (1 - e) + 1.0 * e;
     } else if (chip > thr - 0.012) {               // тонкая тёмная кромка скола
       v *= 0.93;
     }
     const k = i * 4;
     ci.data[k] = ci.data[k + 1] = ci.data[k + 2] = Math.max(0, Math.min(255, v * 255)); ci.data[k + 3] = 255;
-    oi.data[k] = 255; oi.data[k + 1] = Math.max(0, Math.min(255, rough * 255)); oi.data[k + 2] = metal * 255; oi.data[k + 3] = 255;
+    oi.data[k] = oi.data[k + 1] = oi.data[k + 2] = Math.max(0, Math.min(255, gloss * 255)); oi.data[k + 3] = 255;
   }
   cc.putImageData(ci, 0, 0); oc.putImageData(oi, 0, 0);
   // царапины (с заворотом через края)
@@ -78,7 +78,7 @@ function makeWear(level, seed) {
       if (x + ox + Math.abs(dx) < -4 || x + ox - Math.abs(dx) > S + 4 || y + oy + Math.abs(dy) < -4 || y + oy - Math.abs(dy) > S + 4) continue;
       cc.strokeStyle = 'rgba(255,255,255,' + al.toFixed(3) + ')'; cc.lineWidth = 0.6 + rnd() * 0.6;
       cc.beginPath(); cc.moveTo(x + ox, y + oy); cc.lineTo(x + ox + dx, y + oy + dy); cc.stroke();
-      oc.strokeStyle = 'rgba(255,110,90,' + (al * 0.8).toFixed(3) + ')'; oc.lineWidth = 1;
+      oc.strokeStyle = 'rgba(255,255,255,' + (al * 1.6).toFixed(3) + ')'; oc.lineWidth = 1;
       oc.beginPath(); oc.moveTo(x + ox, y + oy); oc.lineTo(x + ox + dx, y + oy + dy); oc.stroke();
     }
   }
@@ -133,7 +133,7 @@ export function createMaterials() {
 
   const wearTex = (lvl) => tex('wear' + lvl, () => {
     const [col, orm] = makeWear([0.2, 0.5, 0.85][lvl], 1234 + lvl * 77);
-    return { map: canvasTexture(col, { repeat: true }), orm: canvasTexture(orm, { srgb: false, repeat: true }) };
+    return { map: canvasTexture(col, { repeat: true }), spec: canvasTexture(orm, { srgb: false, repeat: true }) };
   });
   const brushed = () => tex('brushed', () => canvasTexture(makeBrushed(99), { repeat: true }));
   const floorTex = () => tex('floor', () => {
@@ -141,13 +141,15 @@ export function createMaterials() {
     return { map: canvasTexture(col, { repeat: true, aniso: 8 }), normal: canvasTexture(nrm, { srgb: false, repeat: true, aniso: 8 }) };
   });
 
+  // Крашеные поверхности занимают почти весь экран, поэтому для них — MeshPhongMaterial (без карты окружения):
+  // это примерно вдвое дешевле по заливке, чем MeshStandardMaterial; металлы и глянец остаются на PBR.
   function painted(key, hex, wear, extra = {}) {
     return memo(key, () => {
       const lvl = wear < 0.34 ? 0 : wear < 0.7 ? 1 : 2;
       const t = wearTex(lvl);
       const color = toColor(hex).multiplyScalar(1 / WEAR_BASE_LIN);
-      return new THREE.MeshStandardMaterial(Object.assign({
-        color, map: t.map, roughnessMap: t.orm, metalnessMap: t.orm, roughness: 1, metalness: 1,
+      return new THREE.MeshPhongMaterial(Object.assign({
+        color, map: t.map, specularMap: t.spec, specular: new THREE.Color(0x5a5a5a), shininess: 24,
       }, extra));
     });
   }
@@ -200,19 +202,21 @@ export function createMaterials() {
     },
     /** Охристая эмаль маховиков и рукоятей приводов. */
     get ochre() {
-      return painted('ochre', PALETTE.ochre, 0.2, { roughness: 0.8 });
+      return memo('ochre', () => new THREE.MeshStandardMaterial({
+        color: toColor(PALETTE.ochre).multiplyScalar(1 / WEAR_BASE_LIN), map: wearTex(0).map, roughness: 0.4, metalness: 0.0, envMapIntensity: 0.8,
+      }));
     },
     get floor() {
       return memo('floor', () => {
         const t = floorTex();
-        return new THREE.MeshStandardMaterial({
-          color: toColor(PALETTE.floor).multiplyScalar(3.2), map: t.map, normalMap: t.normal, normalScale: new THREE.Vector2(1, 1),
-          roughness: 0.5, metalness: 0.75,
+        return new THREE.MeshPhongMaterial({
+          color: toColor(PALETTE.floor).multiplyScalar(4.5), map: t.map, normalMap: t.normal, normalScale: new THREE.Vector2(1, 1),
+          specular: new THREE.Color(0x8a8a8a), shininess: 34,
         });
       });
     },
     get wall() {
-      return painted('wall', PALETTE.frame, 0.85);
+      return painted('wall', toColor(PALETTE.frame).multiplyScalar(1.5), 0.85, { shininess: 16 });
     },
 
     // --- служебные (используются органами управления) ---

@@ -78,15 +78,13 @@ export function extrude(shape, depth, bevel = 0, segs = 2, curve = 8) {
 }
 
 /**
- * Тело вращения вокруг оси Z (профиль — пары [radius, z]); «смотрит» в +Z.
- * Повторённая точка даёт острое ребро.
+ * Тело вращения вокруг оси Z; «смотрит» в +Z. Профиль — пары [radius, z], перечисленные от основания (z = 0)
+ * наружу-вверх и к оси на торце: тогда нормали направлены наружу. Повторённая точка даёт острое ребро.
  */
 export function lathe(profile, segments = 24) {
-  // LatheGeometry вращает вокруг Y; профиль идём от большего z к меньшему, чтобы нормали были наружу.
   const pts = profile.map(([r, z]) => new THREE.Vector2(Math.max(0, r), z));
   const g = new THREE.LatheGeometry(pts, segments);
-  g.rotateX(Math.PI / 2);
-  // проверяем ориентацию по первой грани: нормаль должна смотреть от оси/наружу
+  g.rotateX(Math.PI / 2);          // ось Y → ось Z
   return g;
 }
 
