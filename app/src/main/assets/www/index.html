@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>АРТА — Огневая позиция</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ======== ГЛАВНОЕ МЕНЮ ======== -->
+<section id="menu" class="screen active">
+  <div class="menu-inner">
+    <div class="logo">
+      <svg viewBox="0 0 100 100" class="logo-mark"><circle cx="50" cy="50" r="34"/><path d="M50 8v26M50 66v26M8 50h26M66 50h26"/><circle cx="50" cy="50" r="4" class="dot"/></svg>
+      <h1>АРТА</h1>
+      <div class="sub">ОГНЕВАЯ ПОЗИЦИЯ</div>
+    </div>
+    <button class="big" data-act="campaign">Кампания</button>
+    <button class="big" data-act="skirmish">Свободный бой</button>
+    <button class="big ghost" data-act="howto">Как играть</button>
+    <div class="diff">
+      <div class="lbl">Сложность</div>
+      <div class="seg" id="diffSeg">
+        <button data-diff="0">Новобранец</button>
+        <button data-diff="1">Наводчик</button>
+        <button data-diff="2">Ветеран</button>
+      </div>
+      <div class="hint" id="diffHint"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======== СПИСОК МИССИЙ ======== -->
+<section id="missions" class="screen">
+  <header class="bar"><button class="back" data-act="toMenu">‹</button><h2>Кампания</h2></header>
+  <div id="missionList" class="list"></div>
+</section>
+
+<!-- ======== ИГРА ======== -->
+<section id="game" class="screen">
+  <header id="hud">
+    <button class="hud-btn" data-act="pause">☰</button>
+    <div class="hud-cell"><span class="k">ВРЕМЯ</span><span id="hudTime">00:00</span></div>
+    <div class="hud-cell"><span class="k">СНАРЯДЫ</span><span id="hudAmmo">0</span></div>
+    <div class="hud-cell"><span class="k">ЦЕЛИ</span><span id="hudTargets">0/0</span></div>
+    <div class="hud-cell wide"><span class="k">ДЕМАСКИРОВКА</span><div class="meter"><i id="hudThreat"></i></div></div>
+    <button class="hud-btn" id="speedBtn" data-act="speed">×1</button>
+  </header>
+  <div id="toast"><span class="dim">Радиоэфир: тишина</span></div>
+
+  <main id="panels">
+    <!-- КАРТА -->
+    <div class="panel active" id="p-map">
+      <canvas id="mapCanvas"></canvas>
+      <div class="map-tools">
+        <button data-tool="pan" class="on" title="Перемещение">✋</button>
+        <button data-tool="ruler" title="Линейка">📏</button>
+        <button data-tool="mark" title="Метка">📍</button>
+        <button data-act="rings" id="ringsBtn" title="Круг дальностей">◎</button>
+        <button data-act="zoomIn">＋</button>
+        <button data-act="zoomOut">－</button>
+        <button data-act="centerGun" title="К орудию">⌖</button>
+        <button data-act="clearMarks" title="Убрать метки">🧹</button>
+      </div>
+      <div id="mapInfo" class="map-info"></div>
+    </div>
+
+    <!-- ТАБЛИЦЫ СТРЕЛЬБЫ -->
+    <div class="panel" id="p-table">
+      <div class="tbl-head">
+        <div class="seg small" id="tblCharge"></div>
+        <div class="tbl-find">Д = <input id="tblFind" type="number" inputmode="numeric" placeholder="м"></div>
+      </div>
+      <div class="tbl-wrap"><table id="fireTable"></table></div>
+      <div class="tbl-legend">
+        <b>Д</b> — дальность, м · <b>П</b> — прицел (возвышение), дел. ·
+        <b>ΔП/10м</b> — добавить к прицелу на каждые +10 м превышения цели над орудием ·
+        <b>ΔД/дел</b> — изменение дальности на 1 дел. прицела ·
+        <b>t</b> — время полёта, с · <b>Дер.</b> — деривация (снос вправо), дел. ·
+        <b>Wд</b> — уменьшение дальности на 1 м/с встречного ветра, м ·
+        <b>Wб</b> — снос на 1 м/с бокового ветра, дел.
+      </div>
+    </div>
+
+    <!-- ОРУДИЕ -->
+    <div class="panel" id="p-gun">
+      <canvas id="gunCanvas"></canvas>
+      <div class="gun-grid">
+        <div class="gun-field">
+          <div class="lbl">УГЛОМЕР (азимут), дел.</div>
+          <div class="val" id="setAz" data-act="editAz">0-00</div>
+          <div class="cur">ствол: <span id="curAz">0-00</span></div>
+          <div class="steps" data-target="az">
+            <button data-d="-100">−100</button><button data-d="-10">−10</button><button data-d="-1">−1</button>
+            <button data-d="1">+1</button><button data-d="10">+10</button><button data-d="100">+100</button>
+          </div>
+        </div>
+        <div class="gun-field">
+          <div class="lbl">ПРИЦЕЛ (возвышение), дел.</div>
+          <div class="val" id="setEl" data-act="editEl">0-00</div>
+          <div class="cur">ствол: <span id="curEl">0-00</span></div>
+          <div class="steps" data-target="el">
+            <button data-d="-100">−100</button><button data-d="-10">−10</button><button data-d="-1">−1</button>
+            <button data-d="1">+1</button><button data-d="10">+10</button><button data-d="100">+100</button>
+          </div>
+        </div>
+      </div>
+      <div class="charge-row">
+        <span class="lbl">ЗАРЯД</span>
+        <div class="seg" id="chargeSeg"></div>
+      </div>
+      <div class="fire-row">
+        <div id="gunStatus" class="status">ГОТОВО</div>
+        <button id="fireBtn" class="fire" data-act="fire">ОГОНЬ!</button>
+      </div>
+      <div class="shot-log-title">Журнал стрельбы</div>
+      <div id="shotLog" class="shot-log"></div>
+    </div>
+
+    <!-- ВЫЧИСЛИТЕЛЬ -->
+    <div class="panel" id="p-calc">
+      <div class="card">
+        <div class="card-title">Огневой планшет</div>
+        <div class="plot-grid">
+          <span>От</span>
+          <div class="seg small" id="plotFrom"><button data-from="gun" class="on">Орудие</button><button data-from="op">НП</button></div>
+          <span>X (восток)</span><input id="plotE" type="number" inputmode="decimal">
+          <span>Y (север)</span><input id="plotN" type="number" inputmode="decimal">
+        </div>
+        <div id="plotOut" class="plot-out"></div>
+        <div class="row-btns">
+          <button data-act="plotMark">Нанести на карту</button>
+          <button data-act="plotFill">Взять активную цель</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Калькулятор <small>(углы в делениях: 60-00 = 6000 = 360°)</small></div>
+        <div id="calcExpr" class="calc-expr"></div>
+        <div id="calcRes" class="calc-res">0</div>
+        <div class="calc-keys" id="calcKeys"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Блокнот</div>
+        <textarea id="notes" placeholder="Записи наводчика…"></textarea>
+      </div>
+    </div>
+
+    <!-- РАЦИЯ -->
+    <div class="panel" id="p-radio">
+      <div class="card">
+        <div class="card-title">Цели <small>(нажмите, чтобы назначить корректировку)</small></div>
+        <div id="targetList"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Условия</div>
+        <div id="conditions"></div>
+      </div>
+      <div class="card grow">
+        <div class="card-title">Радиообмен</div>
+        <div id="radioLog"></div>
+      </div>
+    </div>
+  </main>
+
+  <nav id="tabs">
+    <button data-tab="map" class="on"><i>🗺</i>Карта</button>
+    <button data-tab="table"><i>📋</i>Таблицы</button>
+    <button data-tab="gun"><i>🎯</i>Орудие</button>
+    <button data-tab="calc"><i>🧮</i>Вычисл.</button>
+    <button data-tab="radio"><i>📻</i>Рация<b id="radioBadge"></b></button>
+  </nav>
+</section>
+
+<!-- ======== МОДАЛЬНЫЕ ОКНА ======== -->
+<div id="modal" class="modal"><div class="modal-box"><div id="modalBody"></div><div id="modalBtns" class="modal-btns"></div></div></div>
+
+<div id="keypad" class="modal"><div class="modal-box keypad-box">
+  <div class="kp-title" id="kpTitle"></div>
+  <div class="kp-val" id="kpVal"></div>
+  <div class="kp-hint" id="kpHint"></div>
+  <div class="kp-keys">
+    <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
+    <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
+    <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
+    <button data-k="C">C</button><button data-k="0">0</button><button data-k="B">⌫</button>
+  </div>
+  <div class="modal-btns"><button data-k="X" class="ghost">Отмена</button><button data-k="OK">Установить</button></div>
+</div></div>
+
+<script src="js/ballistics.js"></script>
+<script src="js/terrain.js"></script>
+<script src="js/missions.js"></script>
+<script src="js/calc.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
