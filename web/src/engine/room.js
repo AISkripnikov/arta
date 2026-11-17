@@ -9,6 +9,7 @@ import { cageLampParts, valveWheelGeometry } from './controls/decor.js';
 export const ROOM = { radius: 3.0, height: 2.6, ring: 2.05, slots: 6 };
 
 const TAU = Math.PI * 2, DEG = Math.PI / 180;
+const POOL = 0.15;            // яркость «пятен света» от плафонов
 
 /** Ставит геометрию, построенную «лицом в +Z» в начале координат, на стену: угол theta, радиус r, высота y. */
 function place(g, theta, r, y) {
@@ -130,9 +131,9 @@ export function createRoom(engine) {
   ringPipe(R - 0.12, Y_MAIN, 0.055, steelParts);
   ringPipe(R - 0.25, H - 0.3, 0.035, copperParts);                    // под потолком
   for (const th of ribAngles) {                                        // хомуты на рёбрах
-    const c1 = new THREE.BoxGeometry(0.035, 0.085, 0.1); steelParts.push(place(c1, th, R - 0.075, Y_COPPER));
-    const c2 = new THREE.BoxGeometry(0.03, 0.045, 0.05); steelParts.push(place(c2, th, R - 0.05, Y_CONDUIT));
-    const c3 = new THREE.BoxGeometry(0.045, 0.14, 0.15); steelParts.push(place(c3, th, R - 0.1, Y_MAIN));
+    const c1 = new THREE.BoxGeometry(0.035, 0.085, 0.1); darkParts.push(place(c1, th, R - 0.075, Y_COPPER));
+    const c2 = new THREE.BoxGeometry(0.03, 0.045, 0.05); darkParts.push(place(c2, th, R - 0.05, Y_CONDUIT));
+    const c3 = new THREE.BoxGeometry(0.045, 0.14, 0.15); darkParts.push(place(c3, th, R - 0.1, Y_MAIN));
   }
   for (let k = 0; k < 12; k++) {                                       // фланцы на трубах
     const th = k * 30 * DEG;
@@ -151,8 +152,6 @@ export function createRoom(engine) {
     const lampY = 1.36;
     // плафон на кронштейне
     const lp = cageLampParts(1.15);
-    const plate = new THREE.BoxGeometry(0.2, 0.3, 0.03); 
-    darkParts.push(place(plate, th, R - 0.02, lampY));
     darkParts.push(place(lp.base, th, R - 0.035, lampY));
     darkParts.push(place(lp.cage, th, R - 0.035, lampY));
     bulbParts.push(place(lp.bulb, th, R - 0.035, lampY));
@@ -220,7 +219,7 @@ export function createRoom(engine) {
   mesh(ochreParts, mat.ochre, 'ochre');
   mesh(rubberParts, mat.rubber, 'rubber');
   const bulbMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  const bulbColor = new THREE.Color(mat.PALETTE.lampWhite).multiplyScalar(2.4);
+  const bulbColor = new THREE.Color('#ffdca8').multiplyScalar(1.7);
   bulbMat.color.copy(bulbColor);
   mesh(bulbParts, bulbMat, 'bulbs');
 
@@ -236,7 +235,7 @@ export function createRoom(engine) {
   { const sp = new THREE.Sprite(glowMat); sp.position.copy(ceilLamp.pos); sp.scale.setScalar(1.25); group.add(sp); sprites.push(sp); }
 
   const poolMat = new THREE.MeshBasicMaterial({
-    map: mat.glowTexture, color: 0xff9d4a, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.26,
+    map: mat.glowTexture, color: 0xffa860, blending: THREE.AdditiveBlending, transparent: true, opacity: POOL,
     depthWrite: false, fog: false, side: THREE.DoubleSide,
   });
   {
@@ -274,7 +273,7 @@ export function createRoom(engine) {
   function applyLevel(k) {
     bulbMat.color.copy(bulbColor).multiplyScalar(0.15 + 0.85 * k);
     glowMat.opacity = 0.6 * k;
-    poolMat.opacity = 0.26 * k;
+    poolMat.opacity = POOL * k;
     engine.lights.fillCeil.intensity = fillBase * (0.35 + 0.65 * k);
   }
   const fillBase = engine.lights.fillCeil.intensity;

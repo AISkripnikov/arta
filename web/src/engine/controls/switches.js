@@ -19,20 +19,20 @@ export function toggle(c, opts = {}) {
   const labels = opts.labels || [];
   const group = new THREE.Group();
   group.name = 'toggle';
-  const nutR = 0.021 * s;
+  const nutR = 0.027 * s;
   group.add(new THREE.Mesh(merge([
-    lathe([[nutR * 1.45, 0], [nutR * 1.45, 0.003 * s], [nutR * 1.45, 0.003 * s], [nutR * 1.2, 0.0045 * s], [0, 0.0045 * s]], 20),
-    xf(hexGeometry(nutR, 0.008 * s), { p: [0, 0, 0.004 * s] }),
-    lathe([[nutR * 0.55, 0.012 * s], [nutR * 0.55, 0.02 * s], [nutR * 0.42, 0.023 * s], [0, 0.023 * s]], 14),
+    lathe([[nutR * 1.45, 0], [nutR * 1.45, 0.004 * s], [nutR * 1.45, 0.004 * s], [nutR * 1.2, 0.006 * s], [0, 0.006 * s]], 20),
+    xf(hexGeometry(nutR, 0.01 * s), { p: [0, 0, 0.005 * s] }),
+    lathe([[nutR * 0.55, 0.015 * s], [nutR * 0.55, 0.025 * s], [nutR * 0.42, 0.029 * s], [0, 0.029 * s]], 14),
   ]), c.mat.nickel));
   const bat = new THREE.Group();
-  bat.position.z = 0.014 * s;
+  bat.position.z = 0.018 * s;
   group.add(bat);
-  const bl = 0.058 * s;
-  bat.add(new THREE.Mesh(lathe([[0.0062 * s, 0], [0.0068 * s, bl * 0.35], [0.0098 * s, bl * 0.8], [0.0105 * s, bl * 0.92], [0.0075 * s, bl], [0, bl]], 12), c.mat.steel));
+  const bl = 0.066 * s;
+  bat.add(new THREE.Mesh(lathe([[0.0085 * s, 0], [0.009 * s, bl * 0.35], [0.013 * s, bl * 0.8], [0.014 * s, bl * 0.92], [0.01 * s, bl], [0, bl]], 12), c.mat.nickel));
 
   const lsize = opts.labelSize || 0.024;
-  const off0 = nutR * 1.45 + 0.012;
+  const off0 = nutR * 1.45 + 0.012 + bl * 0.42;         // подписи — за пределами хода ручки
   const plates = [];
   labels.forEach((text, i) => {
     if (!text) return;
@@ -49,7 +49,7 @@ export function toggle(c, opts = {}) {
   if (plates[1]) ext1 += orient === 'h' ? plates[1].w : plates[1].h;
   const cross = Math.max(0.075, ...plates.filter(Boolean).map(p => orient === 'h' ? p.h : p.w)) + 0.015;
   const along = ext0 + ext1 + 0.015, mid = (ext1 - ext0) / 2;
-  const hit = orient === 'h' ? hitBox(along, cross, 0.07, mid, 0, 0.035) : hitBox(cross, along, 0.07, 0, mid, 0.035);
+  const hit = orient === 'h' ? hitBox(along, cross, 0.09, mid, 0, 0.045) : hitBox(cross, along, 0.09, 0, mid, 0.045);
   group.add(hit);
 
   let value = opts.value ? 1 : 0, flipped = false;
@@ -80,7 +80,7 @@ export function toggle(c, opts = {}) {
       const lp = localPlanePoint(c, group, e, 0);            // точка на плоскости панели (без параллакса)
       if (lp) {
         const a = orient === 'h' ? lp.x : lp.y;
-        if (Math.abs(a) > off0 - 0.004) side = a > 0 ? 1 : -1;
+        if (Math.abs(a) > off0 - 0.006) side = a > 0 ? 1 : -1;
       }
       if (side === 0) setValue(value ? 0 : 1, true);
       else setValue(side > 0 ? 1 : 0, true);
@@ -104,13 +104,13 @@ const COVER_OPEN = 112 * DEG;
 /**
  * Откидная предохранительная крышка (красная) над элементом. Ставится в ту же точку панели, что и элемент.
  * Пока крышка закрыта, она перехватывает касания элемента под ней.
- * opts: { w=0.1, h=0.13, depth=0.075, open=false, label (надпись на крышке), onChange(open),
+ * opts: { w=0.1, h=0.13, depth=0.1, open=false, label (надпись на крышке), onChange(open),
  *         guards: [органы] — пока крышка закрыта, у них enabled=false (см. также guard(ctrl)) }
  * Касание — открыть/закрыть; перетаскивание вверх — открыть, вниз — закрыть.
  * → { object3D, open, set(b) (без события), guard(ctrl) }
  */
 export function cover(c, opts = {}) {
-  const { w = 0.1, h = 0.13, depth = 0.075 } = opts;
+  const { w = 0.1, h = 0.13, depth = 0.1 } = opts;
   const group = new THREE.Group();
   group.name = 'cover';
   const th = 0.005, hingeY = h / 2 + 0.012, hingeZ = 0.012;
@@ -176,6 +176,8 @@ export function cover(c, opts = {}) {
   });
   const api = {
     get open() { return open; },
+    /** Object3D откидной части (для подсказок и тестов). */
+    lid,
     set(b) { b = !!b; if (b !== open) { open = b; handle.item.priority = open ? 0 : 10; syncGuards(); } },
     /** Орган под крышкой: недоступен (enabled=false), пока крышка закрыта. */
     guard(ctrl) { guarded.push(ctrl); ctrl.enabled = open; return ctrl; },
@@ -306,6 +308,8 @@ export function rotarySelector(c, opts = {}) {
   const api = {
     positions: n,
     get value() { return value; },
+    /** Центр подписи положения i в локальных координатах органа ([x, y, z]). */
+    labelPoint(i) { const a = angleOf(i); return [Math.sin(a) * ringR, Math.cos(a) * ringR, 0]; },
     set(i) { value = clamp(i | 0, 0, n - 1); },
   };
   return finish(api, group, [remove, off]);

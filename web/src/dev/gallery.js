@@ -43,7 +43,7 @@ function plotStation(engine) {
   const cRange = main.add(ui.drumCounter({ digits: 4, decimals: 2, unit: 'КМ', label: 'ДАЛЬНОСТЬ', value: s.range }), -0.14, 0.02);
   const cX = main.add(ui.drumCounter({ digits: 4, decimals: 2, label: 'X', digitH: 0.044, value: s.x }), 0.36, 0.02);
   const cY = main.add(ui.drumCounter({ digits: 4, decimals: 2, label: 'Y', digitH: 0.044, value: s.y }), 0.66, 0.02);
-  const lampOk = main.add(ui.lamp({ color: 'green', label: 'СОВМЕЩЕНО' }), -0.56, -0.135);
+  const lampOk = main.add(ui.lamp({ color: 'green', label: 'СОВМЕЩЕНО' }), -0.56, -0.125);
   const bRecord = main.add(ui.pushButton({
     color: 'ochre', label: 'ЗАПИСАТЬ', radius: 0.032,
     onPress() { bRecord.setLit(true); audio.clunk(); setTimeout(() => bRecord.setLit(false), 600); },
@@ -57,7 +57,7 @@ function plotStation(engine) {
   const wBearing = desk.add(ui.handwheel({
     radius: 0.16,
     onTurn(d) { s.bearing = ((s.bearing + d / TURN * 10) % 360 + 360) % 360; cBearing.setValue(s.bearing); check(); },
-  }), -0.56, 0);
+  }), -0.54, 0);
   const wRange = desk.add(ui.handwheel({
     radius: 0.16, spokes: 3,
     onTurn(d) { s.range = Math.max(0, Math.min(22, s.range + d / TURN * 0.5)); cRange.setValue(s.range); check(); },
@@ -97,7 +97,7 @@ function computerStation(engine) {
       s.range = Math.max(0.01, Math.min(22, s.range + d / TURN * (s.fine ? 0.1 : 2)));
       cRange.setValue(s.range); s.stale = s.pulls > 0; refresh();
     },
-  }), -0.56, 0);
+  }), -0.54, 0);
   const selector = desk.add(ui.rotarySelector({
     positions: 6, value: s.charge,
     onChange(i) { s.charge = i; s.stale = s.pulls > 0; refresh(); },
@@ -135,10 +135,10 @@ function loadingStation(engine) {
   const cHe = main.add(ui.drumCounter({ digits: 2, label: 'ОФ', value: s.he }), 0.42, 0.18);
   const cAp = main.add(ui.drumCounter({ digits: 2, label: 'ББ', value: s.ap }), 0.68, 0.18);
   const leverBreech = main.add(ui.lever({
-    mode: 'toggle', length: 0.2, labels: ['ЗАКРЫТ', 'ОТКРЫТ'],
+    mode: 'toggle', length: 0.2, labels: ['ЗАКРЫТ', 'ОТКРЫТ'], labelSide: 'right',
     onChange(on) { s.open = on; lampClosed.set(!on); audio.breech(); },
-  }), -0.68, -0.14);
-  const tShell = main.add(ui.toggle({ labels: ['ОФ', 'ББ'], orient: 'h', onChange(i) { s.shell = i; } }), -0.36, -0.03);
+  }), -0.7, -0.14);
+  const tShell = main.add(ui.toggle({ labels: ['ОФ', 'ББ'], orient: 'h', onChange(i) { s.shell = i; } }), -0.3, -0.03);
   const bHoist = main.add(ui.pushButton({
     color: 'ochre', label: 'ПОДАТЬ СНАРЯД', radius: 0.034,
     onPress() {
@@ -146,11 +146,11 @@ function loadingStation(engine) {
       s.loaded = true; lampShell.set('blink'); audio.hoist();
       if (s.shell) cAp.setValue(--s.ap); else cHe.setValue(--s.he);
     },
-  }), -0.36, -0.2);
+  }), -0.3, -0.2);
   const leverRam = main.add(ui.lever({
     mode: 'momentary', length: 0.2, labels: ['ДОСЛАТЬ'],
     onPull() { if (s.loaded && !s.rammed) { s.rammed = true; lampShell.set(true); audio.ram(); } else audio.buzz(); },
-  }), -0.05, -0.16);
+  }), 0.0, -0.16);
   const setCharges = d => () => { s.charges = Math.max(0, Math.min(6, s.charges + d)); cCharges.setValue(s.charges); };
   const bPlus = main.add(ui.pushButton({ label: 'ЗАРЯД +', hold: true, onPress: setCharges(1) }), 0.27, -0.06);
   const bMinus = main.add(ui.pushButton({ label: 'ЗАРЯД −', hold: true, onPress: setCharges(-1) }), 0.27, -0.24);
@@ -176,14 +176,14 @@ function traverseStation(engine) {
   main.add(title(ui, 'ПОВОРОТ'), 0, 0.345);
   const cBearing = main.add(ui.drumCounter({ digits: 5, decimals: 2, unit: '°', wrap: 360, label: 'ПЕЛЕНГ БАШНИ', value: s.bearing }), -0.52, 0.17);
   const cTarget = main.add(ui.drumCounter({ digits: 4, decimals: 1, unit: '°', label: 'ЗАДАНО', digitH: 0.04, value: s.target }), -0.12, 0.17);
-  const gPressure = main.add(ui.gauge({ radius: 0.115, min: 0, max: 160, majorStep: 40, minorStep: 10, label: 'ДАВЛЕНИЕ', unit: 'АТМ', zones: [{ from: 130, to: 160 }] }), 0.3, 0.13);
-  const gCourse = main.add(ui.gauge({ radius: 0.115, min: 0, max: 360, sweep: 360, majorStep: 60, minorStep: 10, label: 'КУРС', value: s.bearing }), 0.62, 0.13);
+  const gPressure = main.add(ui.gauge({ radius: 0.115, min: 0, max: 160, majorStep: 40, minorStep: 10, caption: 'ДАВЛЕНИЕ', unit: 'АТМ', zones: [{ from: 130, to: 160 }] }), 0.32, 0.19);
+  const gCourse = main.add(ui.gauge({ radius: 0.115, min: 0, max: 360, sweep: 360, start: 0, majorStep: 90, minorStep: 10, caption: 'КУРС', value: s.bearing }), 0.64, 0.19);
   gCourse.setBug(s.target);
-  const lampBrake = main.add(ui.lamp({ color: 'red', label: 'СТОПОР', state: true }), 0.52, -0.12);
-  const lampDrive = main.add(ui.lamp({ color: 'amber', label: 'ПРИВОД' }), 0.72, -0.12);
-  const lampOn = main.add(ui.lamp({ color: 'green', label: 'НА ЦЕЛИ' }), 0.62, -0.27);
+  const lampBrake = main.add(ui.lamp({ color: 'red', label: 'СТОПОР', state: true }), 0.52, -0.16);
+  const lampDrive = main.add(ui.lamp({ color: 'amber', label: 'ПРИВОД' }), 0.72, -0.16);
+  const lampOn = main.add(ui.lamp({ color: 'green', label: 'НА ЦЕЛИ' }), 0.62, -0.3);
   const leverBrake = main.add(ui.lever({
-    mode: 'toggle', length: 0.2, labels: ['СТОИТ', 'СНЯТ'],
+    mode: 'toggle', length: 0.2, labels: ['СТОИТ', 'СНЯТ'], labelSide: 'right',
     onChange(on) { s.brake = !on; lampBrake.set(s.brake); },
   }), -0.7, -0.15);
   const slew = main.add(ui.slewLever({ length: 0.2, onInput(v) { s.slew = v; } }), -0.36, -0.3);
@@ -194,8 +194,8 @@ function traverseStation(engine) {
     cBearing.setValue(s.bearing); gCourse.setValue(s.bearing);
     lampOn.set(Math.abs(((s.bearing - s.target + 540) % 360) - 180) < 0.1);
   };
-  const wFine = main.add(ui.handwheel({ radius: 0.16, onTurn(d) { rotate(d / TURN * 1); } }), 0.13, -0.2);
-  main.add(ui.plate('ТОЧНО', { size: 0.024, screws: false }), 0.13, 0.0);
+  const wFine = main.add(ui.handwheel({ radius: 0.16, onTurn(d) { rotate(d / TURN * 1); } }), 0.08, -0.2);
+  main.add(ui.plate('ТОЧНО', { size: 0.024, screws: false }), 0.08, 0.0);
   return {
     id: 'traverse', title: 'ПОВОРОТ', group,
     update(dt) {
@@ -218,9 +218,9 @@ function elevationStation(engine) {
   main.add(title(ui, 'ПОДЪЁМ'), 0, 0.195);
   const cElev = main.add(ui.drumCounter({ digits: 4, decimals: 2, unit: '°', signed: true, label: 'УГОЛ СТВОЛА', value: s.elevation }), -0.56, 0.02);
   const cTarget = main.add(ui.drumCounter({ digits: 4, decimals: 2, unit: '°', label: 'ЗАДАНО', digitH: 0.04, value: s.target }), -0.15, 0.02);
-  const gElev = main.add(ui.gauge({ radius: 0.115, min: -5, max: 45, majorStep: 10, minorStep: 1, label: 'УГОЛ', unit: 'ГРАД', zones: [{ from: -5, to: 3, color: '#3d8f4f' }], value: s.elevation }), 0.3, -0.05);
+  const gElev = main.add(ui.gauge({ radius: 0.105, min: -5, max: 45, majorStep: 10, minorStep: 1, caption: 'УГОЛ', unit: 'ГРАД', zones: [{ from: -5, to: 3, color: '#3d8f4f' }], value: s.elevation }), 0.3, -0.02);
   gElev.setBug(s.target);
-  const gError = main.add(ui.gauge({ radius: 0.115, min: -5, max: 5, majorStep: 1, minorStep: 0.5, label: 'РАССОГЛ.', sweep: 180, zones: [{ from: -5, to: -3 }, { from: 3, to: 5 }] }), 0.62, -0.05);
+  const gError = main.add(ui.gauge({ radius: 0.105, min: -5, max: 5, majorStep: 2.5, minorStep: 0.5, caption: 'РАССОГЛАСОВАНИЕ', sweep: 180, zones: [{ from: -5, to: -3 }, { from: 3, to: 5 }] }), 0.62, -0.02);
   const tFine = main.add(ui.toggle({ labels: ['ГРУБО', 'ТОЧНО'], orient: 'h', onChange(i) { s.fine = i; } }), -0.56, -0.15);
   const lampLoad = main.add(ui.lamp({ color: 'green', label: 'УГОЛ ЗАРЯЖАНИЯ', state: true }), -0.15, -0.13);
   const refresh = () => {
@@ -251,7 +251,7 @@ function fireStation(engine) {
   main.add(title(ui, 'ОГОНЬ'), 0, 0.345);
   const names = ['СНАРЯД', 'ЗАРЯД', 'ЗАТВОР', 'СТОПОР', 'ЦЕПЬ'];
   const ready = names.map((n, i) => main.add(ui.lamp({ color: i === 4 ? 'red' : 'green', label: n, state: i < 4 }), -0.72 + i * 0.16, 0.2));
-  const gWatch = main.add(ui.gauge({ radius: 0.13, min: 0, max: 60, sweep: 360, majorStep: 10, minorStep: 1, label: 'ПОЛЁТ', unit: 'С', speed: 40, damping: 0.9 }), 0.6, 0.13);
+  const gWatch = main.add(ui.gauge({ radius: 0.13, min: 0, max: 60, sweep: 360, start: 0, wrap: false, majorStep: 10, minorStep: 1, caption: 'ВРЕМЯ ПОЛЁТА', unit: 'С', speed: 40, damping: 0.9 }), 0.6, 0.17);
   const cShots = main.add(ui.drumCounter({ digits: 3, label: 'ВЫСТРЕЛОВ', sound: true }), 0.22, 0.19);
   main.add(ui.plate('ЦЕПЬ СТРЕЛЬБЫ', { style: 'red', size: 0.024, screws: false }), -0.58, -0.02);
   const tArm = main.add(ui.toggle({ labels: ['', ''], onChange(i) { s.armed = !!i; ready[4].set(s.armed ? 'blink' : false); } }), -0.58, -0.17);
@@ -266,11 +266,11 @@ function fireStation(engine) {
       setTimeout(() => audio.impactFar(), 2600);
     },
   }), -0.2, -0.17);
-  const lampAlarm = main.add(ui.cageLamp({ color: 'red', on: false, scale: 0.9 }), 0.78, -0.3);
+  const lampAlarm = main.add(ui.cageLamp({ color: 'red', on: false, scale: 0.8 }), 0.74, -0.31);
   const bAlarm = main.add(ui.pushButton({
     color: 'red', label: 'ТРЕВОГА', radius: 0.034,
     onPress() { s.alarm = !s.alarm; bAlarm.setLit(s.alarm); lampAlarm.set(s.alarm); audio.alarm(s.alarm); },
-  }), 0.56, -0.24);
+  }), 0.52, -0.24);
   const bRadio = main.add(ui.pushButton({ color: 'ivory', label: 'СВЯЗЬ', onPress() { audio.radio(); } }), 0.3, -0.24);
   const bReset = main.add(ui.pushButton({ label: 'СБРОС', onPress() { s.shots = 0; cShots.setValue(0); } }), 0.1, -0.24);
   return {

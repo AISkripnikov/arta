@@ -17,6 +17,7 @@ const fs = require('fs');
   const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   const ctx = await b.newContext({ viewport: { width: opt.w, height: opt.h }, deviceScaleFactor: opt.dpr, hasTouch: true });
   const p = await ctx.newPage();
+  p.setDefaultTimeout(180000);
   p.on('pageerror', e => console.log('PAGEERROR:', e.message));
   p.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') console.log('CONSOLE.' + m.type() + ':', m.text()); });
   await p.goto('file://' + target);

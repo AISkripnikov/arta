@@ -5,6 +5,7 @@ import { finish, planeMapper, sweepAngle, callSafe, TAU, DEG } from './base.js';
 
 /**
  * opts: { radius=0.16, spokes=4, color (по умолчанию охра), knob=true, standoff (вынос от панели),
+ *         knobAngle=135 (начальное положение рукоятки, градусы по часовой от «12 часов»),
  *         onTurn(deltaRad), onStart(), onEnd(), tickAngle=15° (шаг трещотки для звука; 0 — без звука) }
  * onTurn: приращение угла, «по часовой для игрока» = +.
  * → { object3D, angle (накопленный угол, рад), spin(deltaRad) — повернуть визуально без события, enabled }
@@ -62,6 +63,7 @@ export function handwheel(c, opts = {}) {
   const hit = hitCylinder(R * 1.2 + 0.02, H + 0.1);
   group.add(hit);
 
+  wheel.rotation.z = -(opts.knobAngle == null ? 135 : opts.knobAngle) * DEG;
   let angle = 0, mapper = null, pu = 0, pv = 0, tickAcc = 0, turning = false;
   const rmin = R * 0.3;
 
@@ -99,6 +101,8 @@ export function handwheel(c, opts = {}) {
 
   const api = {
     radius: R,
+    /** Вращающаяся часть (Object3D; её начало координат — ступица). */
+    wheel,
     /** Накопленный угол поворота, рад (по часовой для игрока = +). */
     get angle() { return angle; },
     /** true, пока игрок держит маховик. */

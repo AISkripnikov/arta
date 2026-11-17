@@ -10,7 +10,8 @@ const LEVER_SWING = 38 * DEG;      // отклонение рычага от н�
 /**
  * Рычаг. Торчит из панели к игроку; верхнее положение — исходное.
  * opts: { length=0.22, color (цвет рукояти; по умолчанию чёрный бакелит), mode='momentary'|'toggle',
- *         labels: [верх, низ] или строка (одна подпись сверху), labelSize=0.024,
+ *         labels: [верх, низ] — подписи положений (ставятся сбоку от прорези: labelSide='right'|'left'|'ends');
+ *                 строка или один элемент — одна подпись под основанием; labelSize=0.024,
  *         onPull() — momentary: один раз за каждое полное протягивание вниз (≥ 88 % хода); возврат пружиной,
  *         onChange(on) — toggle: нижнее положение = on; меняется перетаскиванием или касанием,
  *         on=false (начальное состояние toggle) }
@@ -47,12 +48,24 @@ export function lever(c, opts = {}) {
   const gripG = new THREE.CapsuleGeometry(gripR, gripLen, 4, 12);
   gripG.rotateZ(Math.PI / 2); gripG.translate(0, 0, L);
   arm.add(new THREE.Mesh(gripG, opts.color ? c.mat.paint(opts.color, { wear: 0.2 }) : c.mat.bakelite));
+  const handle = new THREE.Object3D(); handle.position.set(0, 0, L); arm.add(handle);
 
-  // подписи
-  const labels = typeof opts.labels === 'string' ? [opts.labels, null] : (opts.labels || []);
+  // подписи: одна — под основанием; две — сбоку от прорези у верхнего и нижнего положений (не закрываются рукоятью)
+  const labels = typeof opts.labels === 'string' ? [opts.labels] : (opts.labels || []);
   const lsize = opts.labelSize || 0.024;
-  if (labels[0]) { const p = c.ui.plate(labels[0], { size: lsize, screws: false }); p.object3D.position.set(0, baseH / 2 + 0.01 + p.h / 2, 0); group.add(p.object3D); }
-  if (labels[1]) { const p = c.ui.plate(labels[1], { size: lsize, screws: false }); p.object3D.position.set(0, -baseH / 2 - 0.01 - p.h / 2, 0); group.add(p.object3D); }
+  const side = opts.labelSide || 'right';
+  const mk = text => c.ui.plate(text, { size: lsize, screws: false });
+  if (labels.length === 1 && labels[0]) {
+    const p = mk(labels[0]); p.object3D.position.set(0, -baseH / 2 - 0.01 - p.h / 2, 0); group.add(p.object3D);
+  } else {
+    labels.slice(0, 2).forEach((text, i) => {
+      if (!text) return;
+      const p = mk(text), sy = i === 0 ? 1 : -1;
+      if (side === 'ends') p.object3D.position.set(0, sy * (baseH / 2 + 0.01 + p.h / 2), 0);
+      else p.object3D.position.set((side === 'left' ? -1 : 1) * (baseW / 2 + 0.012 + p.w / 2), sy * throwY * 0.62, 0);
+      group.add(p.object3D);
+    });
+  }
 
   const hit = hitBox(Math.max(baseW, gripLen + gripR * 2) + 0.03, throwY * 2 + 0.07, L + 0.05, 0, 0, (L + 0.05) / 2);
   group.add(hit);
@@ -118,6 +131,8 @@ export function lever(c, opts = {}) {
     get on() { return on; },
     /** Текущее положение рукояти: 0 — верх, 1 — низ. */
     get travel() { return t; },
+    /** Object3D в центре рукояти (для подсказок и тестов). */
+    handle,
     /** toggle: установить состояние без вызова onChange. */
     set(b) { if (isToggle) on = !!b; },
   };
@@ -191,6 +206,7 @@ export function slewLever(c, opts = {}) {
   const gripR = Math.max(0.021, L * 0.11);
   const grip = new THREE.SphereGeometry(gripR, 16, 12); grip.scale(1, 1.25, 1); grip.translate(0, L, 0);
   arm.add(new THREE.Mesh(grip, c.mat.bakelite));
+  const handle = new THREE.Object3D(); handle.position.set(0, L, 0); arm.add(handle);
 
   const hit = hitBox(W + 0.02, Hh + 0.04, 0.09, 0, cy + 0.01, 0.045);
   group.add(hit);
@@ -237,6 +253,10 @@ export function slewLever(c, opts = {}) {
     /** Текущее значение −1…1 (0, если рычаг отпущен). */
     get value() { return value; },
     get held() { return held; },
+    /** Отклонение рычага в данный момент (−1…1, с учётом возврата пружиной). */
+    get position() { return st.x; },
+    /** Object3D в центре рукояти (для подсказок и тестов). */
+    handle,
   };
   return finish(api, group, [remove, off]);
 }

@@ -80,16 +80,16 @@ export async function createEngine(canvas, opts = {}) {
   scene.background = new THREE.Color(0x050607);
   const envRT = buildEnvironment(renderer);
   scene.environment = envRT.texture;
-  scene.environmentIntensity = 0.55;
+  scene.environmentIntensity = 0.5;
 
   const camera = new THREE.PerspectiveCamera(DEFAULT_CAMERA.fov, 2, 0.05, 30);
   scene.add(camera);
 
   // --- свет (§3): полусферический + ключевой у текущего поста + два заполняющих. Теней нет. ---
-  const hemi = new THREE.HemisphereLight(0x9a8f7c, 0x14181d, 0.55);
-  const keyLight = new THREE.PointLight(0xffd7a3, 14, 9, 1.7);
-  const fillCeil = new THREE.PointLight(0xffc98f, 5.5, 8, 1.6);    // центральный плафон
-  const fillCool = new THREE.PointLight(0x7f9cc0, 3.0, 7, 1.8);    // холодный контровой снизу-справа
+  const hemi = new THREE.HemisphereLight(0xaab6c4, 0x1a1c20, 0.42);
+  const keyLight = new THREE.PointLight(0xffe9cf, 7.5, 9, 1.7);
+  const fillCeil = new THREE.PointLight(0xffc98f, 3.2, 8, 1.6);    // центральный плафон
+  const fillCool = new THREE.PointLight(0x7f9cc0, 2.4, 7, 1.8);    // холодный контровой снизу-справа
   fillCeil.position.set(0, 2.25, 0);
   scene.add(hemi, keyLight, fillCeil, fillCool);
 

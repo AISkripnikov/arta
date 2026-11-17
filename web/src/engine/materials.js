@@ -90,7 +90,7 @@ function makeBrushed(seed) {
   const S = 256, rnd = mulberry32(seed);
   const a = fbm(S, 2, 128, 2, rnd), b = fbm(S, 4, 4, 3, rnd);
   const d = new Float32Array(S * S);
-  for (let i = 0; i < d.length; i++) d[i] = 0.84 + (a[i] - 0.5) * 0.24 + (b[i] - 0.5) * 0.12;
+  for (let i = 0; i < d.length; i++) d[i] = 0.88 + (a[i] - 0.5) * 0.12 + (b[i] - 0.5) * 0.08;
   return grayCanvas(S, d);
 }
 
@@ -188,7 +188,7 @@ export function createMaterials() {
       return memo('ivory', () => new THREE.MeshStandardMaterial({ color: toColor(PALETTE.ivory), roughness: 0.55, metalness: 0.0 }));
     },
     get copper() {
-      return memo('copper', () => new THREE.MeshStandardMaterial({ color: toColor(PALETTE.copper).multiplyScalar(1.3), map: brushed(), roughness: 0.36, metalness: 1 }));
+      return memo('copper', () => new THREE.MeshStandardMaterial({ color: toColor(PALETTE.copper).multiplyScalar(1.1), map: brushed(), roughness: 0.42, metalness: 1 }));
     },
     get rubber() {
       return memo('rubber', () => new THREE.MeshStandardMaterial({ color: 0x101112, roughness: 0.88, metalness: 0.0 }));
