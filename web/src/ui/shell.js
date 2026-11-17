@@ -31,6 +31,7 @@ const DIFF_HINT = [
 export function createShell({ engine, game }) {
   const s = game.state;
   const sfx = (name, ...a) => { try { const f = engine.audio && engine.audio[name]; if (f) f.apply(engine.audio, a); } catch (e) { /* звук не критичен */ } };
+  let pendingUpdate = 0;
   let dirty = true, lastRender = 0, notebookOpen = false, unread = 0, dialogDismiss = null, radioTimer = 0, toastTimer = 0;
 
   // ---------- экраны ----------
@@ -57,7 +58,11 @@ export function createShell({ engine, game }) {
     document.querySelectorAll('#soundSeg button').forEach((b) => b.classList.toggle('on', (b.dataset.sound === '1') === !game.save.muted));
     $('diffHint').textContent = DIFF_HINT[s.difficulty];
   }
-  function showMenu() { $('hud').classList.add('hidden'); refreshMenu(); show('menu'); sfx('ambient', false); }
+  function showMenu() {
+    // скачанное обновление игры применяем, когда игрок вышел в меню
+    if (pendingUpdate) { pendingUpdate = 0; location.href = 'arta://apply-update'; return; }
+    $('hud').classList.add('hidden'); refreshMenu(); show('menu'); sfx('ambient', false);
+  }
   function showMissions() {
     const grid = $('missionGrid'); grid.innerHTML = '';
     game.campaign.forEach((m, i) => {
@@ -273,6 +278,15 @@ export function createShell({ engine, game }) {
     return false;
   };
   window.onAppPause = () => { if (s.phase === 'playing' && !s.paused) showPause(); };
+
+  // Обновление «по воздуху» (см. MainActivity/Updater): приложение спрашивает, можно ли перезапустить игру сейчас.
+  window.onUpdateReady = (version) => {
+    if (s.phase === 'menu') return true;
+    pendingUpdate = version;
+    toast('ОБНОВЛЕНИЕ ИГРЫ ЗАГРУЖЕНО — УСТАНОВИТСЯ ПРИ ВЫХОДЕ В МЕНЮ');
+    return false;
+  };
+  window.onAppInfo = (info) => { const el = $('verInfo'); if (el && info) el.textContent = 'ВЕРСИЯ ИГРЫ ' + info.game + (info.bundled ? '' : ' · ОБНОВЛЕНО ПО СЕТИ'); };
 
   sfx('setMuted', game.save.muted);
   showMenu();

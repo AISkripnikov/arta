@@ -112,3 +112,13 @@ export function callSafe(fn, ...args) {
   if (typeof fn !== 'function') return;
   try { return fn(...args); } catch (e) { console.error('[engine.ui] ошибка в обработчике:', e); }
 }
+
+const _n = new THREE.Vector3(), _p = new THREE.Vector3();
+/** Точка пересечения луча события с локальной плоскостью z = const объекта → локальные координаты (или null). */
+export function localPlanePoint(c, obj, e, z = 0) {
+  obj.updateWorldMatrix(true, false);
+  _p.set(0, 0, z).applyMatrix4(obj.matrixWorld);
+  _n.set(0, 0, 1).transformDirection(obj.matrixWorld);
+  const hit = c.input.planePoint(e, _n, _p);
+  return hit ? obj.worldToLocal(hit) : null;
+}

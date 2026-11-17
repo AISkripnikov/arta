@@ -139,7 +139,8 @@ export function drumCounter(c, opts = {}) {
   }
 
   function setCell(i, col, row) {
-    const u0 = col * COL_W / ATLAS_W + 6 / ATLAS_W, u1 = (col + 1) * COL_W / ATLAS_W - 6 / ATLAS_W;
+    const mg = (COL_W - CELL_H * 0.62) / 2;                 // сохраняем пропорции цифры
+    const u0 = (col * COL_W + mg) / ATLAS_W, u1 = ((col + 1) * COL_W - mg) / ATLAS_W;
     const vTop = 1 - row * CELL_H / ATLAS_H, vBot = 1 - (row + 1) * CELL_H / ATLAS_H;
     uvs.set([u0, vBot, u1, vBot, u1, vTop, u0, vTop], i * 8);
   }
@@ -156,7 +157,7 @@ export function drumCounter(c, opts = {}) {
       const col = s < 5 ? 0 : 1, row = s < 5 ? s : s - 5;
       setCell(nCells - 1 - k, col, row);
     }
-    if (signed) setCell(0, 2, shown < -0.5 ? 1 : (Math.abs(target) < 0.5 && Math.abs(shown) < 0.5 ? 2 : (shown > 0 ? 0 : 1)));
+    if (signed) setCell(0, 2, Math.abs(shown) < 0.5 ? 2 : (shown < 0 ? 1 : 0));
     uvAttr.needsUpdate = true;
   }
 

@@ -1,0 +1,42 @@
+{
+ "version": 1,
+ "minApp": 2,
+ "orientation": "portrait",
+ "files": [
+  {
+   "path": "css/style.css",
+   "size": 14349,
+   "sha256": "c88977e72ae347f7c322462d6466c4c3215e6db3af6c0f99171fbb63297c6e17"
+  },
+  {
+   "path": "index.html",
+   "size": 9331,
+   "sha256": "533a2ce153b68c075696fb613069b18e865719489c1ad02b0fe606057e2a2718"
+  },
+  {
+   "path": "js/ballistics.js",
+   "size": 8000,
+   "sha256": "ed6ee76490e187951808e044dca3c3b2434c5f50059d5011368e8f9747d1a67b"
+  },
+  {
+   "path": "js/calc.js",
+   "size": 2248,
+   "sha256": "50934d9ff3d4d731442e49cb9eeaf0129bf186a902234697c4c906b203691bc8"
+  },
+  {
+   "path": "js/game.js",
+   "size": 51857,
+   "sha256": "15c133b73c30f0e3d159f0b07db9a0177f943fb9a5bc500bc9ce036599f5b6dc"
+  },
+  {
+   "path": "js/missions.js",
+   "size": 12607,
+   "sha256": "f51982758e9222499ab309b06fe9a2f05c6166636b1464ed445a062d29445e6b"
+  },
+  {
+   "path": "js/terrain.js",
+   "size": 4184,
+   "sha256": "57d3d154db6a4c4fa3257546e73f51b8a69601ee3bfa7bce3d63a41317120238"
+  }
+ ]
+}

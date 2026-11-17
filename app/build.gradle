@@ -10,8 +10,12 @@ android {
         applicationId 'com.arta.game'
         minSdk 24
         targetSdk 34
-        versionCode 1
-        versionName '1.0'
+        versionCode 2
+        versionName '2.0'
+
+        // Откуда приложение берёт обновления игры «по воздуху» (каталог ota/ в репозитории).
+        // Пустая строка отключает обновления.
+        buildConfigField 'String', 'UPDATE_URL', '"https://raw.githubusercontent.com/AISkripnikov/arta/claude/kind-darwin-oxqzge/ota/"'
     }
 
     buildTypes {
@@ -20,6 +24,10 @@ android {
             // Подписывается debug-ключом, чтобы APK можно было сразу установить.
             signingConfig signingConfigs.debug
         }
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     compileOptions {

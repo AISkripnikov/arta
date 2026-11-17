@@ -95,3 +95,4 @@ table.stats { width: 100%; border-collapse: collapse; font-size: 14px; } table.s
 .nb-kv { display: flex; justify-content: space-between; border-bottom: 1px dotted rgba(28,26,21,.4); padding: 2px 0; } .nb-kv b { font: 600 13px var(--mono); }
 .nb-msg { padding: 3px 0; border-bottom: 1px dotted rgba(28,26,21,.35); } .nb-msg .t { font: 11px var(--mono); color: #6b624c; margin-right: 5px; } .nb-msg b { font-weight: 600; font-size: 11px; letter-spacing: .1em; margin-right: 4px; }
 .nb-msg.bad { color: #8f1d14; } .nb-msg.good { color: #1f5a2a; }
+.ver { margin-top: 6px; font-size: 10px; letter-spacing: .18em; color: #56616b; }
