@@ -1,0 +1,514 @@
+// Игровая логика «АРТА: Башня». Чистый JS без DOM и THREE. Контракт — docs/DESIGN.md §6.
+import { solve, shoot, chargeRange, CHARGE_V0 } from './ballistics.js';
+import { CAMPAIGN, KINDS, MAP, makeMap, coastAt, isLand, skirmishDef } from './missions.js';
+
+const C = Object.freeze({ LOAD_ANGLE: 3, EL_MIN: -2, EL_MAX: 45, CHARGES: CHARGE_V0.length, MAP, RANGE_MIN: 0.01, RANGE_MAX: 22 });
+const RAD = Math.PI / 180;
+const DUR = { open: 1.2, close: 1.2, hoist: 2.5, ram: 1.8, charge: 0.9, uncharge: 0.6, unload: 2.0 };
+const DIFF = [
+  { name: 'Курсант', dmg: 0.6, grace: 90, reconEvery: 30 },
+  { name: 'Командир', dmg: 1.0, grace: 60, reconEvery: 45 },
+];
+
+const r2 = (v) => Math.round(v * 100) / 100;
+const r1 = (v) => Math.round(v * 10) / 10;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const norm360 = (a) => ((a % 360) + 360) % 360;
+const angDiff = (a, b) => { let d = norm360(a - b); if (d > 180) d -= 360; return d; };
+const pad = (v, n) => String(v).padStart(n, '0');
+const fmtKm = (v) => { const s = r2(v).toFixed(2); return s.length < 5 ? '0' + s : s; };
+const fmtTime = (t) => pad(Math.floor(t / 60), 2) + ':' + pad(Math.floor(t % 60), 2);
+const gauss = () => { const u = 1 - Math.random(), v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+const bearingTo = (dx, dy) => norm360(Math.atan2(dx, dy) / RAD);
+
+export function createGame(opts = {}) {
+  const storage = opts.storage || null;
+  const listeners = new Map();
+  const on = (ev, fn) => { if (!listeners.has(ev)) listeners.set(ev, new Set()); listeners.get(ev).add(fn); return () => listeners.get(ev).delete(fn); };
+  const emit = (ev, data) => { const s = listeners.get(ev); if (s) [...s].forEach((fn) => fn(data)); };
+  const changed = () => emit('state', state);
+
+  // ---------- сохранение ----------
+  const save = { unlocked: 1, stars: [], difficulty: 0, muted: false };
+  try { const raw = storage && storage.get('arta2.save'); if (raw) Object.assign(save, JSON.parse(raw)); } catch (e) { /* нет сохранения */ }
+  const persist = () => { try { if (storage) storage.set('arta2.save', JSON.stringify(save)); } catch (e) { /* игнорируем */ } };
+
+  const state = {
+    phase: 'menu', paused: false, speed: 1, difficulty: save.difficulty, time: 0,
+    mission: null, integrity: 100, shells: { he: 0, ap: 0 }, targets: [], activeTarget: null,
+    plot: { pins: {}, alidade: { bearing: 0, range: 5 }, recorded: {} },
+    computer: { range: 5, charge: 1, elevation: null, tof: null, stale: false },
+    turret: { bearing: 0, brake: true, elevation: 0 },
+    breech: { open: false, shell: null, rammed: false, charges: 0, busy: null },
+    fire: { armed: false },
+    flight: [], radio: [], lastReport: null,
+    checklist: { measured: false, computed: false, loaded: false, traversed: false, elevated: false, armed: false },
+    shots: 0,
+  };
+  let events = [];      // отложенные события { t, fn }
+  let flightId = 0, endScheduled = false;
+
+  const at = (delay, fn) => events.push({ t: state.time + delay, fn });
+  const ok = () => ({ ok: true });
+  const deny = (action, reason) => { emit('denied', { action, reason }); return { ok: false, reason }; };
+  const playing = () => state.phase === 'playing';
+  const target = (id) => state.targets.find((t) => t.id === id) || null;
+  const active = () => target(state.activeTarget);
+
+  function radio(from, text, kind = 'info') {
+    const msg = { time: state.time, from, text, kind };
+    state.radio.push(msg);
+    emit('radio', msg);
+  }
+
+  function updateChecklist() {
+    const c = state.checklist, a = active(), rec = a ? state.plot.recorded[a.id] : null;
+    const cp = state.computer, b = state.breech, t = state.turret;
+    c.measured = !!rec;
+    c.computed = cp.elevation != null && !cp.stale;
+    c.loaded = !b.open && !!b.shell && b.rammed && b.charges > 0;
+    c.traversed = t.brake && !!rec && Math.abs(angDiff(t.bearing, rec.bearing)) <= 2;
+    c.elevated = c.computed && Math.abs(t.elevation - cp.elevation) <= 0.05;
+    c.armed = state.fire.armed;
+  }
+  const touch = () => { updateChecklist(); changed(); };
+
+  // ---------- запуск задания ----------
+  function setupMission(def, index) {
+    const map = makeMap(def.seed);
+    const bat = map.battery;
+    Object.assign(state, {
+      phase: 'briefing', paused: false, speed: 1, time: 0, integrity: 100, shots: 0,
+      shells: { he: def.shells.he, ap: def.shells.ap },
+      mission: { id: def.id, index, name: def.name, brief: def.brief, battery: { x: bat.x, y: bat.y }, mapSeed: def.seed, map, tutorial: !!def.tutorial, skirmish: !!def.skirmish },
+      targets: [], activeTarget: null, flight: [], radio: [], lastReport: null,
+      plot: { pins: {}, alidade: { bearing: 0, range: 5 }, recorded: {} },
+      computer: { range: 5, charge: 1, elevation: null, tof: null, stale: false },
+      turret: { bearing: 0, brake: true, elevation: 0 },
+      breech: { open: false, shell: null, rammed: false, charges: 0, busy: null },
+      fire: { armed: false },
+    });
+    events = []; endScheduled = false;
+    const usedIslands = new Set();
+    def.targets.forEach((td, i) => {
+      const k = KINDS[td.kind];
+      let x, y, tries = 0;
+      if (k.site === 'island') {
+        // ближайший к желаемой дальности свободный остров
+        const want = td.range ? (td.range[0] + td.range[1]) / 2 : 11;
+        const cand = map.islands.map((o, j) => ({ o, j, d: Math.hypot(o.x - bat.x, o.y - bat.y) }))
+          .filter((c) => !usedIslands.has(c.j) && c.d < 19)
+          .sort((a, b) => Math.abs(a.d - want) - Math.abs(b.d - want))[0] || { o: map.islands[0], j: 0 };
+        usedIslands.add(cand.j);
+        x = cand.o.x + (Math.random() - 0.5) * 0.3; y = cand.o.y + (Math.random() - 0.5) * 0.2;
+      } else {
+        const sec = td.bearing || [315, 45];
+        const span = norm360(sec[1] - sec[0]);
+        do {
+          const b = norm360(sec[0] + Math.random() * span), d = td.range[0] + Math.random() * (td.range[1] - td.range[0]);
+          x = bat.x + d * Math.sin(b * RAD); y = bat.y + d * Math.cos(b * RAD);
+        } while (++tries < 300 && (x < 0.8 || x > MAP - 0.8 || y > MAP - 0.8 || y < coastAt(map, x) + 1.5 || isLand(map, x, y) ||
+          state.targets.some((t) => Math.hypot(t.x - x, t.y - y) < 1.2)));
+      }
+      const t = {
+        id: i + 1, label: 'ЦЕЛЬ ' + (i + 1), name: k.name, kind: td.kind, armored: k.armored, hp: k.hp, maxHp: k.hp, radius: k.radius,
+        alive: true, escaped: false, reported: null, moving: k.speed > 0,
+        x: r2(x), y: r2(y), course: 0, speed: k.speed, end: k.end || null, pathLeft: td.path || 0, pathLen: td.path || 0,
+        gun: k.gun ? { ...k.gun, next: 0 } : null, nextRecon: 0,
+      };
+      if (t.moving) {
+        if (k.end === 'land') t.course = bearingTo(bat.x + (Math.random() - 0.5) * 3 - t.x, coastAt(map, t.x) - t.y);
+        else {
+          // курс поперёк линии «батарея → цель», в сторону середины карты
+          const los = bearingTo(t.x - bat.x, t.y - bat.y);
+          const side = t.x > MAP / 2 ? -90 : 90;
+          t.course = Math.round(norm360(los + side + (Math.random() - 0.5) * 40));
+        }
+        t.course = Math.round(t.course);
+      }
+      state.targets.push(t);
+    });
+    state.turret.bearing = 0;
+    updateChecklist();
+  }
+
+  function startMission(index) {
+    const def = CAMPAIGN[index];
+    if (!def) return deny('startMission', 'Нет такого задания');
+    if (index >= save.unlocked) return deny('startMission', 'Задание ещё закрыто');
+    setupMission(def, index);
+    emit('phase', state.phase); changed();
+    return ok();
+  }
+  function startSkirmish() {
+    setupMission(skirmishDef(state.difficulty), null);
+    emit('phase', state.phase); changed();
+    return ok();
+  }
+  function begin() {
+    if (state.phase !== 'briefing') return deny('begin', 'Задание не выбрано');
+    state.phase = 'playing';
+    const d = DIFF[state.difficulty];
+    at(1, () => radio('ШТАБ', 'Батарея «Утёс», к бою. Координаты батареи: X ' + fmtKm(state.mission.battery.x) + ', Y ' + fmtKm(state.mission.battery.y) + '.'));
+    state.targets.forEach((t, i) => {
+      at(3.5 + i * 3, () => recon(t, true));
+      if (t.gun) t.gun.next = d.grace + i * 7 + Math.random() * t.gun.period;
+    });
+    emit('phase', state.phase); touch();
+    return ok();
+  }
+  function quit() {
+    state.phase = 'menu'; state.mission = null; state.targets = []; state.flight = []; events = [];
+    emit('phase', state.phase); changed();
+    return ok();
+  }
+  function pause(b) { state.paused = !!b; changed(); return ok(); }
+  function setSpeed(n) { state.speed = n === 3 ? 3 : 1; changed(); return ok(); }
+  function setDifficulty(d) { state.difficulty = save.difficulty = d ? 1 : 0; persist(); changed(); return ok(); }
+  function setMuted(b) { save.muted = !!b; persist(); return ok(); }
+
+  // ---------- разведка ----------
+  function reconText(t) {
+    const r = t.reported;
+    let s = t.label + ' — ' + t.name.toLowerCase() + '. X ' + fmtKm(r.x) + ', Y ' + fmtKm(r.y) + '.';
+    if (t.moving) s += ' Курс ' + pad(Math.round(r.course), 3) + '°, скорость ' + Math.round(r.speed) + ' км/ч.';
+    return s;
+  }
+  function recon(t, announce) {
+    if (!t.alive) return;
+    const prev = t.reported;
+    t.reported = { x: r2(t.x), y: r2(t.y), course: t.course, speed: t.speed, time: state.time };
+    t.nextRecon = state.time + DIFF[state.difficulty].reconEvery;
+    if (state.activeTarget == null) state.activeTarget = t.id;
+    if (announce || (prev && prev.course !== t.course)) radio('РАЗВЕДКА', reconText(t), 'recon');
+    emit('recon', t);
+    touch();
+  }
+  /** Прогноз положения цели по последнему донесению через tAhead секунд от текущего момента. */
+  function predict(targetId, tAhead = 0) {
+    const t = target(targetId);
+    if (!t || !t.reported) return null;
+    const r = t.reported, dt = (state.time - r.time + tAhead) / 3600, d = r.speed * dt;
+    return { x: r.x + d * Math.sin(r.course * RAD), y: r.y + d * Math.cos(r.course * RAD) };
+  }
+
+  // ---------- планшет ----------
+  function selectTarget(id) {
+    const t = target(id);
+    if (!t || !t.reported) return deny('selectTarget', 'Цель не обнаружена');
+    state.activeTarget = id; touch(); return ok();
+  }
+  function setPin(id, x, y) {
+    const t = target(id);
+    if (!t || !t.reported) return deny('setPin', 'Цель не обнаружена');
+    state.plot.pins[id] = { x: r2(clamp(x, 0, MAP)), y: r2(clamp(y, 0, MAP)) };
+    changed(); return ok();
+  }
+  function setAlidade(v) {
+    const a = state.plot.alidade;
+    if (v.bearing != null && isFinite(v.bearing)) a.bearing = norm360(r1(v.bearing)) % 360;
+    if (v.range != null && isFinite(v.range)) a.range = r2(clamp(v.range, 0, 25));
+    changed(); return ok();
+  }
+  function recordMeasurement() {
+    const a = active();
+    if (!playing() || !a) return deny('recordMeasurement', 'Нет активной цели');
+    const al = state.plot.alidade;
+    state.plot.recorded[a.id] = { bearing: al.bearing, range: al.range, time: state.time };
+    emit('recorded', { targetId: a.id, bearing: al.bearing, range: al.range });
+    touch(); return ok();
+  }
+
+  // ---------- вычислитель ----------
+  function setComputerRange(km) {
+    const c = state.computer, v = r2(clamp(km, C.RANGE_MIN, C.RANGE_MAX));
+    if (v !== c.range) { c.range = v; if (c.elevation != null) c.stale = true; touch(); }
+    return ok();
+  }
+  function setComputerCharge(n) {
+    const c = state.computer, v = clamp(Math.round(n), 1, C.CHARGES);
+    if (v !== c.charge) { c.charge = v; if (c.elevation != null) c.stale = true; touch(); }
+    return ok();
+  }
+  function chargeStates() {
+    const out = [];
+    for (let n = 1; n <= C.CHARGES; n++) { const l = chargeRange(n); out.push(state.computer.range >= l.min && state.computer.range <= l.max ? 'ok' : 'out'); }
+    return out;
+  }
+  function compute() {
+    const c = state.computer, res = solve(c.range, c.charge);
+    if (!res.ok) { c.elevation = null; c.tof = null; c.stale = false; touch(); return deny('compute', res.reason); }
+    c.elevation = res.elevation; c.tof = res.tof; c.stale = false;
+    emit('computed', res); touch();
+    return res;
+  }
+
+  // ---------- наводка ----------
+  function setBrake(b) { state.turret.brake = !!b; touch(); return ok(); }
+  function rotateTurret(delta) {
+    if (state.turret.brake) return deny('rotateTurret', 'Башня на стопоре');
+    if (!isFinite(delta)) return ok();
+    state.turret.bearing = norm360(Math.round((state.turret.bearing + delta) * 100) / 100) % 360;
+    touch(); return ok();
+  }
+  function elevate(delta) {
+    if (!isFinite(delta)) return ok();
+    if (state.breech.open && state.turret.elevation + delta > C.LOAD_ANGLE) return deny('elevate', 'Затвор открыт — ствол заблокирован');
+    state.turret.elevation = r2(clamp(state.turret.elevation + delta, C.EL_MIN, C.EL_MAX));
+    touch(); return ok();
+  }
+
+  // ---------- заряжание ----------
+  function busy(kind, done) {
+    const b = state.breech;
+    b.busy = { kind, t: 0, dur: DUR[kind], done };
+    emit('breech', b); touch();
+    return ok();
+  }
+  const breechFree = (action) => (state.breech.busy ? deny(action, 'Механизм занят') : null);
+  function openBreech() {
+    const b = state.breech;
+    if (breechFree('openBreech')) return { ok: false, reason: 'Механизм занят' };
+    if (b.open) return ok();
+    if (state.turret.elevation > C.LOAD_ANGLE) return deny('openBreech', 'Опустите ствол на угол заряжания (не выше ' + C.LOAD_ANGLE + '°)');
+    return busy('open', () => { b.open = true; state.fire.armed = false; });
+  }
+  function closeBreech() {
+    const b = state.breech;
+    if (breechFree('closeBreech')) return { ok: false, reason: 'Механизм занят' };
+    if (!b.open) return ok();
+    if (b.shell && !b.rammed) return deny('closeBreech', 'Снаряд на лотке — дошлите его');
+    return busy('close', () => { b.open = false; });
+  }
+  function hoistShell(type) {
+    const b = state.breech;
+    if (breechFree('hoistShell')) return { ok: false, reason: 'Механизм занят' };
+    if (type !== 'he' && type !== 'ap') return deny('hoistShell', 'Неизвестный тип снаряда');
+    if (!b.open) return deny('hoistShell', 'Затвор закрыт');
+    if (b.shell) return deny('hoistShell', 'Снаряд уже подан');
+    if (state.shells[type] <= 0) return deny('hoistShell', type === 'he' ? 'Фугасные снаряды кончились' : 'Бронебойные снаряды кончились');
+    state.shells[type]--;
+    return busy('hoist', () => { b.shell = type; b.rammed = false; });
+  }
+  function ramShell() {
+    const b = state.breech;
+    if (breechFree('ramShell')) return { ok: false, reason: 'Механизм занят' };
+    if (!b.open) return deny('ramShell', 'Затвор закрыт');
+    if (!b.shell) return deny('ramShell', 'На лотке нет снаряда');
+    if (b.rammed) return deny('ramShell', 'Снаряд уже дослан');
+    return busy('ram', () => { b.rammed = true; });
+  }
+  function addCharge() {
+    const b = state.breech;
+    if (breechFree('addCharge')) return { ok: false, reason: 'Механизм занят' };
+    if (!b.open) return deny('addCharge', 'Затвор закрыт');
+    if (!b.rammed) return deny('addCharge', 'Сначала дошлите снаряд');
+    if (b.charges >= C.CHARGES) return deny('addCharge', 'Камора полна');
+    return busy('charge', () => { b.charges++; });
+  }
+  function removeCharge() {
+    const b = state.breech;
+    if (breechFree('removeCharge')) return { ok: false, reason: 'Механизм занят' };
+    if (!b.open) return deny('removeCharge', 'Затвор закрыт');
+    if (b.charges <= 0) return deny('removeCharge', 'Зарядов нет');
+    return busy('uncharge', () => { b.charges--; });
+  }
+  function unload() {
+    const b = state.breech;
+    if (breechFree('unload')) return { ok: false, reason: 'Механизм занят' };
+    if (!b.open) return deny('unload', 'Затвор закрыт');
+    if (!b.shell && !b.charges) return deny('unload', 'Орудие не заряжено');
+    return busy('unload', () => { if (b.shell) state.shells[b.shell]++; b.shell = null; b.rammed = false; b.charges = 0; });
+  }
+
+  // ---------- огонь ----------
+  function arm(v) {
+    if (v && state.breech.open) return deny('arm', 'Затвор открыт');
+    state.fire.armed = !!v; touch(); return ok();
+  }
+  function fireReadiness() {
+    const b = state.breech;
+    return { shell: !!b.shell && b.rammed, charge: b.charges > 0, breech: !b.open && !b.busy, brake: state.turret.brake, armed: state.fire.armed };
+  }
+  function fire() {
+    if (!playing()) return deny('fire', 'Бой не идёт');
+    const rd = fireReadiness();
+    if (!rd.breech) return deny('fire', 'Затвор не закрыт');
+    if (!rd.shell) return deny('fire', 'Орудие не заряжено');
+    if (!rd.charge) return deny('fire', 'Нет заряда в каморе');
+    if (!rd.brake) return deny('fire', 'Башня не на стопоре');
+    if (!rd.armed) return deny('fire', 'Цепь стрельбы не взведена');
+    const b = state.breech, t = state.turret;
+    const noise = { v: gauss() * 0.0012, el: gauss() * 0.02, az: gauss() * 0.03 };
+    const res = shoot(t.bearing, t.elevation, b.charges, noise);
+    const sh = { id: ++flightId, t: 0, tof: res.tof, shell: b.shell, charges: b.charges, x: state.mission.battery.x + res.dx, y: state.mission.battery.y + res.dy, bearing: t.bearing, elevation: t.elevation };
+    state.flight.push(sh);
+    state.shots++;
+    b.shell = null; b.rammed = false; b.charges = 0;
+    state.fire.armed = false;
+    emit('fired', { id: sh.id, tof: sh.tof, shell: sh.shell, charges: sh.charges });
+    emit('breech', b);
+    touch();
+    return { ok: true, tof: sh.tof };
+  }
+
+  function impact(sh) {
+    const bat = state.mission.battery;
+    const hits = [];
+    let ref = active();
+    if (!ref || !ref.alive) ref = state.targets.filter((t) => t.alive && t.reported).sort((a, b) => Math.hypot(a.x - sh.x, a.y - sh.y) - Math.hypot(b.x - sh.x, b.y - sh.y))[0] || null;
+    let refNote = null;
+    state.targets.forEach((t) => {
+      if (!t.alive) return;
+      const d = Math.hypot(t.x - sh.x, t.y - sh.y);
+      let dmg = 0, note = null;
+      if (sh.shell === 'ap') { if (d <= t.radius) dmg = t.armored ? 2 : 1; }
+      else if (t.armored) { if (d <= t.radius) note = 'armor'; }
+      else if (d <= t.radius) dmg = 2;
+      else if (d <= t.radius * 1.8) dmg = 1;
+      if (dmg) { t.hp = Math.max(0, t.hp - dmg); if (t.hp <= 0) t.alive = false; hits.push({ target: t, damage: dmg, destroyed: !t.alive }); }
+      if (t === ref) refNote = dmg ? 'hit' : note;
+    });
+
+    let report = null;
+    if (ref) {
+      const ux0 = ref.x - bat.x, uy0 = ref.y - bat.y, L = Math.hypot(ux0, uy0) || 1, ux = ux0 / L, uy = uy0 / L;
+      const ex = (sh.x - ref.x) * 1000, ey = (sh.y - ref.y) * 1000;
+      const over = Math.round((ex * ux + ey * uy) / 10) * 10, right = Math.round((ex * uy - ey * ux) / 10) * 10;
+      const dist = Math.hypot(ex, ey);
+      let text;
+      if (refNote === 'hit') text = null;
+      else if (refNote === 'armor') text = ref.label + ': попадание, броня не пробита! Нужен бронебойный.';
+      else if (dist > 3000) text = ref.label + ': разрыва не наблюдаю. Проверьте установки.';
+      else {
+        const parts = [];
+        if (over) parts.push((over > 0 ? 'перелёт ' : 'недолёт ') + Math.abs(over));
+        if (right) parts.push((right > 0 ? 'вправо ' : 'влево ') + Math.abs(right));
+        text = ref.label + ': ' + (parts.join(', ') || 'накрытие, без поражения') + '.';
+        if (state.difficulty === 0 && parts.length) {
+          const dR = -over / 1000, dB = -(right / (L * 1000)) / RAD;
+          const sg = (v, n) => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(n);
+          text += ' Поправка: дальность ' + sg(dR, 2) + ' км, пеленг ' + sg(dB, 1) + '°.';
+        }
+      }
+      report = { targetId: ref.id, over, right, text, time: state.time, observed: dist <= 3000 };
+      state.lastReport = report;
+      if (text) radio('КОРРЕКТИРОВЩИК', text, 'report');
+    }
+    hits.forEach((h) => {
+      if (h.destroyed) { radio('КОРРЕКТИРОВЩИК', h.target.label + ' (' + h.target.name.toLowerCase() + ') уничтожена!', 'good'); emit('targetDestroyed', h.target); }
+      else radio('КОРРЕКТИРОВЩИК', 'Попадание! ' + h.target.label + ' повреждена, продолжайте огонь.', 'good');
+    });
+    const cur = active();
+    if (!cur || !cur.alive) { const nx = state.targets.find((t) => t.alive && t.reported); if (nx) state.activeTarget = nx.id; }
+    emit('impact', { report, hits, x: sh.x, y: sh.y, shell: sh.shell });
+    touch();
+    checkEnd();
+  }
+
+  // ---------- конец задания ----------
+  function checkEnd() {
+    if (!playing() || endScheduled) return;
+    const alive = state.targets.filter((t) => t.alive);
+    if (!alive.length) { endScheduled = true; at(2, () => finish(true)); return; }
+    const b = state.breech, inFlight = state.flight.length > 0, loaded = !!b.shell;
+    if (inFlight || loaded) return;
+    const anySoft = alive.some((t) => !t.armored);
+    const canHurt = state.shells.ap > 0 || (state.shells.he > 0 && anySoft);
+    if (!canHurt) { endScheduled = true; at(2, () => finish(false, 'Боезапас израсходован, цели не уничтожены.')); }
+  }
+  function finish(won, reason) {
+    if (!playing()) return;
+    state.phase = won ? 'won' : 'lost';
+    let par = 0;
+    state.targets.forEach((t) => { par += Math.ceil(t.maxHp / 2) + 1 + (t.moving ? 1 : 0); });
+    const n = state.targets.length;
+    const stars = !won ? 0 : state.shots <= par && state.integrity >= 60 ? 3 : state.shots <= par + n * 2 ? 2 : 1;
+    const idx = state.mission.index;
+    if (won && idx != null) {
+      save.stars[idx] = Math.max(save.stars[idx] || 0, stars);
+      save.unlocked = Math.max(save.unlocked, Math.min(CAMPAIGN.length, idx + 2));
+      persist();
+    }
+    const stats = { shots: state.shots, par, time: state.time, integrity: Math.round(state.integrity), destroyed: state.targets.filter((t) => !t.alive && !t.escaped).length, total: n };
+    emit('phase', state.phase);
+    emit('missionEnd', { won, stars, reason: reason || null, stats });
+    changed();
+  }
+
+  // ---------- такт ----------
+  function update(dtReal) {
+    if (!playing() || state.paused || !(dtReal > 0)) return;
+    const dt = Math.min(dtReal, 0.25) * state.speed;
+    state.time += dt;
+    let dirty = false;
+
+    // механизмы заряжания
+    const b = state.breech;
+    if (b.busy) {
+      b.busy.t += dt; dirty = true;
+      if (b.busy.t >= b.busy.dur) { const done = b.busy.done; b.busy = null; done(); emit('breech', b); checkEnd(); }
+    }
+    // снаряды в полёте
+    for (let i = state.flight.length - 1; i >= 0; i--) {
+      const sh = state.flight[i]; sh.t += dt; dirty = true;
+      if (sh.t >= sh.tof) { state.flight.splice(i, 1); impact(sh); if (!playing()) return; }
+    }
+    // цели
+    const map = state.mission.map, bat = state.mission.battery, d = DIFF[state.difficulty];
+    for (const t of state.targets) {
+      if (!t.alive || !t.reported) continue;
+      if (t.moving) {
+        const ds = (t.speed / 3600) * dt;
+        t.x += ds * Math.sin(t.course * RAD); t.y += ds * Math.cos(t.course * RAD);
+        t.pathLeft -= ds;
+        const out = t.x < 0.3 || t.x > MAP - 0.3 || t.y > MAP - 0.3;
+        if (t.end === 'land') {
+          if (t.y <= coastAt(map, t.x) + 0.25) { t.alive = false; t.escaped = true; radio('ШТАБ', 'Десант высадился на берег!', 'bad'); finish(false, 'Десант противника высадился на берег.'); return; }
+        } else if (t.end === 'patrol') {
+          if (t.pathLeft <= 0 || out) { t.course = norm360(t.course + 180); t.pathLeft = t.pathLen; recon(t, false); }
+        } else if (t.pathLeft <= 0 || out) {
+          t.alive = false; t.escaped = true;
+          radio('РАЗВЕДКА', t.label + ' ушла из зоны огня.', 'bad');
+          finish(false, t.name + ' противника ушёл из-под огня.'); return;
+        }
+        if (state.time >= t.nextRecon) recon(t, false);
+        dirty = true;
+      }
+      if (t.gun && state.time >= t.gun.next) {
+        t.gun.next = state.time + t.gun.period * (0.8 + Math.random() * 0.4);
+        if (Math.hypot(t.x - bat.x, t.y - bat.y) <= t.gun.range) {
+          if (Math.random() < t.gun.p) {
+            const dmg = Math.round(t.gun.dmg * d.dmg * (0.7 + Math.random() * 0.6));
+            state.integrity = Math.max(0, state.integrity - dmg);
+            emit('batteryHit', { damage: dmg, by: t.id });
+            if (state.integrity <= 0) { radio('ШТАБ', 'Батарея разбита!', 'bad'); finish(false, 'Батарея уничтожена огнём противника.'); return; }
+            if (state.integrity <= 35 && !state.mission.warned) { state.mission.warned = true; radio('ШТАБ', 'Батарея получила тяжёлые повреждения! Подавите огневые точки противника.', 'bad'); }
+          } else emit('batteryHit', { damage: 0, by: t.id });
+          dirty = true;
+        }
+      }
+    }
+    // отложенные события
+    if (events.length) {
+      const due = events.filter((e) => e.t <= state.time).sort((a, b2) => a.t - b2.t);
+      if (due.length) { events = events.filter((e) => e.t > state.time); for (const e of due) { if (state.phase === 'menu') break; e.fn(); } dirty = true; }
+    }
+    if (dirty) touch();
+  }
+
+  const game = {
+    state, save, C, on, campaign: CAMPAIGN, difficulties: DIFF.map((d) => d.name),
+    update, startMission, startSkirmish, begin, quit, pause, setSpeed, setDifficulty, setMuted,
+    selectTarget, setPin, setAlidade, recordMeasurement, predict,
+    setComputerRange, setComputerCharge, chargeStates, compute,
+    setBrake, rotateTurret, elevate,
+    openBreech, closeBreech, hoistShell, ramShell, addCharge, removeCharge, unload,
+    arm, fire, fireReadiness,
+    solve, chargeRange,
+    isLand: (x, y) => (state.mission ? isLand(state.mission.map, x, y) : false),
+    coastAt: (x) => (state.mission ? coastAt(state.mission.map, x) : 0),
+    fmt: { km: fmtKm, time: fmtTime },
+  };
+  return game;
+}
