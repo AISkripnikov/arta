@@ -226,7 +226,7 @@ export function createTraverseStation(ctx) {
     mode: 'toggle', length: 0.16, labels: [], on: !(game.state.turret && game.state.turret.brake),
     onChange(on) { game.setBrake(!on); },             // верх — «СТОПОР», низ — «СВОБОДНО»
   }));
-  left.upper.add(brakeLever, -0.02, 0.03);
+  left.upper.add(brakeLever, -0.005, 0.03);
   const lampBrake = keep(ui.lamp({ color: 'green', label: 'СТОПОР', labelSize: 0.027 }));
   left.upper.add(lampBrake, 0.16, 0.125);
   const lampFree = keep(ui.lamp({ color: 'amber', label: 'СВОБОДНО', labelSize: 0.027 }));

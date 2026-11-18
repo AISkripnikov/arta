@@ -121,7 +121,7 @@ export function createElevationStation(ctx) {
   on(wheel, WX, WY, HOUSING_H);
 
   const tGear = ui.toggle({
-    labels: ['ГРУБО\n10°/ОБ.', 'ТОЧНО\n0,5°/ОБ.'], orient: 'h', value: 0, labelSize: 0.022,
+    labels: ['ГРУБО\n10°/ОБ.', 'ТОЧНО\n0,5°/ОБ.'], orient: 'h', value: 0, labelSize: 0.024,
     onChange(i) { fine = i ? 1 : 0; acc = 0; },
   });
   on(tGear, WX, 0.262);
@@ -295,7 +295,7 @@ export function createElevationStation(ctx) {
   quad.add(pinion);
 
   const title = on(ui.plate('ПОДЪЁМ', { size: 0.036, style: 'black' }), -0.17, 0.312);
-  on(ui.plate('ПРИ ОТКРЫТОМ ЗАТВОРЕ\nВЫШЕ 3° НЕ ПОДНИМАТЬ', { style: 'red', size: 0.0165, screws: false }), 0.108, -0.098);
+  on(ui.plate('ПРИ ОТКРЫТОМ ЗАТВОРЕ\nВЫШЕ 3° НЕ ПОДНИМАТЬ', { style: 'red', size: 0.019, screws: false }), 0.105, -0.1);
 
   const lampLoad = on(ui.lamp({ color: 'green', label: 'УГОЛ\nЗАРЯЖАНИЯ' }), -0.17, -0.212);
   const bDrive = on(ui.pushButton({ radius: 0.04, color: 'ochre', label: 'НА УГОЛ\nЗАРЯЖАНИЯ' }), 0.1, -0.212);
@@ -472,7 +472,7 @@ export function createElevationStation(ctx) {
 
   const station = {
     id: 'elevation', title: 'ПОДЪЁМ', group,
-    camera: { position: [0, 1.44, 1.24], target: [0, 1.09, 0], fov: 42 },
+    camera: { position: [0, 1.44, 1.24], target: [0, 1.09, 0], fov: 43.5 },
     update,
     onEnter() { acc = 0; upBlocked = false; driveHold = bDrive.pressed; },
     onLeave() { acc = 0; driveHold = true; if (driving) { driving = false; bDrive.setLit(false); } setServo(0); audio.servo(0); },

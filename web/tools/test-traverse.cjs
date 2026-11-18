@@ -1,11 +1,12 @@
 // Тест поста «ПОВОРОТ»: настоящий ввод указателем по органам + проверка game.state и показаний приборов.
-//   cd web && node build.mjs --dev st-traverse && node tools/test-traverse.cjs      (код возврата ≠ 0 при ошибке)
+//   cd web && node build.mjs --dev st-traverse && node tools/test-traverse.cjs [ширина высота]     (по умолчанию 844 390; код возврата ≠ 0 при ошибке)
 const { chromium } = require('playwright');
 const path = require('path');
 
 (async () => {
   const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
-  const p = await b.newPage({ viewport: { width: 844, height: 390 } });
+  const W = +process.argv[2] || 844, H = +process.argv[3] || 390;
+  const p = await b.newPage({ viewport: { width: W, height: H } });
   p.setDefaultTimeout(180000);
   const problems = [];
   p.on('pageerror', (e) => problems.push('pageerror: ' + e.message));
@@ -59,7 +60,7 @@ const path = require('path');
   console.log('hotspots:', names.join(', '));
   for (const k of ['brakeLever', 'slewLever', 'fineWheel', 'fineWheelRim']) {
     const q = await pos(k);
-    ok(q.x > 20 && q.x < 824 && q.y > 44 && q.y < 330, `орган ${k} в зоне управления`, q);
+    ok(q.x > 20 && q.x < W - 20 && q.y > 44 && q.y < H - 60, `орган ${k} в зоне управления`, q);
   }
 
   // ---- 1. исходное состояние: стопор ----
