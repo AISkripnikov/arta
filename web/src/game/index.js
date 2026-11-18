@@ -1,6 +1,6 @@
 // Игровая логика «АРТА: Башня». Чистый JS без DOM и THREE. Контракт — docs/DESIGN.md §6.
 import { solve, shoot, chargeRange, CHARGE_V0 } from './ballistics.js';
-import { CAMPAIGN, KINDS, MAP, makeMap, coastAt, isLand, skirmishDef } from './missions.js';
+import { CAMPAIGN, KINDS, MAP, makeMap, coastAt, isLand, skirmishDef, soundPosts } from './missions.js';
 
 const C = Object.freeze({ LOAD_ANGLE: 3, EL_MIN: -2, EL_MAX: 45, CHARGES: CHARGE_V0.length, MAP, RANGE_MIN: 0.01, RANGE_MAX: 22 });
 const RAD = Math.PI / 180;
@@ -17,6 +17,7 @@ const norm360 = (a) => ((a % 360) + 360) % 360;
 const angDiff = (a, b) => { let d = norm360(a - b); if (d > 180) d -= 360; return d; };
 const pad = (v, n) => String(v).padStart(n, '0');
 const fmtKm = (v) => { const s = r2(v).toFixed(2); return s.length < 5 ? '0' + s : s; };
+const fmtBrg = (b) => { const v = (Math.round(b * 10) / 10).toFixed(1); return v.padStart(5, '0') + '°'; };
 const fmtTime = (t) => pad(Math.floor(t / 60), 2) + ':' + pad(Math.floor(t % 60), 2);
 const gauss = () => { const u = 1 - Math.random(), v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
 const bearingTo = (dx, dy) => norm360(Math.atan2(dx, dy) / RAD);
@@ -41,7 +42,7 @@ export function createGame(opts = {}) {
     turret: { bearing: 0, brake: true, elevation: 0 },
     breech: { open: false, shell: null, rammed: false, charges: 0, busy: null },
     fire: { armed: false },
-    flight: [], radio: [], lastReport: null,
+    flight: [], impacts: [], radio: [], lastReport: null,
     checklist: { measured: false, computed: false, loaded: false, traversed: false, elevated: false, armed: false },
     shots: 0,
   };
@@ -81,7 +82,7 @@ export function createGame(opts = {}) {
       phase: 'briefing', paused: false, speed: 1, time: 0, integrity: 100, shots: 0,
       shells: { he: def.shells.he, ap: def.shells.ap },
       mission: { id: def.id, index, name: def.name, brief: def.brief, battery: { x: bat.x, y: bat.y }, mapSeed: def.seed, map, tutorial: !!def.tutorial, skirmish: !!def.skirmish },
-      targets: [], activeTarget: null, flight: [], radio: [], lastReport: null,
+      targets: [], activeTarget: null, flight: [], impacts: [], radio: [], lastReport: null,
       plot: { pins: {}, alidade: { bearing: 0, range: 5 }, recorded: {} },
       computer: { range: 5, charge: 1, elevation: null, tof: null, stale: false },
       turret: { bearing: 0, brake: true, elevation: 0 },
@@ -89,17 +90,18 @@ export function createGame(opts = {}) {
       fire: { armed: false },
     });
     events = []; endScheduled = false;
+    map.posts = def.targets.some((td) => td.locate === 'sound') ? soundPosts(map, bat) : [];
     const usedIslands = new Set();
     def.targets.forEach((td, i) => {
       const k = KINDS[td.kind];
-      let x, y, tries = 0;
+      let x, y, tries = 0, islandIdx = -1;
       if (k.site === 'island') {
         // ближайший к желаемой дальности свободный остров
         const want = td.range ? (td.range[0] + td.range[1]) / 2 : 11;
         const cand = map.islands.map((o, j) => ({ o, j, d: Math.hypot(o.x - bat.x, o.y - bat.y) }))
           .filter((c) => !usedIslands.has(c.j) && c.d < 19)
           .sort((a, b) => Math.abs(a.d - want) - Math.abs(b.d - want))[0] || { o: map.islands[0], j: 0 };
-        usedIslands.add(cand.j);
+        usedIslands.add(cand.j); islandIdx = cand.j;
         x = cand.o.x + (Math.random() - 0.5) * 0.3; y = cand.o.y + (Math.random() - 0.5) * 0.2;
       } else {
         const sec = td.bearing || [315, 45];
@@ -115,6 +117,8 @@ export function createGame(opts = {}) {
         alive: true, escaped: false, reported: null, moving: k.speed > 0,
         x: r2(x), y: r2(y), course: 0, speed: k.speed, end: k.end || null, pathLeft: td.path || 0, pathLen: td.path || 0,
         gun: k.gun ? { ...k.gun, next: 0 } : null, nextRecon: 0,
+        locate: td.locate === 'sound' ? 'sound' : 'recon', relocateEvery: td.relocate || 0, salvos: 0, silentUntil: 0,
+        delay: td.delay || 0, islandRef: islandIdx,
       };
       if (t.moving) {
         if (k.end === 'land') t.course = bearingTo(bat.x + (Math.random() - 0.5) * 3 - t.x, coastAt(map, t.x) - t.y);
@@ -150,10 +154,24 @@ export function createGame(opts = {}) {
     state.phase = 'playing';
     const d = DIFF[state.difficulty];
     at(1, () => radio('ШТАБ', 'Батарея «Утёс», к бою. Координаты батареи: X ' + fmtKm(state.mission.battery.x) + ', Y ' + fmtKm(state.mission.battery.y) + '.'));
+    let k = 0;
     state.targets.forEach((t, i) => {
-      at(3.5 + i * 3, () => recon(t, true));
-      if (t.gun) t.gun.next = d.grace + i * 7 + Math.random() * t.gun.period;
+      if (t.locate === 'recon') {
+        at(3.5 + (k++) * 3 + t.delay, () => {
+          if (t.delay) radio('ШТАБ', 'Внимание! Обнаружена новая цель.', 'bad');
+          recon(t, true);
+        });
+        if (t.gun) t.gun.next = d.grace + t.delay + i * 7 + Math.random() * t.gun.period;
+      } else if (t.gun) {
+        // скрытая батарея: её засекают звукометристы по первому залпу
+        t.gun.next = 12 + t.delay + i * 9 + Math.random() * 8;
+        t.firstSalvo = true;
+      }
     });
+    if (state.mission.map.posts.length) {
+      const P = state.mission.map.posts;
+      at(2.5, () => radio('ЗВУКОМЕТРИЯ', 'Посты на позициях. ' + P.map((q) => q.name + ': X ' + fmtKm(q.x) + ', Y ' + fmtKm(q.y)).join('; ') + '. Ждём залпа противника.'));
+    }
     emit('phase', state.phase); touch();
     return ok();
   }
@@ -170,12 +188,13 @@ export function createGame(opts = {}) {
   // ---------- разведка ----------
   function reconText(t) {
     const r = t.reported;
+    if (r.sound) return t.label + ' — ' + t.name.toLowerCase() + '. ' + r.sound.map((q) => q.name + ': пеленг ' + fmtBrg(q.bearing)).join(', ') + '.';
     let s = t.label + ' — ' + t.name.toLowerCase() + '. X ' + fmtKm(r.x) + ', Y ' + fmtKm(r.y) + '.';
     if (t.moving) s += ' Курс ' + pad(Math.round(r.course), 3) + '°, скорость ' + Math.round(r.speed) + ' км/ч.';
     return s;
   }
   function recon(t, announce) {
-    if (!t.alive) return;
+    if (!t.alive || t.locate === 'sound') return;
     const prev = t.reported;
     t.reported = { x: r2(t.x), y: r2(t.y), course: t.course, speed: t.speed, time: state.time };
     t.nextRecon = state.time + DIFF[state.difficulty].reconEvery;
@@ -187,9 +206,47 @@ export function createGame(opts = {}) {
   /** Прогноз положения цели по последнему донесению через tAhead секунд от текущего момента. */
   function predict(targetId, tAhead = 0) {
     const t = target(targetId);
-    if (!t || !t.reported) return null;
+    if (!t || !t.reported || t.reported.x == null) return null;
     const r = t.reported, dt = (state.time - r.time + tAhead) / 3600, d = r.speed * dt;
     return { x: r.x + d * Math.sin(r.course * RAD), y: r.y + d * Math.cos(r.course * RAD) };
+  }
+
+  // ---------- звукометрия ----------
+  /** Пеленг с поста звукометрии на цель (° до 0.1; на «Командире» — с небольшой ошибкой). */
+  function soundBearing(post, t) {
+    const err = state.difficulty === 0 ? 0 : gauss() * 0.12;
+    return Math.round(norm360(bearingTo(t.x - post.x, t.y - post.y) + err) * 10) / 10;
+  }
+  function soundReport(t) {
+    if (!t.alive) return;
+    if (t.reported && !t.moved) {
+      radio('ЗВУКОМЕТРИЯ', t.label + ' ведёт огонь. Пеленги прежние.', 'recon');
+      return;
+    }
+    const posts = state.mission.map.posts;
+    const bearings = posts.map((q) => ({ name: q.name, x: q.x, y: q.y, bearing: soundBearing(q, t) }));
+    const first = !t.reported;
+    t.moved = false;
+    t.reported = { x: null, y: null, sound: bearings, course: 0, speed: 0, time: state.time };
+    if (state.activeTarget == null || !target(state.activeTarget).alive) state.activeTarget = t.id;
+    radio('ЗВУКОМЕТРИЯ', (first ? 'Засечён залп! ' : 'Новая позиция! ') + reconText(t), 'recon');
+    emit('recon', t);
+  }
+  /** Батарея снимается и уходит на новую позицию на том же острове. */
+  function relocate(t) {
+    if (!t.alive) return;
+    const map = state.mission.map, o = map.islands[t.islandRef] || map.islands[0];
+    for (let i = 0; i < 60; i++) {
+      const a = Math.random() * Math.PI * 2, r = 0.35 + Math.random() * 0.45;
+      const u = Math.cos(a) * o.rx * r, v = Math.sin(a) * o.ry * r, c = Math.cos(o.rot), sn = Math.sin(o.rot);
+      const x = o.x + u * c - v * sn, y = o.y + u * sn + v * c;
+      if (Math.hypot(x - t.x, y - t.y) > 0.3 && isLand(map, x, y)) { t.x = r2(x); t.y = r2(y); break; }
+    }
+    t.moved = true;
+    t.silentUntil = state.time + 45;
+    t.gun.next = state.time + 45 + Math.random() * 15;
+    t.firstSalvo = false;
+    at(4, () => radio('ЗВУКОМЕТРИЯ', t.label + ' замолчала — похоже, меняет позицию. Ждите новой засечки.', 'bad'));
   }
 
   // ---------- планшет ----------
@@ -341,9 +398,11 @@ export function createGame(opts = {}) {
     const b = state.breech, t = state.turret;
     const noise = { v: gauss() * 0.0012, el: gauss() * 0.02, az: gauss() * 0.03 };
     const res = shoot(t.bearing, t.elevation, b.charges, noise);
-    const sh = { id: ++flightId, t: 0, tof: res.tof, shell: b.shell, charges: b.charges, x: state.mission.battery.x + res.dx, y: state.mission.battery.y + res.dy, bearing: t.bearing, elevation: t.elevation };
-    state.flight.push(sh);
     state.shots++;
+    const sh = { id: ++flightId, n: state.shots, t: 0, tof: res.tof, shell: b.shell, charges: b.charges, x: state.mission.battery.x + res.dx, y: state.mission.battery.y + res.dy, bearing: t.bearing, elevation: t.elevation };
+    state.flight.push(sh);
+    // каждый наш выстрел помогает противнику засечь батарею
+    for (const e of state.targets) if (e.alive && e.gun) e.gun.p = Math.min(0.75, e.gun.p + 0.04);
     b.shell = null; b.rammed = false; b.charges = 0;
     state.fire.armed = false;
     emit('fired', { id: sh.id, tof: sh.tof, shell: sh.shell, charges: sh.charges });
@@ -401,7 +460,9 @@ export function createGame(opts = {}) {
     });
     const cur = active();
     if (!cur || !cur.alive) { const nx = state.targets.find((t) => t.alive && t.reported); if (nx) state.activeTarget = nx.id; }
-    emit('impact', { report, hits, x: sh.x, y: sh.y, shell: sh.shell });
+    state.impacts.push({ n: sh.n, x: sh.x, y: sh.y, time: state.time, shell: sh.shell, hit: hits.length > 0, targetId: ref ? ref.id : null });
+    if (state.impacts.length > 40) state.impacts.shift();
+    emit('impact', { report, hits, x: sh.x, y: sh.y, shell: sh.shell, n: sh.n });
     touch();
     checkEnd();
   }
@@ -457,7 +518,7 @@ export function createGame(opts = {}) {
     // цели
     const map = state.mission.map, bat = state.mission.battery, d = DIFF[state.difficulty];
     for (const t of state.targets) {
-      if (!t.alive || !t.reported) continue;
+      if (!t.alive || (!t.reported && t.locate !== 'sound')) continue;
       if (t.moving) {
         const ds = (t.speed / 3600) * dt;
         t.x += ds * Math.sin(t.course * RAD); t.y += ds * Math.cos(t.course * RAD);
@@ -475,16 +536,20 @@ export function createGame(opts = {}) {
         if (state.time >= t.nextRecon) recon(t, false);
         dirty = true;
       }
-      if (t.gun && state.time >= t.gun.next) {
+      if (t.gun && state.time >= t.gun.next && (t.reported || t.locate === 'sound') && state.time >= t.silentUntil) {
         t.gun.next = state.time + t.gun.period * (0.8 + Math.random() * 0.4);
         if (Math.hypot(t.x - bat.x, t.y - bat.y) <= t.gun.range) {
-          if (Math.random() < t.gun.p) {
+          t.salvos++;
+          if (t.locate === 'sound') soundReport(t);
+          const ranging = t.firstSalvo; t.firstSalvo = false;
+          if (!ranging && Math.random() < t.gun.p) {
             const dmg = Math.round(t.gun.dmg * d.dmg * (0.7 + Math.random() * 0.6));
             state.integrity = Math.max(0, state.integrity - dmg);
             emit('batteryHit', { damage: dmg, by: t.id });
             if (state.integrity <= 0) { radio('ШТАБ', 'Батарея разбита!', 'bad'); finish(false, 'Батарея уничтожена огнём противника.'); return; }
             if (state.integrity <= 35 && !state.mission.warned) { state.mission.warned = true; radio('ШТАБ', 'Батарея получила тяжёлые повреждения! Подавите огневые точки противника.', 'bad'); }
           } else emit('batteryHit', { damage: 0, by: t.id });
+          if (t.relocateEvery && t.salvos % t.relocateEvery === 0) relocate(t);
           dirty = true;
         }
       }
@@ -497,10 +562,17 @@ export function createGame(opts = {}) {
     if (dirty) touch();
   }
 
+  /** Где сейчас снаряд (вид сверху): доля пути и точка. Горизонтальная скорость падает из-за сопротивления. */
+  function shellPosition(sh) {
+    const bat = state.mission.battery, c = 1.1;
+    const f = Math.min(1, (1 - Math.exp(-c * sh.t / sh.tof)) / (1 - Math.exp(-c)));
+    return { f, x: bat.x + (sh.x - bat.x) * f, y: bat.y + (sh.y - bat.y) * f };
+  }
+
   const game = {
     state, save, C, on, campaign: CAMPAIGN, difficulties: DIFF.map((d) => d.name),
     update, startMission, startSkirmish, begin, quit, pause, setSpeed, setDifficulty, setMuted,
-    selectTarget, setPin, setAlidade, recordMeasurement, predict,
+    selectTarget, setPin, setAlidade, recordMeasurement, predict, shellPosition,
     setComputerRange, setComputerCharge, chargeStates, compute,
     setBrake, rotateTurret, elevate,
     openBreech, closeBreech, hoistShell, ramShell, addCharge, removeCharge, unload,
@@ -508,7 +580,7 @@ export function createGame(opts = {}) {
     solve, chargeRange,
     isLand: (x, y) => (state.mission ? isLand(state.mission.map, x, y) : false),
     coastAt: (x) => (state.mission ? coastAt(state.mission.map, x) : 0),
-    fmt: { km: fmtKm, time: fmtTime },
+    fmt: { km: fmtKm, time: fmtTime, brg: fmtBrg },
   };
   return game;
 }

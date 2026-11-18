@@ -9,6 +9,14 @@ const norm = (a) => ((a % 360) + 360) % 360;
 function tick(game, seconds, step = 0.1) { for (let t = 0; t < seconds && game.state.phase === 'playing'; t += step) game.update(step); }
 function waitBreech(game) { let n = 0; while (game.state.breech.busy && n++ < 1000) game.update(0.1); }
 
+/** Пересечение двух пеленгов звукометрии. */
+function intersect([a, b]) {
+  const da = [Math.sin(a.bearing * RAD), Math.cos(a.bearing * RAD)], db = [Math.sin(b.bearing * RAD), Math.cos(b.bearing * RAD)];
+  const den = da[0] * db[1] - da[1] * db[0];
+  const k = ((b.x - a.x) * db[1] - (b.y - a.y) * db[0]) / den;
+  return { x: a.x + da[0] * k, y: a.y + da[1] * k };
+}
+
 function unlockAll() { const mem = {}; return { get: (k) => mem[k] || JSON.stringify({ unlocked: 99, stars: [], difficulty: 1 }), set: (k, v) => { mem[k] = v; } }; }
 
 /** Бот проходит полную процедуру выстрела по донесениям разведки. */
@@ -24,7 +32,7 @@ function engage(game, t, corr) {
   let tof = 30, sol, charge, brg, rng;
   for (let i = 0; i < 4; i++) {
     const lead = t.moving ? tof + 12 : 0;
-    const p = game.predict(t.id, lead);
+    const p = t.reported.sound ? intersect(t.reported.sound) : game.predict(t.id, lead);
     const dx = p.x - bat.x + (corr ? corr.dx : 0), dy = p.y - bat.y + (corr ? corr.dy : 0);
     rng = Math.hypot(dx, dy); brg = norm(Math.atan2(dx, dy) / RAD);
     charge = [1, 2, 3, 4, 5, 6].find((n) => { const l = chargeRange(n); return rng >= l.min && rng <= l.max - 0.3; });
@@ -32,7 +40,8 @@ function engage(game, t, corr) {
     sol = solve(rng, charge); tof = sol.tof;
   }
   game.selectTarget(t.id);
-  game.setPin(t.id, t.reported.x, t.reported.y);
+  const pinAt = t.reported.sound ? intersect(t.reported.sound) : t.reported;
+  game.setPin(t.id, pinAt.x, pinAt.y);
   game.setAlidade({ bearing: brg, range: rng });
   assert.ok(game.recordMeasurement().ok);
   game.setComputerRange(rng); game.setComputerCharge(charge);
@@ -127,14 +136,25 @@ for (let diff = 0; diff <= 1; diff++) {
         game.setDifficulty(diff);
         assert.ok(game.startMission(idx).ok); game.begin();
         const s = game.state; let end = null; game.on('missionEnd', (e) => { end = e; });
-        tick(game, 15);
-        assert.ok(s.targets.every((t) => t.reported), 'все цели сообщены');
+        for (let i = 0; i < 60 && !s.targets.some((t) => t.reported); i++) tick(game, 1);
+        assert.ok(s.targets.some((t) => t.reported), 'есть донесения');
+        const corr = {};
         let guard = 0;
-        while (s.phase === 'playing' && guard++ < 40) {
+        while (s.phase === 'playing' && guard++ < 60) {
           // сначала те, кто стреляет и убегает
-          const t = s.targets.filter((x) => x.alive).sort((a, b) => (b.end === 'land' || b.end === 'escape' ? 2 : b.gun ? 1 : 0) - (a.end === 'land' || a.end === 'escape' ? 2 : a.gun ? 1 : 0))[0];
-          if (!t) { tick(game, 3); continue; }
-          engage(game, t, null);
+          const t = s.targets.filter((x) => x.alive && x.reported && !x.moved).sort((a, b) => (b.end === 'land' || b.end === 'escape' ? 2 : b.gun ? 1 : 0) - (a.end === 'land' || a.end === 'escape' ? 2 : a.gun ? 1 : 0))[0];
+          if (!t) { tick(game, 3); guard--; if (s.time > 1500) break; continue; }
+          const c = corr[t.id] || (corr[t.id] = { dx: 0, dy: 0, key: null });
+          const key = JSON.stringify(t.reported.sound || [t.reported.x, t.reported.y]);
+          if (c.key !== key || t.moving) { c.dx = 0; c.dy = 0; c.key = key; }   // новая засечка — поправки сначала
+          engage(game, t, c);
+          // поправка по докладу корректировщика (как сделал бы игрок)
+          const rep = s.lastReport;
+          if (rep && rep.targetId === t.id && t.alive && !t.moving && rep.observed) {
+            const bat = s.mission.battery, L = Math.hypot(t.x - bat.x, t.y - bat.y), ux = (t.x - bat.x) / L, uy = (t.y - bat.y) / L;
+            c.dx -= (rep.over * ux + rep.right * uy) / 1000;
+            c.dy -= (rep.over * uy - rep.right * ux) / 1000;
+          }
           tick(game, 0.5);
         }
         tick(game, 5);

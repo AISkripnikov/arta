@@ -3,6 +3,7 @@
 // рейка точной подвижки фишки (счётчики X, Y и четыре кнопки-стрелки); по углам — маховики «ПЕЛЕНГ» и «ДАЛЬНОСТЬ»
 // со счётчиками над ними. Пост ничего не решает сам: каждый кадр перечитывает game.state и вызывает
 // game.setPin / selectTarget / setAlidade / recordMeasurement.
+import { createOverlay } from './plot-overlay.js';
 import { CHART, drawChart, drawPinAtlas, drawLeadAtlas, drawRulerScale, drawTag } from './plot-chart.js';
 
 const DEG = Math.PI / 180;
@@ -211,6 +212,11 @@ export function createPlotStation(ctx) {
   const chartMat = new THREE.MeshBasicMaterial({ map: chartTex, color: 0xd9d6cf });
   const sheet = new THREE.Mesh(new THREE.PlaneGeometry(SHEET, SHEET), chartMat);
   plane.add(sheet);
+  // слой поверх карты: полёт снаряда, разрывы, звукометрия
+  const overlay = createOverlay({ THREE, TX, size: SHEET });
+  overlay.mesh.position.z = 0.0003;
+  plane.add(overlay.mesh);
+  disposers.push(() => overlay.dispose());
   let chartMission;                                       // для какого задания нарисована карта
   function redrawChart(mission) {
     chartMission = mission;
@@ -688,11 +694,14 @@ export function createPlotStation(ctx) {
     if (active && active.reported && !isDead(active)) {
       const m = pinMoved[activeId], r = active.reported;
       // фишку ставили не здесь (обучение, бот) — судим по расстоянию до донесения
-      fresh = !activePin || (m ? r.time > m.time && (r.x !== m.x || r.y !== m.y) : Math.hypot(activePin.x - r.x, activePin.y - r.y) > LEAD_TOL);
+      if (r.x == null) fresh = !activePin || (m ? r.time > m.time : !!active.moved);   // засечка звукометрии
+      else fresh = !activePin || (m ? r.time > m.time && (r.x !== m.x || r.y !== m.y) : Math.hypot(activePin.x - r.x, activePin.y - r.y) > LEAD_TOL);
     }
     lampNew.set(fresh);
     const rec = active ? plot.recorded[activeId] : null;
     lampRecorded.set(!!rec && rec.bearing === a.bearing && rec.range === a.range);
+
+    overlay.update(s, game, performance.now() / 1000, zoom);
 
     // отметки упреждения
     let lead = false;

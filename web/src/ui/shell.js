@@ -21,6 +21,8 @@ const HOWTO = `
 <h3>5. ПОДЪЁМ</h3><p>Маховиком поднимите ствол на вычисленный угол.</p>
 <h3>6. ОГОНЬ</h3><p>Проверьте лампы готовности, откройте крышку, взведите цепь стрельбы и дёрните спуск.</p>
 <h3>КОРРЕКТИРОВКА</h3><p>После разрыва корректировщик доложит отклонение. Перелёт — уменьшите дальность на вычислителе и пересчитайте угол; ушло вправо — доверните башню влево. Один градус на 10 км — это около 175 м в сторону.</p>
+<h3>КАРТА ПЛАНШЕТА</h3><p>После выстрела на карте видна трасса летящего снаряда, а после разрыва — круг с номером выстрела. Так видно, куда легли снаряды и как вносить поправку.</p>
+<h3>КОНТРБАТАРЕЙНАЯ БОРЬБА</h3><p>Скрытые батареи противника не видит разведка. Их засекают по звуку залпа два поста звукометрии на берегу (ЗВ-1, ЗВ-2): каждый сообщает только пеленг. На планшете от постов проведены линии — батарея там, где они пересекаются. Кочующие батареи после нескольких залпов меняют позицию — ждите новой засечки. Каждый ваш выстрел помогает противнику точнее засечь «Утёс».</p>
 <h3>ДВИЖУЩИЕСЯ ЦЕЛИ</h3><p>Стреляйте с упреждением — в точку, где цель окажется через время подготовки плюс время полёта снаряда.</p>`;
 
 const DIFF_HINT = [
@@ -66,6 +68,7 @@ export function createShell({ engine, game }) {
   function showMissions() {
     const grid = $('missionGrid'); grid.innerHTML = '';
     game.campaign.forEach((m, i) => {
+      if (i === 0 || i === 8) { const h = document.createElement('div'); h.className = 'm-sec'; h.textContent = i === 0 ? 'ЧАСТЬ I · БЕРЕГОВАЯ ОБОРОНА' : 'ЧАСТЬ II · КОНТРБАТАРЕЙНАЯ БОРЬБА'; grid.appendChild(h); }
       const locked = i >= game.save.unlocked, st = game.save.stars[i] || 0;
       const el = document.createElement('button');
       el.className = 'm-card' + (locked ? ' locked' : '');
@@ -133,6 +136,8 @@ export function createShell({ engine, game }) {
     const c = s.checklist, b = s.breech;
     if (s.flight.length && !b.shell && !b.open) return { st: null, text: 'Снаряд в полёте — ждите доклада корректировщика' };
     if (!s.activeTarget) return { st: null, text: 'Ждите донесения разведки' };
+    const at = s.targets.find((t) => t.id === s.activeTarget);
+    if (!c.measured && at && at.reported && at.reported.sound) return { st: 'plot', text: 'ПЛАНШЕТ: поставьте фишку на пересечение пеленгов звукометрии, наведите алидаду, «ЗАПИСАТЬ»' };
     if (!c.measured) return { st: 'plot', text: 'ПЛАНШЕТ: поставьте фишку по координатам, наведите алидаду, «ЗАПИСАТЬ»' };
     if (!c.computed) return { st: 'computer', text: 'ВЫЧИСЛИТЕЛЬ: наберите дальность, выберите заряд, потяните рычаг' };
     if (!c.loaded) {
@@ -174,7 +179,7 @@ export function createShell({ engine, game }) {
       b.classList.toggle('next', hints && step.st === st.id);
     });
     const fc = $('flightChip');
-    if (s.flight.length) { const rem = Math.min(...s.flight.map((f) => f.tof - f.t)); fc.innerHTML = 'СНАРЯД В ПОЛЁТЕ <b>' + Math.max(0, rem).toFixed(0) + ' с</b>'; fc.classList.remove('hidden'); }
+    if (s.flight.length) { const rem = Math.min(...s.flight.map((f) => f.tof - f.t)); fc.innerHTML = 'СНАРЯД В ПОЛЁТЕ <b>' + Math.max(0, rem).toFixed(0) + ' с</b>' + (engine.current !== 'plot' ? ' · НА КАРТЕ ▸' : ''); fc.classList.remove('hidden'); }
     else fc.classList.add('hidden');
   }
 
@@ -185,7 +190,8 @@ export function createShell({ engine, game }) {
       const el = document.createElement('button');
       el.className = 'nb-t' + (t.id === s.activeTarget ? ' on' : '') + (t.alive ? '' : ' dead');
       el.innerHTML = `<b>${t.label}</b> — ${esc(t.name)}${t.armored ? ' (броня, ББ)' : ''}${t.alive ? '' : t.escaped ? ' — ушла' : ' — уничтожена'}` +
-        `<span class="co">X ${game.fmt.km(r.x)}  Y ${game.fmt.km(r.y)}${t.moving ? `  курс ${String(Math.round(r.course)).padStart(3, '0')}°  ${Math.round(r.speed)} км/ч` : ''}</span>` +
+        (r.sound ? `<span class="co">${r.sound.map((q) => q.name + ' (X ' + game.fmt.km(q.x) + ' Y ' + game.fmt.km(q.y) + ') → ' + game.fmt.brg(q.bearing)).join('<br>')}</span>`
+          : `<span class="co">X ${game.fmt.km(r.x)}  Y ${game.fmt.km(r.y)}${t.moving ? `  курс ${String(Math.round(r.course)).padStart(3, '0')}°  ${Math.round(r.speed)} км/ч` : ''}</span>`) +
         `<span class="dimx">донесение от ${game.fmt.time(r.time)}</span>` +
         (rec ? `<span class="ms">замер: пеленг ${rec.bearing.toFixed(1)}°, дальность ${game.fmt.km(rec.range)} км</span>` : '');
       if (t.alive) el.onclick = () => { game.selectTarget(t.id); renderNotebook(); };
@@ -225,6 +231,7 @@ export function createShell({ engine, game }) {
   game.on('denied', (d) => { sfx('buzz'); toast(d.reason); });
   game.on('fired', () => { sfx('fire'); try { engine.shake(0.06, 0.7); } catch (e) { /* нет тряски */ } flash('fire'); if (navigator.vibrate) try { navigator.vibrate(150); } catch (e) { /* нет вибро */ } });
   game.on('impact', () => sfx('impactFar'));
+  $('flightChip').addEventListener('click', () => { if (s.phase === 'playing') goto('plot'); });
   game.on('batteryHit', (h) => { sfx('impactFar'); if (h.damage > 0) { flash('hit'); try { engine.shake(0.04, 0.5); } catch (e) { /* нет тряски */ } if (navigator.vibrate) try { navigator.vibrate(300); } catch (e) { /* нет вибро */ } toast('ПОПАДАНИЕ ПО БАТАРЕЕ: −' + h.damage + '%'); } });
   engine.on('station', () => { dirty = true; });
   engine.on('swipe', (dir) => { if (s.phase === 'playing' && !s.paused) neighbor(dir > 0 ? 1 : -1); });
