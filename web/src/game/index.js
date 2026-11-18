@@ -4,7 +4,14 @@ import { CAMPAIGN, KINDS, MAP, makeMap, coastAt, isLand, skirmishDef, soundPosts
 
 const C = Object.freeze({ LOAD_ANGLE: 3, EL_MIN: -2, EL_MAX: 45, CHARGES: CHARGE_V0.length, MAP, RANGE_MIN: 0.01, RANGE_MAX: 22 });
 const RAD = Math.PI / 180;
-const DUR = { open: 1.2, close: 1.2, hoist: 2.5, ram: 1.8, charge: 0.9, uncharge: 0.6, unload: 2.0 };
+const DUR = { open: 1.2, close: 1.2, hoist: 2.5, ram: 1.8, charge: 0.9, uncharge: 0.6, unload: 2.0, auto: 9 };
+const KW = 0.5;            // снос снаряда ветром: метров на (м/с × с полёта)
+const REPAIR_TIME = 25;    // с на устранение одной неисправности
+const FAULTS = {
+  drive: { name: 'привод поворота башни', fix: 'Наводите маховиком точной наводки.' },
+  hoist: { name: 'элеватор подачи снарядов', fix: 'Подача снаряда идёт втрое дольше.' },
+  lights: { name: 'электроосвещение башни', fix: 'В башне темно.' },
+};
 const DIFF = [
   { name: 'Курсант', dmg: 0.6, grace: 90, reconEvery: 30 },
   { name: 'Командир', dmg: 1.0, grace: 60, reconEvery: 45 },
@@ -30,18 +37,19 @@ export function createGame(opts = {}) {
   const changed = () => emit('state', state);
 
   // ---------- сохранение ----------
-  const save = { unlocked: 1, stars: [], difficulty: 0, muted: false };
+  const save = { unlocked: 1, stars: [], records: [], difficulty: 0, muted: false };
   try { const raw = storage && storage.get('arta2.save'); if (raw) Object.assign(save, JSON.parse(raw)); } catch (e) { /* нет сохранения */ }
   const persist = () => { try { if (storage) storage.set('arta2.save', JSON.stringify(save)); } catch (e) { /* игнорируем */ } };
 
   const state = {
     phase: 'menu', paused: false, speed: 1, difficulty: save.difficulty, time: 0,
     mission: null, integrity: 100, shells: { he: 0, ap: 0 }, targets: [], activeTarget: null,
-    plot: { pins: {}, alidade: { bearing: 0, range: 5 }, recorded: {} },
-    computer: { range: 5, charge: 1, elevation: null, tof: null, stale: false },
+    plot: { pins: {}, alidade: { bearing: 0, range: 5 }, recorded: {}, pivot: 0, lines: [] },
+    computer: { range: 5, charge: 1, elevation: null, tof: null, stale: false, windRange: 0, windBearing: 0 },
+    faults: { drive: false, hoist: false, lights: false }, repair: null,
     turret: { bearing: 0, brake: true, elevation: 0 },
     breech: { open: false, shell: null, rammed: false, charges: 0, busy: null },
-    fire: { armed: false },
+    fire: { armed: false, burst: 1, burstLeft: 0 },
     flight: [], impacts: [], radio: [], lastReport: null,
     checklist: { measured: false, computed: false, loaded: false, traversed: false, elevated: false, armed: false },
     shots: 0,
@@ -83,14 +91,17 @@ export function createGame(opts = {}) {
       shells: { he: def.shells.he, ap: def.shells.ap },
       mission: { id: def.id, index, name: def.name, brief: def.brief, battery: { x: bat.x, y: bat.y }, mapSeed: def.seed, map, tutorial: !!def.tutorial, skirmish: !!def.skirmish },
       targets: [], activeTarget: null, flight: [], impacts: [], radio: [], lastReport: null,
-      plot: { pins: {}, alidade: { bearing: 0, range: 5 }, recorded: {} },
-      computer: { range: 5, charge: 1, elevation: null, tof: null, stale: false },
+      plot: { pins: {}, alidade: { bearing: 0, range: 5 }, recorded: {}, pivot: 0, lines: [] },
+      computer: { range: 5, charge: 1, elevation: null, tof: null, stale: false, windRange: 0, windBearing: 0 },
+      faults: { drive: false, hoist: false, lights: false }, repair: null,
       turret: { bearing: 0, brake: true, elevation: 0 },
       breech: { open: false, shell: null, rammed: false, charges: 0, busy: null },
-      fire: { armed: false },
+      fire: { armed: false, burst: 1, burstLeft: 0 },
     });
     events = []; endScheduled = false;
     map.posts = def.targets.some((td) => td.locate === 'sound') ? soundPosts(map, bat) : [];
+    const w = def.wind || [0, 0], ws = Math.round(w[0] + Math.random() * (w[1] - w[0]));
+    state.mission.wind = { speed: ws, from: ws ? Math.round(Math.random() * 35) * 10 : 0 };
     const usedIslands = new Set();
     def.targets.forEach((td, i) => {
       const k = KINDS[td.kind];
@@ -153,6 +164,8 @@ export function createGame(opts = {}) {
     if (state.phase !== 'briefing') return deny('begin', 'Задание не выбрано');
     state.phase = 'playing';
     const d = DIFF[state.difficulty];
+    const wd = state.mission.wind;
+    if (wd.speed) at(1.8, () => radio('МЕТЕО', 'Ветер ' + String(wd.from).padStart(3, '0') + '° (откуда дует), ' + wd.speed + ' м/с. Вычислитель учитывает его автоматически — поправку пеленга вносите на посту ПОВОРОТ.'));
     at(1, () => radio('ШТАБ', 'Батарея «Утёс», к бою. Координаты батареи: X ' + fmtKm(state.mission.battery.x) + ', Y ' + fmtKm(state.mission.battery.y) + '.'));
     let k = 0;
     state.targets.forEach((t, i) => {
@@ -267,9 +280,32 @@ export function createGame(opts = {}) {
     if (v.range != null && isFinite(v.range)) a.range = r2(clamp(v.range, 0, 25));
     changed(); return ok();
   }
+  /** Точки, где может стоять ось алидады: 0 — батарея, 1… — посты звукометрии. */
+  function pivots() {
+    const m = state.mission;
+    if (!m) return [];
+    return [{ name: 'УТЁС', x: m.battery.x, y: m.battery.y }].concat(m.map.posts || []);
+  }
+  function setPivot(i) {
+    const P = pivots();
+    if (!P[i]) return deny('setPivot', 'Нет такой точки');
+    state.plot.pivot = i; changed(); return ok();
+  }
+  /** Провести карандашом линию вдоль алидады (для засечки по пеленгам). */
+  function drawLine() {
+    const P = pivots(), p = P[state.plot.pivot] || P[0];
+    if (!p) return deny('drawLine', 'Бой не идёт');
+    const L = state.plot.lines;
+    L.push({ from: p.name, x: p.x, y: p.y, bearing: state.plot.alidade.bearing });
+    if (L.length > 6) L.shift();
+    changed(); return ok();
+  }
+  function clearLines() { state.plot.lines = []; changed(); return ok(); }
+
   function recordMeasurement() {
     const a = active();
     if (!playing() || !a) return deny('recordMeasurement', 'Нет активной цели');
+    if (state.plot.pivot) return deny('recordMeasurement', 'Ось алидады не на батарее — переставьте её на «УТЁС»');
     const al = state.plot.alidade;
     state.plot.recorded[a.id] = { bearing: al.bearing, range: al.range, time: state.time };
     emit('recorded', { targetId: a.id, bearing: al.bearing, range: al.range });
@@ -292,18 +328,42 @@ export function createGame(opts = {}) {
     for (let n = 1; n <= C.CHARGES; n++) { const l = chargeRange(n); out.push(state.computer.range >= l.min && state.computer.range <= l.max ? 'ok' : 'out'); }
     return out;
   }
+  /** Составляющие ветра вдоль и поперёк направления стрельбы, м/с (+ попутный, + сносит вправо). */
+  function windParts(bearing) {
+    const w = state.mission && state.mission.wind;
+    if (!w || !w.speed) return { along: 0, cross: 0 };
+    const to = (w.from + 180) * RAD, b = bearing * RAD;
+    return { along: w.speed * Math.cos(to - b), cross: w.speed * Math.sin(to - b) };
+  }
+  /** Направление стрельбы для поправок: записанный пеленг активной цели, иначе текущий пеленг башни. */
+  function firingBearing() {
+    const rec = state.activeTarget != null ? state.plot.recorded[state.activeTarget] : null;
+    return rec ? rec.bearing : state.turret.bearing;
+  }
   function compute() {
-    const c = state.computer, res = solve(c.range, c.charge);
-    if (!res.ok) { c.elevation = null; c.tof = null; c.stale = false; touch(); return deny('compute', res.reason); }
+    const c = state.computer;
+    let res = solve(c.range, c.charge);
+    let dR = 0, dB = 0;
+    if (res.ok) {
+      const wp = windParts(firingBearing());
+      if (wp.along || wp.cross) {
+        // ветер сносит снаряд: стреляем на столько же ближе/дальше и доворачиваем против сноса
+        for (let i = 0; i < 3 && res.ok; i++) { dR = -wp.along * res.tof * KW / 1000; res = solve(c.range + dR, c.charge); }
+        if (res.ok) dB = -Math.atan2(wp.cross * res.tof * KW, c.range * 1000) / RAD;
+      }
+    }
+    if (!res.ok) { c.elevation = null; c.tof = null; c.stale = false; c.windRange = 0; c.windBearing = 0; touch(); return deny('compute', res.reason); }
     c.elevation = res.elevation; c.tof = res.tof; c.stale = false;
+    c.windRange = r2(dR); c.windBearing = r1(dB);
     emit('computed', res); touch();
-    return res;
+    return { ...res, windRange: c.windRange, windBearing: c.windBearing };
   }
 
   // ---------- наводка ----------
   function setBrake(b) { state.turret.brake = !!b; touch(); return ok(); }
-  function rotateTurret(delta) {
+  function rotateTurret(delta, opts) {
     if (state.turret.brake) return deny('rotateTurret', 'Башня на стопоре');
+    if (opts && opts.power && state.faults.drive) return deny('rotateTurret', 'Привод поворота повреждён — только маховик точной наводки');
     if (!isFinite(delta)) return ok();
     state.turret.bearing = norm360(Math.round((state.turret.bearing + delta) * 100) / 100) % 360;
     touch(); return ok();
@@ -318,7 +378,7 @@ export function createGame(opts = {}) {
   // ---------- заряжание ----------
   function busy(kind, done) {
     const b = state.breech;
-    b.busy = { kind, t: 0, dur: DUR[kind], done };
+    b.busy = { kind, t: 0, dur: DUR[kind] * (kind === 'hoist' && state.faults.hoist ? 3 : 1), done };
     emit('breech', b); touch();
     return ok();
   }
@@ -399,16 +459,58 @@ export function createGame(opts = {}) {
     const noise = { v: gauss() * 0.0012, el: gauss() * 0.02, az: gauss() * 0.03 };
     const res = shoot(t.bearing, t.elevation, b.charges, noise);
     state.shots++;
-    const sh = { id: ++flightId, n: state.shots, t: 0, tof: res.tof, shell: b.shell, charges: b.charges, x: state.mission.battery.x + res.dx, y: state.mission.battery.y + res.dy, bearing: t.bearing, elevation: t.elevation };
+    const wp = windParts(t.bearing), B = t.bearing * RAD;
+    const wa = wp.along * res.tof * KW / 1000, wc = wp.cross * res.tof * KW / 1000;    // км сноса
+    const sh = { id: ++flightId, n: state.shots, t: 0, tof: res.tof, shell: b.shell, charges: b.charges,
+      x: state.mission.battery.x + res.dx + wa * Math.sin(B) + wc * Math.cos(B),
+      y: state.mission.battery.y + res.dy + wa * Math.cos(B) - wc * Math.sin(B), bearing: t.bearing, elevation: t.elevation };
     state.flight.push(sh);
     // каждый наш выстрел помогает противнику засечь батарею
     for (const e of state.targets) if (e.alive && e.gun) e.gun.p = Math.min(0.75, e.gun.p + 0.04);
+    const shellType = b.shell, charges = b.charges;
     b.shell = null; b.rammed = false; b.charges = 0;
     state.fire.armed = false;
-    emit('fired', { id: sh.id, tof: sh.tof, shell: sh.shell, charges: sh.charges });
+    emit('fired', { id: sh.id, n: sh.n, tof: sh.tof, shell: sh.shell, charges: sh.charges });
     emit('breech', b);
+    // очередь: расчёт сам перезаряжает тем же снарядом и зарядом и стреляет на тех же установках
+    const F = state.fire;
+    if (F.burstLeft === 0 && F.burst > 1) F.burstLeft = F.burst - 1;
+    else if (F.burstLeft > 0) F.burstLeft--;
+    if (F.burstLeft > 0) {
+      if (state.shells[shellType] <= 0) { F.burstLeft = 0; radio('РАСЧЁТ', 'Очередь прервана: кончились снаряды этого типа.', 'bad'); }
+      else {
+        state.shells[shellType]--;
+        busy('auto', () => {
+          b.shell = shellType; b.rammed = true; b.charges = charges;
+          if (!playing() || !state.turret.brake) { F.burstLeft = 0; return; }
+          state.fire.armed = true;
+          const r = fire();
+          if (!r.ok) F.burstLeft = 0;
+        });
+      }
+    }
     touch();
     return { ok: true, tof: sh.tof };
+  }
+  /** Сколько выстрелов в очереди (1…3). */
+  function setBurst(n) { state.fire.burst = clamp(Math.round(n), 1, 3); state.fire.burstLeft = 0; changed(); return ok(); }
+
+  // ---------- повреждения и ремонт ----------
+  function breakSomething(dmg) {
+    const ok2 = Object.keys(FAULTS).filter((k) => !state.faults[k]);
+    if (!ok2.length || Math.random() > dmg * 0.07) return;
+    const k = ok2[Math.floor(Math.random() * ok2.length)];
+    state.faults[k] = true;
+    radio('ШТАБ', 'Повреждение! Отказал ' + FAULTS[k].name + '. ' + FAULTS[k].fix + ' Отправьте ремонтную команду.', 'bad');
+    emit('fault', { kind: k });
+  }
+  function repair(kind) {
+    if (!playing()) return deny('repair', 'Бой не идёт');
+    if (!state.faults[kind]) return deny('repair', 'Этот узел исправен');
+    if (state.repair) return deny('repair', 'Ремонтная команда уже занята');
+    state.repair = { kind, t: 0, dur: REPAIR_TIME };
+    radio('РАСЧЁТ', 'Ремонтная команда приступила: ' + FAULTS[kind].name + '.');
+    touch(); return ok();
   }
 
   function impact(sh) {
@@ -492,8 +594,18 @@ export function createGame(opts = {}) {
       persist();
     }
     const stats = { shots: state.shots, par, time: state.time, integrity: Math.round(state.integrity), destroyed: state.targets.filter((t) => !t.alive && !t.escaped).length, total: n };
+    let record = null;
+    if (won && idx != null) {
+      const old = save.records[idx] || null;
+      const better = !old || stars > old.stars || (stars === old.stars && (stats.shots < old.shots || (stats.shots === old.shots && stats.time < old.time)));
+      if (better) {
+        save.records[idx] = { stars, shots: stats.shots, time: Math.round(stats.time), integrity: stats.integrity, difficulty: state.difficulty };
+        persist();
+      }
+      record = { best: save.records[idx], isNew: better, previous: old };
+    }
     emit('phase', state.phase);
-    emit('missionEnd', { won, stars, reason: reason || null, stats });
+    emit('missionEnd', { won, stars, reason: reason || null, stats, record });
     changed();
   }
 
@@ -509,6 +621,11 @@ export function createGame(opts = {}) {
     if (b.busy) {
       b.busy.t += dt; dirty = true;
       if (b.busy.t >= b.busy.dur) { const done = b.busy.done; b.busy = null; done(); emit('breech', b); checkEnd(); }
+    }
+    // ремонт
+    if (state.repair) {
+      const r = state.repair; r.t += dt; dirty = true;
+      if (r.t >= r.dur) { state.faults[r.kind] = false; state.repair = null; radio('РАСЧЁТ', 'Исправлено: ' + FAULTS[r.kind].name + '.', 'good'); emit('fault', { kind: r.kind, fixed: true }); }
     }
     // снаряды в полёте
     for (let i = state.flight.length - 1; i >= 0; i--) {
@@ -542,13 +659,19 @@ export function createGame(opts = {}) {
           t.salvos++;
           if (t.locate === 'sound') soundReport(t);
           const ranging = t.firstSalvo; t.firstSalvo = false;
-          if (!ranging && Math.random() < t.gun.p) {
-            const dmg = Math.round(t.gun.dmg * d.dmg * (0.7 + Math.random() * 0.6));
-            state.integrity = Math.max(0, state.integrity - dmg);
-            emit('batteryHit', { damage: dmg, by: t.id });
-            if (state.integrity <= 0) { radio('ШТАБ', 'Батарея разбита!', 'bad'); finish(false, 'Батарея уничтожена огнём противника.'); return; }
-            if (state.integrity <= 35 && !state.mission.warned) { state.mission.warned = true; radio('ШТАБ', 'Батарея получила тяжёлые повреждения! Подавите огневые точки противника.', 'bad'); }
-          } else emit('batteryHit', { damage: 0, by: t.id });
+          const hit = !ranging && Math.random() < t.gun.p;
+          emit('incoming', { by: t.id, eta: 2.4 });
+          at(2.4, () => {
+            if (!playing()) return;
+            if (hit) {
+              const dmg = Math.round(t.gun.dmg * d.dmg * (0.7 + Math.random() * 0.6));
+              state.integrity = Math.max(0, state.integrity - dmg);
+              emit('batteryHit', { damage: dmg, by: t.id });
+              if (state.integrity <= 0) { radio('ШТАБ', 'Батарея разбита!', 'bad'); finish(false, 'Батарея уничтожена огнём противника.'); return; }
+              breakSomething(dmg);
+              if (state.integrity <= 35 && !state.mission.warned) { state.mission.warned = true; radio('ШТАБ', 'Батарея получила тяжёлые повреждения! Подавите огневые точки противника.', 'bad'); }
+            } else emit('batteryHit', { damage: 0, by: t.id });
+          });
           if (t.relocateEvery && t.salvos % t.relocateEvery === 0) relocate(t);
           dirty = true;
         }
@@ -573,6 +696,7 @@ export function createGame(opts = {}) {
     state, save, C, on, campaign: CAMPAIGN, difficulties: DIFF.map((d) => d.name),
     update, startMission, startSkirmish, begin, quit, pause, setSpeed, setDifficulty, setMuted,
     selectTarget, setPin, setAlidade, recordMeasurement, predict, shellPosition,
+    pivots, setPivot, drawLine, clearLines, windParts, firingBearing, setBurst, repair, FAULTS,
     setComputerRange, setComputerCharge, chargeStates, compute,
     setBrake, rotateTurret, elevate,
     openBreech, closeBreech, hoistShell, ramShell, addCharge, removeCharge, unload,

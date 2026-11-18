@@ -50,7 +50,7 @@ function engage(game, t, corr) {
   assert.ok(game.closeBreech().ok); waitBreech(game);
   // 3. наводка
   game.setBrake(false);
-  let d = norm(brg - s.turret.bearing); if (d > 180) d -= 360;
+  let d = norm(brg + res.windBearing - s.turret.bearing); if (d > 180) d -= 360;
   assert.ok(game.rotateTurret(d).ok);
   game.setBrake(true);
   game.elevate(res.elevation - s.turret.elevation);
@@ -189,4 +189,94 @@ test('доклад корректировщика: знаки отклонени
   rep = fireAt(rng - 0.4, brg - 1);
   assert.ok(rep.over < -250 && rep.right < 0);
   assert.match(rep.text, /недолёт/); assert.match(rep.text, /влево/);
+});
+
+
+test('ветер: вычислитель даёт поправки, с ними снаряд ложится в цель', () => {
+  const game = createGame({ storage: unlockAll() });
+  game.setDifficulty(1); game.startMission(7); game.begin();
+  const s = game.state;
+  for (let i = 0; i < 100; i++) game.update(0.1);
+  s.mission.wind = { from: 270, speed: 10 };          // западный ветер: сносит на восток
+  const bat = s.mission.battery, X = bat.x + 3, Y = bat.y + 11;
+  const rng = Math.hypot(X - bat.x, Y - bat.y), brg = norm(Math.atan2(X - bat.x, Y - bat.y) / RAD);
+  const t = s.targets[0]; game.selectTarget(t.id);
+  game.setAlidade({ bearing: brg, range: rng }); game.recordMeasurement();
+  game.setComputerRange(rng); game.setComputerCharge(5);
+  const res = game.compute();
+  assert.ok(res.ok);
+  assert.ok(res.windBearing < -0.3, 'доворот против сноса влево: ' + res.windBearing);
+  const shootAt = (b) => {
+    game.elevate(-s.turret.elevation); game.openBreech(); waitBreech(game); game.hoistShell('he'); waitBreech(game); game.ramShell(); waitBreech(game);
+    for (let i = 0; i < 5; i++) { game.addCharge(); waitBreech(game); }
+    game.closeBreech(); waitBreech(game);
+    game.setBrake(false); let d = norm(b - s.turret.bearing); if (d > 180) d -= 360; game.rotateTurret(d); game.setBrake(true);
+    game.elevate(res.elevation - s.turret.elevation); game.arm(true);
+    const n0 = s.impacts.length; assert.ok(game.fire().ok);
+    let g = 0; while (s.impacts.length === n0 && g++ < 5000) game.update(0.05);
+    const im = s.impacts[s.impacts.length - 1]; return Math.hypot(im.x - X, im.y - Y) * 1000;
+  };
+  const missNo = shootAt(brg);              // без поправки пеленга
+  const missYes = shootAt(brg + res.windBearing);
+  assert.ok(missNo > 100, 'без поправки промах заметный: ' + missNo.toFixed(0));
+  assert.ok(missYes < 60, 'с поправкой близко: ' + missYes.toFixed(0));
+});
+
+test('планшет: ось алидады на постах, линии, запись только от батареи', () => {
+  const game = createGame({ storage: unlockAll() });
+  game.setDifficulty(1); game.startMission(8); game.begin();
+  const s = game.state;
+  for (let i = 0; i < 300 && !s.targets.some((t) => t.reported); i++) game.update(0.1);
+  assert.equal(game.pivots().length, 3);
+  assert.ok(game.setPivot(1).ok);
+  game.setAlidade({ bearing: 12.3 }); game.drawLine();
+  game.setPivot(2); game.setAlidade({ bearing: 340 }); game.drawLine();
+  assert.equal(s.plot.lines.length, 2);
+  assert.equal(s.plot.lines[0].from, 'ЗВ-1');
+  assert.equal(game.recordMeasurement().ok, false, 'запись не от батареи запрещена');
+  game.setPivot(0); assert.ok(game.recordMeasurement().ok);
+  game.clearLines(); assert.equal(s.plot.lines.length, 0);
+  assert.equal(game.setPivot(5).ok, false);
+});
+
+test('повреждения, ремонт, очередь, рекорды', () => {
+  const store = unlockAll();
+  const game = createGame({ storage: store });
+  game.startMission(0); game.begin();
+  const s = game.state;
+  for (let i = 0; i < 80; i++) game.update(0.1);
+  s.faults.drive = true;
+  game.setBrake(false);
+  assert.equal(game.rotateTurret(5, { power: true }).ok, false, 'привод не работает');
+  assert.ok(game.rotateTurret(0.5).ok, 'маховик работает');
+  assert.ok(game.repair('drive').ok); assert.equal(game.repair('drive').ok, false, 'бригада занята');
+  for (let i = 0; i < 260; i++) game.update(0.1);
+  assert.equal(s.faults.drive, false); assert.equal(s.repair, null);
+  assert.equal(game.repair('hoist').ok, false, 'исправное не чинят');
+  game.setBrake(true);
+  // очередь из трёх
+  game.setBurst(3);
+  game.elevate(-s.turret.elevation); game.openBreech(); waitBreech(game); game.hoistShell('he'); waitBreech(game); game.ramShell(); waitBreech(game);
+  game.addCharge(); waitBreech(game); game.addCharge(); waitBreech(game); game.closeBreech(); waitBreech(game);
+  game.elevate(20); game.arm(true);
+  const he0 = s.shells.he;
+  assert.ok(game.fire().ok);
+  for (let i = 0; i < 400 && s.shots < 3; i++) game.update(0.1);
+  assert.equal(s.shots, 3, 'очередь — три выстрела');
+  assert.equal(s.shells.he, he0 - 2);
+  assert.equal(s.fire.burstLeft, 0);
+});
+
+test('рекорд задания сохраняется и улучшается', () => {
+  const mem = {};
+  const st = { get: (k) => mem[k] || JSON.stringify({ unlocked: 99, stars: [], difficulty: 0 }), set: (k, v) => { mem[k] = v; } };
+  let rec = null;
+  const g1 = createGame({ storage: st }); g1.on('missionEnd', (e) => { rec = e.record; });
+  g1.startMission(0); g1.begin();
+  for (let i = 0; i < 80; i++) g1.update(0.1);
+  const t = g1.state.targets[0]; engage(g1, t, null);
+  for (let i = 0; i < 80; i++) g1.update(0.1);
+  assert.ok(rec && rec.isNew && rec.best.shots === 1);
+  const g2 = createGame({ storage: st });
+  assert.equal(g2.save.records[0].shots, 1, 'рекорд пережил перезапуск');
 });
