@@ -193,7 +193,7 @@ export function buildLoadingGun(ctx, root) {
       if (type === 'he') { band(0.63, 0.715, PAL.ochre); band(0.93, 1, '#c5c9cc'); }
       else { band(0.7, 1, '#141517'); band(0.6, 0.66, '#e9e4d2'); }
       for (let k = 0; k < 3; k++) {                           // трафарет вдоль оси снаряда, трижды по окружности
-        c.save(); c.translate(S * (k + 0.5) / 3, Y(0.36)); c.rotate(Math.PI / 2);
+        c.save(); c.translate(S * (k + 0.5) / 3, Y(0.36)); c.rotate(-Math.PI / 2);
         T.drawLabel(c, type === 'he' ? 'ОФ' : 'ББ', 0, 0, 30, { color: '#e9e4d2', weight: 700 });
         c.restore();
       }
@@ -214,7 +214,7 @@ export function buildLoadingGun(ctx, root) {
   })();
   const bagMat = mat.memo('loading:bag', () => {
     const cv = T.makeCanvas(64, 128), c = cv.getContext('2d'), rnd = T.mulberry32(5);
-    c.fillStyle = '#b3a888'; c.fillRect(0, 0, 64, 128);
+    c.fillStyle = '#a79c7c'; c.fillRect(0, 0, 64, 128);
     for (let i = 0; i < 260; i++) { c.fillStyle = rnd() > 0.5 ? 'rgba(255,255,255,0.10)' : 'rgba(90,70,40,0.10)'; c.fillRect(rnd() * 64, rnd() * 128, 1 + rnd() * 3, 1); }
     c.fillStyle = '#2a2521'; c.fillRect(0, 128 * 0.43, 64, 128 * 0.14);                       // тёмный пояс
     c.fillStyle = 'rgba(70,55,30,0.55)'; c.fillRect(0, 128 * 0.345, 64, 2); c.fillRect(0, 128 * 0.655, 64, 2);   // швы

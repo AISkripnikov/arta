@@ -13,7 +13,7 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol + 1e-9;
 
 (async () => {
   const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
-  const ctx = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
+  const ctx = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: 1, hasTouch: true });
   const page = await ctx.newPage();
   page.setDefaultTimeout(180000);
   const problems = [];
@@ -57,19 +57,35 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol + 1e-9;
     if (hold) await page.waitForTimeout(hold);
     await page.mouse.up();
   };
+  // настоящие события касания (через CDP): порог начала перетаскивания у пальца — 10 px
+  const cdp = await ctx.newCDPSession(page);
+  const touch = (type, p) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: p ? [{ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 }] : [] });
+  const touchDrag = async (a, b, steps = 10) => {
+    await touch('touchStart', a);
+    for (let i = 1; i <= steps; i++) await touch('touchMove', { x: a.x + (b.x - a.x) * i / steps, y: a.y + (b.y - a.y) * i / steps });
+    await touch('touchEnd');
+  };
+  const touchTap = async (p) => { await touch('touchStart', p); await touch('touchEnd'); };
   const tap = async (p) => { await page.mouse.move(p.x, p.y); await page.mouse.down(); await page.mouse.up(); };
   /** Тащит фишку за ручку-диск так, чтобы остриё пришло в (x, y) км; порог начала перетаскивания (5 px) компенсируется. */
-  const dragPinTo = async (id, x, y) => {
+  const dragPinTo = async (id, x, y, finger = false) => {
     const h = await at('T.handle(' + id + ')');
     const c = await at('(() => { const o = T.st.api.handleOffsetKm; return T.chart(' + x + ' + o.x, ' + y + ' + o.y); })()');
-    const L = Math.hypot(c.x - h.x, c.y - h.y) || 1, k = (L + 5.5) / L;
-    await drag(h, { x: h.x + (c.x - h.x) * k, y: h.y + (c.y - h.y) * k }, 10);
+    const L = Math.hypot(c.x - h.x, c.y - h.y) || 1, k = (L + (finger ? 10.5 : 5.5)) / L;
+    await (finger ? touchDrag : drag)(h, { x: h.x + (c.x - h.x) * k, y: h.y + (c.y - h.y) * k }, 12);
   };
-  /** Двойное касание. Кадры на время жеста остановлены: при программном рендере между касаниями иначе проходит > 0.45 с. */
-  const doubleTap = async (p) => {
-    await page.evaluate(() => window.__dev.engine.stop());
-    await tap(p); await tap(p);
-    await page.evaluate(() => window.__dev.engine.start());
+  /**
+   * Двойное касание; want — ожидаемое состояние лупы после него. Кадры на время жеста остановлены, и всё же на
+   * загруженной машине между касаниями может пройти больше 0.45 с — тогда жест повторяется (до трёх раз).
+   */
+  const doubleTap = async (p, want) => {
+    for (let i = 0; i < 3; i++) {
+      await page.evaluate(() => window.__dev.engine.stop());
+      await tap(p); await tap(p);
+      await page.evaluate(() => window.__dev.engine.start());
+      if ((await at('T.st.api.loupe')) === want) return;
+      await page.waitForTimeout(600);
+    }
   };
   const inSafe = (p) => p.x > 4 && p.x < W - 4 && p.y > 40 && p.y < H - 56;
 
@@ -239,16 +255,24 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol + 1e-9;
   ok(s.loupe === false && s.fov > 40, 'плашка «ОБЗОР» возвращает основной вид', [s.loupe, s.fov]);
   {
     const p = await at('T.chart(15, 15)');
-    await doubleTap(p);
+    await doubleTap(p, true);
     await step(30, 0.05);
     s = await snap();
     ok(s.loupe === true, 'двойное касание карты включает лупу');
     const c = { x: W / 2, y: 190 };
-    await doubleTap(c);
+    await doubleTap(c, false);
     await step(30, 0.05);
     s = await snap();
-    ok(s.loupe === false && s.fov > 40, 'двойное касание под лупой — обратно', [s.loupe, s.fov, await at('T.st.api._dbg')]);
+    ok(s.loupe === false && s.fov > 40, 'двойное касание под лупой — обратно', [s.loupe, s.fov]);
   }
+
+  // оболочка сама вернула основной вид (повторный gotoStation) — пост снимает лупу
+  await tap(await at("T.hot('btnLoupe')"));
+  await step(40, 0.05);
+  await page.evaluate(() => window.__dev.engine.gotoStation('plot'));
+  await step(40, 0.05);
+  s = await snap();
+  ok(s.loupe === false && s.fov > 40, 'основной вид, заданный извне, снимает лупу', [s.loupe, s.fov]);
 
   // ---- 3. запись ----
   console.log('запись');
@@ -301,9 +325,19 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol + 1e-9;
   s = await snap();
   {
     const id = s.active, r = s.targets.find((t) => t.id === id).reported;
-    await dragPinTo(id, r.x, r.y);
+    await dragPinTo(id, r.x, r.y, true);
     s = await snap();
-    ok(s.pins[id] && Math.hypot(s.pins[id].x - r.x, s.pins[id].y - r.y) < 0.3, 'после перезапуска фишка снова ставится на карту', [s.pins, r]);
+    ok(s.pins[id] && Math.hypot(s.pins[id].x - r.x, s.pins[id].y - r.y) < 0.3, 'после перезапуска фишка ставится на карту пальцем (касание)', [s.pins, r]);
+    const x0 = s.pins[id].x;
+    await touchTap(await at("T.hot('btnXPlus')"));
+    s = await snap();
+    ok(near(s.pins[id].x, x0 + 0.01, 1e-6), 'касание стрелки X+ пальцем → +0.01 км', [x0, s.pins[id].x]);
+    const o2 = s.targets.find((t) => t.id !== id);
+    if (o2) {
+      await touchTap(await at('T.handle(' + o2.id + ')'));
+      s = await snap();
+      ok(s.active === o2.id, 'касание пальцем фишки в лотке выбирает цель ' + o2.id, s.active);
+    }
   }
   await page.evaluate(() => { const g = window.__dev.game; g.quit(); });
   s = await page.evaluate(() => { window.T.step(3); return { phase: window.__dev.game.state.phase, mission: !!window.__dev.game.state.mission }; });

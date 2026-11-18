@@ -69,11 +69,11 @@ export function createLoadingStation(ctx) {
   const breechLever = fascia.add(ui.lever({
     length: 0.18, mode: 'toggle', labels: ['ЗАТВОР\nЗАКРЫТ', 'ЗАТВОР\nОТКРЫТ'], labelSize: LABEL,
     onChange(on) {
-      if (!gestureDenied) {
-        const r = on ? game.openBreech() : game.closeBreech();
-        if (!r || !r.ok) gestureDenied = true;
-      }
-      breechLever.set(leverTarget());        // рычаг всегда показывает настоящее состояние (при отказе — отскакивает)
+      // не чаще одного отказа за жест; рычаг возвращается к настоящему состоянию в update(), когда палец отпущен
+      // (если вернуть его сразу, движок будет вызывать onChange на каждое движение пальца за порогом)
+      if (gestureDenied) return;
+      const r = on ? game.openBreech() : game.closeBreech();
+      if (!r || !r.ok) gestureDenied = true;
     },
   }), -0.41, -0.135);
 
@@ -165,10 +165,10 @@ export function createLoadingStation(ctx) {
       sp.visible = smoke;
       if (!smoke) return;
       const u = rt / 2.4, a = i * 2.1;
-      sp.position.set(K.X + Math.cos(a) * 0.2 * (0.4 + u), K.Y + 0.25 + Math.sin(a) * 0.08 + u * 0.45, K.ZB - 0.2 + 0.25 * u + i * 0.05);
-      sp.scale.setScalar(0.45 + u * 0.9 + i * 0.12);
+      sp.position.set(K.X + Math.cos(a) * 0.2 * (0.5 + u), K.Y - 0.02 + Math.sin(a) * 0.14 + u * 0.32, K.ZB + 0.06 + 0.22 * u + i * 0.04);
+      sp.scale.setScalar(0.5 + u * 0.9 + i * 0.1);
     });
-    if (smoke) gun.puffMat.opacity = 0.34 * Math.min(1, rt / 0.12) * (1 - rt / 2.4);
+    if (smoke) gun.puffMat.opacity = 0.42 * Math.min(1, rt / 0.15) * (1 - rt / 2.4);
 
     // --- затвор и лоток
     const openAmt = k === 'open' ? p : k === 'close' ? 1 - p : (b.open ? 1 : 0);

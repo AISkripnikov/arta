@@ -99,7 +99,7 @@ export function createPlotStation(ctx) {
   }
 
   // ------------------------------------------------------------------ органы на столе
-  deck.add(keep(ui.plate('ПЛАНШЕТ', { size: 0.032, style: 'black' })), -0.64, 0.335);
+  deck.add(keep(ui.plate('ПЛАНШЕТ', { size: 0.032, style: 'black' })), -0.69, 0.335);
 
   const state = () => game.state;
   const plotOf = (s) => s.plot || EMPTY_PLOT;
@@ -131,8 +131,8 @@ export function createPlotStation(ctx) {
     onEnd() { trySnap(); },
   })), 0.71, -0.2);
 
-  const cBearing = deck.add(keep(ui.drumCounter({ digits: 4, decimals: 1, unit: '°', wrap: 360, label: 'ПЕЛЕНГ', digitH: 0.05 })), -0.71, 0.05);
-  const cRange = deck.add(keep(ui.drumCounter({ digits: 4, decimals: 2, unit: 'КМ', label: 'ДАЛЬНОСТЬ', digitH: 0.05 })), 0.71, 0.05);
+  const cBearing = deck.add(keep(ui.drumCounter({ digits: 4, decimals: 1, unit: '°', wrap: 360, label: 'ПЕЛЕНГ', digitH: 0.05 })), -0.71, 0.04);
+  const cRange = deck.add(keep(ui.drumCounter({ digits: 4, decimals: 2, unit: 'КМ', label: 'ДАЛЬНОСТЬ', digitH: 0.05 })), 0.71, 0.04);
 
   // рейка точной подвижки фишки
   const RAIL_V = -0.325;
@@ -164,7 +164,7 @@ export function createPlotStation(ctx) {
   const btnYm = arrowButton(0.155, -90, 0, -0.01);
   const btnYp = arrowButton(0.47, 90, 0, 0.01);
 
-  const lampNew = deck.add(keep(ui.lamp({ color: 'amber', label: 'НОВОЕ ДОНЕСЕНИЕ', labelSize: 0.022 })), -0.66, 0.245);
+  const lampNew = deck.add(keep(ui.lamp({ color: 'amber', label: 'НОВОЕ ДОНЕСЕНИЕ', labelSize: 0.023 })), -0.69, 0.25);
   const lampAligned = deck.add(keep(ui.lamp({ color: 'green', label: 'СОВМЕЩЕНО' })), 0.455, 0.305);
   const btnRecord = deck.add(keep(ui.pushButton({
     radius: 0.034, color: 'ochre', label: 'ЗАПИСАТЬ',
@@ -518,7 +518,6 @@ export function createPlotStation(ctx) {
 
   disposers.push(input.add(hit, {
     onDown(e) {
-      (window.__plog = window.__plog || []).push(['down', e.x, e.y]);
       drag = null;
       if (!state().mission) return;
       const p = boardPoint(e);
@@ -582,7 +581,6 @@ export function createPlotStation(ctx) {
       if (d.moved) drag = null;
     },
     onTap(e) {
-      (window.__plog = window.__plog || []).push(['tap', drag && drag.kind, drag && drag.moved, e.duration, lastTap && (performance.now() - lastTap.t)]);
       const d = drag;
       drag = null;
       if (!d || d.moved) return;
@@ -623,6 +621,10 @@ export function createPlotStation(ctx) {
 
     zoom += ((loupe ? 1 : 0) - zoom) * (1 - Math.exp(-dt * 7));
     if (Math.abs((loupe ? 1 : 0) - zoom) < 0.002) zoom = loupe ? 1 : 0;
+    // камеру вернули к основному виду помимо поста (повторный gotoStation оболочки) — снять лупу
+    if (loupe && zoom === 1 && engine.current === 'plot' && !engine.flying && engine.camera.fov > (LOUPE.fov + CAM.fov) / 2) {
+      loupe = false; btnLoupe.setLit(false);
+    }
     const ts = tokenScale();
 
     const bat = mission ? battery() : null;
@@ -775,7 +777,6 @@ export function createPlotStation(ctx) {
       /** Смещение ручки-диска от острия фишки, км карты (в основном виде; под лупой — × tokenScale). */
       get handleOffsetKm() { const k = tokenScale() / K; return { x: HANDLE.x * k, y: HANDLE.y * k }; },
       get loupe() { return loupe; },
-      get _dbg() { return { drag, lastTap, loupeC, log: (window.__plog || []).slice(-12) }; },
       get leadVisible() { return leadMesh.visible; },
       setLoupe(b) { setLoupe(b); },
     },
