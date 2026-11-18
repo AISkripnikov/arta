@@ -17,7 +17,7 @@ const path = require('path');
   await p.waitForTimeout(600); await p.screenshot({ path: out + '/0-brief.png' });
   await p.evaluate(() => __arta.game.begin());
   await p.waitForTimeout(9000);
-  for (const id of ['plot', 'computer', 'loading', 'traverse', 'elevation', 'fire']) {
+  for (const id of ['plot', 'computer', 'loading', 'traverse', 'elevation', 'fire', 'observe', 'aa']) {
     await p.evaluate((id) => __arta.engine.gotoStation(id, { instant: true }), id);
     await p.waitForTimeout(1200);
     await p.screenshot({ path: out + '/st-' + id + '.png' });

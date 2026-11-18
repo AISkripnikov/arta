@@ -244,8 +244,14 @@ const PAGE_HELPERS = `(() => {
   await ev('const g = window.__dev.game; g.closeBreech(); T.idle();');
 
   console.log('9. разрыв и доклад корректировщика');
-  await ev('T.untilImpact(); T.adv(6)');
+  await ev('T.untilImpact()');
   s = await snap();
+  const due = await ev('const st = window.__dev.game.state; return { due: st.reportDue != null, last: st.lastReport && st.lastReport.text };');
+  check('доклад корректировщика ещё в пути — на ленте его текста нет', !due.due || !s.lines.some((l) => /ПЕРЕЛ|НЕДОЛ|ЛЕВЕЕ|ПРАВЕЕ/.test(l)), [due, s.lines]);
+  await ev('T.adv(6)');
+  s = await snap();
+  const rep = await ev('const st = window.__dev.game.state; return { due: st.reportDue != null, last: st.lastReport && st.lastReport.text };');
+  check('доклад дошёл — его текст на ленте', !rep.due && (!rep.last || s.lines.join(' ').includes(rep.last.toUpperCase())), [rep, s.lines]);
   check('снарядов в полёте нет: лампа погашена, секундомер на нуле', s.flight === 0 && s.flightLamp === false && s.watch === 0, s);
   check('лента: доклад после «ВЫСТРЕЛ №1»', s.lines.length >= 2 && s.lines[0] === 'ВЫСТРЕЛ №1' && /ЦЕЛЬ|РАЗРЫВ/.test(s.lines[1]), s.lines);
   check('строки ленты — ПРОПИСНЫМИ', s.lines.every((l) => l === l.toUpperCase()), s.lines);

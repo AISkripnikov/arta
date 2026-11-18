@@ -1,21 +1,27 @@
 import { CHANGELOG } from '../changelog.js';
 import { createDebrief } from './debrief.js';
+import { createSettings } from './settings.js';
+import { createUpgrades } from './upgrades.js';
+import { todayKey, dailyMenuText, dailyResultHtml, resumeHtml } from './daily.js';
+import { createCrew, crewStateText } from './crew.js';
 // DOM-оболочка: меню, HUD, блокнот, брифинг, итоги. Общие эффекты (звук выстрела, тряска, вспышки).
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
 export const STATIONS = [
   { id: 'plot', title: 'ПЛАНШЕТ', check: 'measured' },
-  { id: 'computer', title: 'ВЫЧИСЛИТЕЛЬ', check: 'computed' },
-  { id: 'loading', title: 'ЗАРЯЖАНИЕ', check: 'loaded' },
+  { id: 'computer', title: 'ВЫЧИСЛИТЕЛЬ', short: 'ВЫЧИСЛ.', check: 'computed' },
+  { id: 'loading', title: 'ЗАРЯЖАНИЕ', short: 'ЗАРЯЖ.', check: 'loaded' },
   { id: 'traverse', title: 'ПОВОРОТ', check: 'traversed' },
   { id: 'elevation', title: 'ПОДЪЁМ', check: 'elevated' },
   { id: 'fire', title: 'ОГОНЬ', check: 'armed' },
+  { id: 'observe', title: 'НАБЛЮДЕНИЕ', short: 'НАБЛЮД.' },
+  { id: 'aa', title: 'ЗЕНИТКА' },
 ];
 
 const HOWTO = `
 <h2>КАК ИГРАТЬ</h2>
-<p>Вы — оператор башни береговой батареи. Цель не видна: разведка сообщает её координаты, а вы сами проходите всю процедуру выстрела, переходя между шестью постами (кнопки внизу или свайп по пустому месту).</p>
+<p>Вы — оператор башни береговой батареи. Цель не видна: разведка сообщает её координаты, а вы сами проходите всю процедуру выстрела, переходя между восемью постами (кнопки внизу или свайп по пустому месту).</p>
 <h3>1. ПЛАНШЕТ</h3><p>Перетащите фишку цели на карту по координатам X и Y из донесения. Наведите на неё линейку-алидаду и визир, считайте пеленг и дальность, нажмите «ЗАПИСАТЬ».</p>
 <h3>2. ВЫЧИСЛИТЕЛЬ</h3><p>Маховиком наберите дальность, выберите заряд (зелёные лампы — достаёт) и потяните рычаг: получите угол возвышения и время полёта.</p>
 <h3>3. ЗАРЯЖАНИЕ</h3><p>Ствол — не выше 3°. Откройте затвор, галетником выберите тип снаряда (ОФ — фугасный, ББ — бронебойный по броне, ОСВ, ДЫМ, ШРП) и подайте его, дошлите его, подайте столько зарядов, сколько выбрали на вычислителе, закройте затвор.</p>
@@ -37,7 +43,15 @@ const HOWTO = `
 <h3>ВИЛКА</h3><p>Тумблер «ВИЛКА» на посту ОГОНЬ: залп двумя стволами, один снаряд ложится на 150 м ближе, другой — на 150 м дальше точки наводки. Если цель оказалась между разрывами — дальность взята верно, остаётся поправить направление. Расходует два снаряда.</p>
 <h3>ЗВАНИЯ</h3><p>За победы расчёт получает опыт: звёзды и уничтоженные цели. С каждым званием — от матроса до капитана 3 ранга — расчёт на 5% быстрее работает у затвора и чинит повреждения.</p>
 <h3>ОБОРОНА</h3><p>Бой без конца: противник идёт волнами. Отбили волну — батарею подлатают и подвезут снаряды. Прорвавшаяся цель стоит 25% прочности. Сколько волн продержитесь?</p>
-<h3>РАЗБОР БОЯ</h3><p>После боя кнопка «РАЗБОР БОЯ» открывает карту: истинный путь каждой цели, все ваши разрывы по номерам и таблица выстрелов. Коснитесь строки — разрыв подсветится на карте.</p>`;
+<h3>РАЗБОР БОЯ</h3><p>После боя кнопка «РАЗБОР БОЯ» открывает карту: истинный путь каждой цели, все ваши разрывы по номерам и таблица выстрелов. Коснитесь строки — разрыв подсветится на карте.</p>
+<h3>7. НАБЛЮДЕНИЕ</h3><p>Стереотруба с сеткой: деления через полградуса. Маховик поворачивает трубу, рычаг меняет увеличение ×4/×10, «НА ЦЕЛЬ» — довернуть на выбранную цель, «ЗАСЕЧЬ ПЕЛЕНГ» — провести линию на планшете. Если разрыв лёг в поле зрения трубы, расчёт сразу докладывает: правее или левее цели (в градусах), перелёт или недолёт. Ночью это работает, пока район освещён: осветите район → пост НАБЛЮДЕНИЕ → поправка по сетке. В тумане труба видит на 4 км.</p>
+<h3>8. ЗЕНИТКА</h3><p>По команде «ВОЗДУХ!» — к зенитному автомату (красная плашка вверху экрана). Ведите прицел одним пальцем, держите самолёт в кольце и давите гашетку другим (или коротко коснитесь её — автомат бьёт сам, второе касание — отбой): упреждение не нужно, секунда с небольшим в кольце — самолёт сбит. Ствол греется: при перегреве автомат клинит, пока не остынет. Патронов 400 на бой. Прорвавшийся самолёт бомбит «Утёс»: −12% прочности и возможен отказ узла башни.</p>
+<h3>РАСЧЁТ</h3><p>Значки Н, З, Р у края экрана — наводчик, заряжающий и радист. Полоска — усталость: уставший работает на четверть медленнее, раненый (после попадания по батарее) — в полтора раза. Коснитесь значка раненого — аптечка вернёт его в строй. Уставший отдыхает сам, когда не работает; аптечка снимет и усталость — для этого коснитесь его значка дважды. Аптечек две на бой (в ОБОРОНЕ — три, за каждую отбитую волну дают ещё одну, но не больше трёх).</p>
+<h3>СВОИ СИЛЫ</h3><p>Свои катера и транспорты отмечены на планшете и в блокноте. Разрыв ближе 250 м от своего корабля — попадание по своим; за каждый потопленный вами корабль — минус звезда. Плашка «СВОИ В ЗОНЕ ПОРАЖЕНИЯ» предупреждает, что точка прицеливания рядом со своими. Конвой: доведите транспорты до порта или уничтожьте охотников; дымовой снаряд рядом с транспортом сбивает охотникам прицел.</p>
+<h3>СНАБЖЕНИЕ</h3><p>За каждые 150 опыта расчёт получает очко снабжения. В меню, кнопка «СНАБЖЕНИЕ»: шесть улучшений башни по три уровня (2, 3 и 4 очка) — быстрый элеватор, дальномер, второй корректировщик, броня, погреб, ремонтная партия. «СБРОСИТЬ» возвращает все очки.</p>
+<h3>ЗАДАНИЕ ДНЯ</h3><p>Каждый день — один бой, одинаковый у всех игроков. Попытки не ограничены, в зачёт идёт лучший счёт: звёзды, прочность батареи, время и расход снарядов; за огонь по своим — штраф.</p>
+<h3>СОХРАНЕНИЕ БОЯ</h3><p>Бой записывается сам каждые 15 секунд и когда игру сворачивают. В паузе — «ВЫЙТИ С СОХРАНЕНИЕМ»; в меню появится «ПРОДОЛЖИТЬ БОЙ».</p>
+<h3>НАСТРОЙКИ</h3><p>В меню и в паузе: чувствительность маховиков, размер надписей, режим для левши (кнопки и подсказки меняются сторонами), вибрация и звук.</p>`;
 
 const DIFF_HINT = [
   'Курсант: визир сам примагничивается к фишке, корректировщик даёт готовые поправки, противник бьёт слабее.',
@@ -51,7 +65,7 @@ export function createShell({ engine, game, stations = [] }) {
   let dirty = true, lastRender = 0, notebookOpen = false, unread = 0, dialogDismiss = null, radioTimer = 0, toastTimer = 0;
 
   // ---------- экраны ----------
-  const screens = ['loading', 'menu', 'missions', 'dialog', 'notebook', 'debrief'];
+  const screens = ['loading', 'menu', 'missions', 'dialog', 'notebook', 'debrief', 'upgrades', 'settings'];
   function show(id) { screens.forEach((n) => $(n).classList.toggle('show', n === id)); notebookOpen = id === 'notebook'; if (id !== 'dialog') dialogDismiss = null; }
   function dialog(html, buttons, dismiss) {
     $('dlgBody').innerHTML = html; $('dlgBody').scrollTop = 0;
@@ -67,6 +81,24 @@ export function createShell({ engine, game, stations = [] }) {
     dialogDismiss = dismiss || null;
   }
   const closeAll = () => show(null);
+  // настройки (чувствительность, размер надписей, левша, вибрация) и снабжение (улучшения башни) — отдельные модули
+  const settingsUi = createSettings({ game, engine, show, sfx });
+  const vibro = settingsUi.vibrate;
+  const upgradesUi = createUpgrades({ game, show, dialog, sfx, onClose: () => showMenu() });
+  const crewUi = createCrew({ game, box: $('crew'), toast: (t) => toast(t), sfx, vibro });
+
+  // ---------- журнал боя для разбора: чего нет в missionEnd (пути своих, бомбы, разрывы, замеченные в трубу) ----------
+  let blog = null, raidUntil = -1;
+  function resetLog() { blog = { friends: {}, bombs: [], observed: {}, next: 0 }; raidUntil = -1; }
+  function sampleFriends(force) {
+    if (!blog || (!force && s.time < blog.next)) return;
+    blog.next = s.time + 4;
+    (s.friends || []).forEach((f) => {
+      const tr = blog.friends[f.id] || (blog.friends[f.id] = []), last = tr[tr.length - 1];
+      if (!last || Math.hypot(last.x - f.x, last.y - f.y) > 0.02) tr.push({ t: s.time, x: f.x, y: f.y });
+    });
+  }
+  resetLog();
 
   // ---------- звание ----------
   const plural = (n, one, few, many) => { const a = Math.abs(n) % 100, b = a % 10; return a > 10 && a < 20 ? many : b === 1 ? one : b >= 2 && b <= 4 ? few : many; };
@@ -91,6 +123,12 @@ export function createShell({ engine, game, stations = [] }) {
     $('rankXp').textContent = rk.next != null ? rk.xp + ' / ' + rk.next : rk.xp + ' · ВЫСШЕЕ';
     $('rankBar').style.width = rankPct(rk) + '%';
     const sb = game.save.survivalBest;
+    // снабжение, задание дня, сохранённый бой
+    const pts = upgradesUi.points(), ub = $('upBadge');
+    ub.textContent = pts; ub.classList.toggle('show', upgradesUi.affordable() > 0); $('upgradesBtn').title = 'Очков снабжения: ' + pts;
+    $('dailyInfo').textContent = dailyMenuText(game);
+    let ri = null; try { ri = game.resumeInfo(); } catch (e) { /* нет сохранения */ }
+    $('resumeBox').classList.toggle('hidden', !ri); if (ri) $('resumeBtn').innerHTML = resumeHtml(game, ri);
     $('survBest').textContent = sb ? 'РЕКОРД: ' + sb.waves + ' ' + plural(sb.waves, 'ВОЛНА', 'ВОЛНЫ', 'ВОЛН') + ' · ' + sb.kills + ' ' + plural(sb.kills, 'ЦЕЛЬ', 'ЦЕЛИ', 'ЦЕЛЕЙ') : '';
   }
   function showMenu() {
@@ -101,7 +139,7 @@ export function createShell({ engine, game, stations = [] }) {
   function showMissions() {
     const grid = $('missionGrid'); grid.innerHTML = '';
     game.campaign.forEach((m, i) => {
-      const SEC = { 0: 'ЧАСТЬ I · БЕРЕГОВАЯ ОБОРОНА', 8: 'ЧАСТЬ II · КОНТРБАТАРЕЙНАЯ БОРЬБА', 16: 'ЧАСТЬ III · ОСТРОВА В ОГНЕ', 24: 'ЧАСТЬ IV · НОЧЬ И ТУМАН' };
+      const SEC = { 0: 'ЧАСТЬ I · БЕРЕГОВАЯ ОБОРОНА', 8: 'ЧАСТЬ II · КОНТРБАТАРЕЙНАЯ БОРЬБА', 16: 'ЧАСТЬ III · ОСТРОВА В ОГНЕ', 24: 'ЧАСТЬ IV · НОЧЬ И ТУМАН', 30: 'ЧАСТЬ V · КОНВОЙ' };
       if (SEC[i]) { const h = document.createElement('div'); h.className = 'm-sec'; h.textContent = SEC[i]; grid.appendChild(h); }
       const locked = i >= game.save.unlocked, st = game.save.stars[i] || 0;
       const el = document.createElement('button');
@@ -118,11 +156,16 @@ export function createShell({ engine, game, stations = [] }) {
     const list = s.targets.map((t) => `<li>${esc(t.name)}${t.armored ? ' — бронирована, нужен ББ' : ''}${t.moving ? ' — движется' : ''}</li>`).join('');
     const stock = Object.keys(SH()).filter((k) => s.shells[k] > 0).map((k) => shellName(k) + ' ' + s.shells[k]).join(', ') || 'нет';
     const cond = [];
-    if (m.night) cond.push('<b>НОЧЬ</b> — разведка даёт только квадрат; подсветите цель осветительным снарядом (ОСВ).');
+    if (m.night) cond.push('<b>НОЧЬ</b> — разведка даёт только квадрат; подсветите цель осветительным снарядом (ОСВ). Порядок: осветите район → пост НАБЛЮДЕНИЕ → поправка по сетке.');
     if (m.weather === 'fog') cond.push('<b>ТУМАН</b> — донесения реже и грубее (до 100 м), корректировка до 50 м.');
     if (m.weather === 'storm') cond.push('<b>ШТОРМ</b> — ветер меняется по ходу боя, пересчитывайте решение после сводки МЕТЕО.');
+    if (m.noSpotter) cond.push('<b>БЕЗ КОРРЕКТИРОВЩИКА</b> — об отклонениях доложит только свой расчёт: наведите трубу поста НАБЛЮДЕНИЕ на цель.');
+    if (m.raids && m.raids.length) cond.push('<b>ВОЗДУХ</b> — возможен налёт авиации: по команде «ВОЗДУХ!» — к посту ЗЕНИТКА.');
+    const fr = s.friends || [];
+    if (m.convoy) cond.push('<b>КОНВОЙ</b> — доведите транспорты до порта или уничтожьте всех охотников. Потеряете весь конвой — задание провалено.');
+    if (fr.length) cond.push('<b>СВОИ В РАЙОНЕ</b> — ' + fr.map((f) => esc(f.name || f.label)).join(', ') + '. Разрыв ближе 250 м от своего корабля — попадание по своим, минус звезда за каждый потопленный.');
     if (m.survival) cond.push('<b>ОБОРОНА</b> — волна за волной. За отбитую волну: +25% прочности и снаряды. Прорыв цели: −25%.');
-    return `<h2>${m.index != null ? 'ЗАДАНИЕ ' + (m.index + 1) + '. ' : ''}${esc(m.name.toUpperCase())}</h2><p>${esc(m.brief || '')}</p>` +
+    return `<h2>${m.index != null ? 'ЗАДАНИЕ ' + (m.index + 1) + '. ' : m.daily && m.title ? esc(m.title) + '. ' : ''}${esc(m.name.toUpperCase())}</h2><p>${esc(m.brief || '')}</p>` +
       (cond.length ? `<h3>УСЛОВИЯ</h3><ul>${cond.map((c) => `<li>${c}</li>`).join('')}</ul>` : '') +
       `<h3>${m.survival ? 'ПЕРВАЯ ВОЛНА' : 'ЦЕЛИ'}</h3><ul>${list}</ul><p class="dim">Боезапас: ${stock}. Ветер: ${windText(m.wind)}. Сложность: ${game.difficulties[s.difficulty]}. Звание расчёта: ${getRank().name.toLowerCase()}.</p>`;
   }
@@ -141,11 +184,28 @@ export function createShell({ engine, game, stations = [] }) {
       { text: 'ПРОДОЛЖИТЬ', primary: true, fn: resume },
       { text: 'ЗАДАЧА', fn: () => dialog(briefingHtml(), [{ text: 'ЗАКРЫТЬ', primary: true, fn: showPauseAgain }], showPauseAgain) },
       { text: 'КАК ИГРАТЬ', fn: () => dialog(HOWTO, [{ text: 'ЗАКРЫТЬ', primary: true, fn: showPauseAgain }], showPauseAgain) },
-      { text: 'В МЕНЮ', ghost: true, fn: () => { game.pause(false); game.quit(); } },
+      { text: 'НАСТРОЙКИ', fn: () => settingsUi.open(showPauseAgain) },
+      { text: 'ВЫЙТИ С СОХРАНЕНИЕМ', fn: () => { game.pause(false); game.suspend(); game.quit({ keep: true }); } },
+      { text: 'ВЫЙТИ БЕЗ СОХРАНЕНИЯ', ghost: true, fn: () => { game.pause(false); game.quit(); } },
     ], resume);
   }
   function showPauseAgain() { game.pause(false); showPause(); }
   let lastEnd = null;
+  const friendState = (f) => (f.arrived ? 'дошёл до порта' : !f.alive ? 'потоплен' : f.hp < f.maxHp ? 'повреждён, на плаву' : 'цел');
+  /** Строки итогов: конвой, огонь по своим, налёты. */
+  function forcesRows(st) {
+    const m = s.mission || {}, bad = (k, v) => `<tr><td>${k}</td><td class="bad">${v}</td></tr>`, row = (k, v) => `<tr><td>${k}</td><td>${v}</td></tr>`;
+    let h = '';
+    if (st.convoyTotal > 0) h += (st.convoyLost > 0 ? bad : row)('Конвой', (st.convoyArrived > 0 ? 'дошло ' + st.convoyArrived + ' из ' + st.convoyTotal : 'цело ' + (st.convoyTotal - (st.convoyLost || 0)) + ' из ' + st.convoyTotal) + (st.convoyLost > 0 ? ', потеряно ' + st.convoyLost : ''));
+    if ((s.friends || []).length || st.friendlyHits > 0) h += (st.friendlyHits > 0 ? bad : row)('Попаданий по своим', st.friendlyHits || 0);
+    if (st.friendlyKills > 0) h += bad('Своих потоплено вашим огнём', st.friendlyKills + ' (−' + st.friendlyKills + ' ★)');
+    if ((m.raids && m.raids.length) || st.planesDown > 0 || st.bombs > 0) h += row('Самолётов сбито', st.planesDown || 0) + (st.bombs > 0 ? bad : row)('Бомб по батарее', st.bombs || 0);
+    return h;
+  }
+  function friendsResultHtml() {
+    const fr = s.friends || [];
+    return fr.length ? `<p class="fr-list" id="resFriends">СВОИ СИЛЫ: ${fr.map((f) => esc(f.name || f.label) + ' — ' + friendState(f)).join('; ')}.</p>` : '';
+  }
   function showResult(e) {
     lastEnd = e;
     const st = e.stats || {}, sv = e.survival, m = s.mission || {};
@@ -154,23 +214,27 @@ export function createShell({ engine, game, stations = [] }) {
     if (sv) {
       html = `<h2>ОБОРОНА ОКОНЧЕНА</h2><p class="bad">${esc(e.reason || '')}</p><table class="stats">` +
         row('Отбито волн', sv.waves) + row('Уничтожено целей', sv.kills) + row('Выстрелов', st.shots != null ? st.shots : s.shots) + row('Время', game.fmt.time(st.time != null ? st.time : s.time)) +
-        (sv.best ? row('Лучший результат', sv.best.waves + ' ' + plural(sv.best.waves, 'волна', 'волны', 'волн') + ', ' + sv.best.kills + ' ' + plural(sv.best.kills, 'цель', 'цели', 'целей')) : '') + '</table>' +
+        forcesRows(st) + (sv.best ? row('Лучший результат', sv.best.waves + ' ' + plural(sv.best.waves, 'волна', 'волны', 'волн') + ', ' + sv.best.kills + ' ' + plural(sv.best.kills, 'цель', 'цели', 'целей')) : '') + '</table>' +
         (sv.isNew && sv.waves > 0 ? `<p class="rec">★ НОВЫЙ РЕКОРД ОБОРОНЫ${sv.previous ? ` (был: ${sv.previous.waves} ${plural(sv.previous.waves, 'волна', 'волны', 'волн')})` : ''}</p>` : '');
     } else {
       html = `<h2>${e.won ? 'ЗАДАНИЕ ВЫПОЛНЕНО' : 'ЗАДАНИЕ ПРОВАЛЕНО'}</h2>` +
         (e.won ? `<div class="stars">${'★'.repeat(e.stars)}<i>${'★'.repeat(3 - e.stars)}</i></div>` : `<p class="bad">${esc(e.reason || '')}</p>`) +
         '<table class="stats">' + row('Выстрелов', st.shots + (st.combatShots != null && st.combatShots !== st.shots ? ` (боевых ${st.combatShots})` : '')) + row('Норматив на «отлично»', st.par) +
-        row('Уничтожено целей', st.destroyed + ' / ' + st.total) + row('Прочность батареи', st.integrity + '%') + row('Время', game.fmt.time(st.time)) + '</table>' +
+        row('Уничтожено целей', st.destroyed + ' / ' + st.total) + row('Прочность батареи', st.integrity + '%') + row('Время', game.fmt.time(st.time)) + forcesRows(st) + '</table>' +
         (e.record ? (e.record.isNew ? `<p class="rec">★ НОВЫЙ РЕКОРД ЗАДАНИЯ${e.record.previous ? ` (был: ${e.record.previous.shots} выстр., ${game.fmt.time(e.record.previous.time)})` : ''}</p>`
           : `<p class="dim">Рекорд задания: ${e.record.best.shots} выстр., ${game.fmt.time(e.record.best.time)}, ★${e.record.best.stars}</p>`) : '');
     }
+    html += friendsResultHtml();
+    html += dailyResultHtml(e.daily);
     // опыт и звание расчёта
     const rk = e.rank || getRank();
     if (e.rankUp) html += `<div class="rankup">НОВОЕ ЗВАНИЕ: ${esc(rk.name)}</div>`;
     html += `<div class="xp"><div class="rank-l"><span>ОПЫТ +${e.xpGained || 0} · ${esc(rk.name)}</span><span>${rk.next != null ? rk.xp + ' / ' + rk.next : rk.xp}</span></div><div class="rank-bar"><i style="width:${rankPct(rk)}%"></i></div></div>`;
+    if (e.points > 0) html += `<p class="dim pts">Очков снабжения: ${e.points} — улучшения башни в меню, «СНАБЖЕНИЕ».</p>`;
     const idx = m.index, btns = [];
     if (e.won && idx != null && idx + 1 < game.campaign.length) btns.push({ text: 'СЛЕДУЮЩЕЕ', primary: true, fn: () => game.startMission(idx + 1) });
     if (m.survival) btns.push({ text: 'ЕЩЁ РАЗ', primary: !btns.length, fn: () => game.startSurvival() });
+    else if (m.daily) btns.push({ text: 'ЕЩЁ РАЗ', primary: !btns.length, fn: () => game.startDaily(m.daily) });
     else if (m.skirmish || idx == null) btns.push({ text: 'НОВЫЙ БОЙ', primary: !btns.length, fn: () => game.startSkirmish() });
     else btns.push({ text: 'ПОВТОРИТЬ', primary: !btns.length, fn: () => game.startMission(idx) });
     btns.push({ text: 'РАЗБОР БОЯ', fn: showDebrief });
@@ -180,7 +244,12 @@ export function createShell({ engine, game, stations = [] }) {
 
   // ---------- разбор боя ----------
   const debrief = createDebrief({ game, canvas: $('dbfCanvas'), table: $('dbfTable'), legend: $('dbfLegend'), zoomBtn: $('dbfZoom') });
-  function showDebrief() { if (!lastEnd) return; show('debrief'); debrief.open(lastEnd, s); }
+  function showDebrief() {
+    if (!lastEnd) return;
+    sampleFriends(true);
+    (s.impacts || []).forEach((i) => { if (i.observed) blog.observed[i.n] = true; });
+    show('debrief'); debrief.open(lastEnd, s, blog);
+  }
   function closeDebrief() { if (lastEnd && (s.phase === 'won' || s.phase === 'lost')) showResult(lastEnd); else showMenu(); }
 
   // ---------- HUD ----------
@@ -188,7 +257,7 @@ export function createShell({ engine, game, stations = [] }) {
   STATIONS.forEach((st, i) => {
     const b = document.createElement('button');
     b.dataset.station = st.id;
-    b.innerHTML = `<span class="n">${i + 1}</span><span>${st.title}</span>`;
+    b.innerHTML = `<span class="n">${i + 1}</span><span>${st.short || st.title}</span>`;
     nav.appendChild(b);
   });
   function goto(id) { if (engine.current !== id) { sfx('tick'); engine.gotoStation(id); } dirty = true; }
@@ -200,9 +269,54 @@ export function createShell({ engine, game, stations = [] }) {
   const ang = (a, b) => { let d = ((a - b) % 360 + 360) % 360; if (d > 180) d -= 360; return d; };
   const loadingStation = stations.find((x) => x && x.id === 'loading');
   /** Следующий шаг процедуры: пост, текст подсказки и орган управления для подсветки. */
+  const hasHot = (stId, name) => { const st = stations.find((x) => x && x.id === stId); return !!(st && st.hotspots && st.hotspots[name]); };
+  /** Первый существующий орган управления из списка (посты дописываются — имён может не быть). */
+  const pickHot = (stId, ...names) => names.find((n) => hasHot(stId, n)) || null;
+  const visible = (id) => { try { return !!game.visible(id); } catch (e) { return false; } };
+  const brgTo = (x, y) => { const bat = s.mission.battery; return ((Math.atan2(x - bat.x, y - bat.y) * 180 / Math.PI) + 360) % 360; };
+  /** Свои рядом с точкой прицеливания (замер и/или решение вычислителя): ближе 0.4 км. */
+  function friendsInZone() {
+    const fr = (s.friends || []).filter((f) => f.alive && !f.arrived && !f.sunk);
+    if (!fr.length || !s.activeTarget || !s.mission) return [];
+    const rec = s.plot.recorded[s.activeTarget], cp = s.computer, bat = s.mission.battery, R = Math.PI / 180, pts = [];
+    const pt = (brg, rng) => pts.push({ x: bat.x + rng * Math.sin(brg * R), y: bat.y + rng * Math.cos(brg * R) });
+    if (rec) { pt(rec.bearing, rec.range); if (cp.elevation != null && !cp.stale) pt(rec.bearing, cp.range); }
+    if (cp.elevation != null && s.checklist.loaded) pt(s.turret.bearing - (cp.windBearing || 0), cp.range);
+    return fr.filter((f) => pts.some((p) => Math.hypot(p.x - f.x, p.y - f.y) < 0.4));
+  }
+  /** Подсказка зенитного поста, пока идёт налёт (null — налёта нет или стрелять нечем). */
+  function raidStep() {
+    const rd = s.raid, aa = s.aa;
+    if (!rd || !aa || rd.phase !== 'inbound') return null;
+    const live = (rd.planes || []).filter((p) => p.alive && !p.attacked);
+    if (!live.length || aa.ammo <= 0) return null;
+    if (aa.jammed) return { st: 'aa', text: 'ЗЕНИТКА: клин — ствол перегрет! Отпустите гашетку, автомат остынет' };
+    const R = Math.PI / 180, cone = (game.C && game.C.AA_CONE) || 2.2;
+    const sep = (p) => Math.acos(Math.max(-1, Math.min(1, Math.sin(p.elevation * R) * Math.sin(aa.elevation * R) + Math.cos(p.elevation * R) * Math.cos(aa.elevation * R) * Math.cos((p.bearing - aa.bearing) * R)))) / R;
+    if (live.some((p) => sep(p) < cone)) return { st: 'aa', hot: pickHot('aa', 'aaFire', 'aaTrigger'), text: 'ЗЕНИТКА: самолёт в кольце — давите гашетку «ОГОНЬ»!' };
+    return { st: 'aa', hot: pickHot('aa', 'aaPad'), text: 'ВОЗДУХ! ЗЕНИТКА: ведите прицел пальцем — самолёт в кольцо, вторым пальцем давите гашетку' };
+  }
+  /** Снаряд в полёте: когда корректировщик не поможет, а цель видна в оптику — к трубе. */
+  function observeStep() {
+    const m = s.mission, lr = s.lastReport, at = s.targets.find((t) => t.id === s.activeTarget);
+    if (!s.flight.some((f) => f.shell !== 'illum' && f.shell !== 'smoke')) {
+      if (m.night && s.flight.some((f) => f.shell === 'illum')) return { st: null, text: 'Осветительный в полёте. Дальше: пост НАБЛЮДЕНИЕ — в свете цель и разрывы видны в трубу, поправка по сетке' };
+      return null;
+    }
+    if (!at || !at.alive || !(m.noSpotter || m.night || (lr && (lr.blind || lr.dark))) || !visible(at.id)) return null;
+    const off = Math.abs(ang(s.scope.bearing, brgTo(at.x, at.y)));
+    let fov = 16; try { fov = game.scopeFov(); } catch (e) { /* старая логика */ }
+    if (off > fov * 0.4) {
+      const btn = pickHot('observe', 'toTargetButton');
+      return { st: 'observe', hot: btn || pickHot('observe', 'scopeWheel'), text: 'НАБЛЮДЕНИЕ: наведите трубу на цель' + (btn ? ' (кнопка «НА ЦЕЛЬ» или маховик)' : ' маховиком') + ' — расчёт доложит, куда лёг снаряд' };
+    }
+    return { st: 'observe', text: 'НАБЛЮДЕНИЕ: труба на цели — ждите разрыва и снимите поправку по сетке' };
+  }
   function nextStep() {
     const c = s.checklist, b = s.breech, cp = s.computer;
-    if (s.flight.length && !b.shell && !b.open && !(b.busy && b.busy.kind === 'auto')) return { st: null, text: 'Снаряд в полёте — следите за картой на ПЛАНШЕТЕ и ждите доклада' };
+    const air = raidStep();
+    if (air) return air;
+    if (s.flight.length && !b.shell && !b.open && !(b.busy && b.busy.kind === 'auto')) return observeStep() || { st: null, text: 'Снаряд в полёте — следите за картой на ПЛАНШЕТЕ и ждите доклада' };
     if (b.busy && b.busy.kind === 'auto') return { st: null, text: 'Очередь: расчёт перезаряжает орудие' };
     if (!s.activeTarget) {
       if (s.mission.survival && !s.targets.some((t) => t.alive)) return { st: null, text: 'Волна отбита — ждите следующую' };
@@ -257,7 +371,8 @@ export function createShell({ engine, game, stations = [] }) {
     }
     if (!c.elevated) return { st: 'elevation', hot: 'elevWheel', text: 'ПОДЪЁМ: поднимите ствол маховиком на ' + cp.elevation.toFixed(2) + '°' };
     if (!c.armed) return { st: 'fire', hot: 'armCover', text: 'ОГОНЬ: откройте красную крышку и взведите цепь стрельбы' };
-    return { st: 'fire', hot: 'fireLever', text: b.shell === 'illum' ? 'ОГОНЬ: осветительный в стволе — потяните спуск вниз!' : blind && needIllum ? 'ОГОНЬ: цель не освещена — лучше сначала осветительный. Спуск — вниз' : 'ОГОНЬ: потяните спуск вниз!' };
+    if (friendsInZone().length && b.shell !== 'illum' && b.shell !== 'smoke') return { st: 'fire', hot: 'fireLever', warn: true, text: 'ОГОНЬ: СВОИ В ЗОНЕ ПОРАЖЕНИЯ! Проверьте замер на ПЛАНШЕТЕ — или стреляйте на свой риск' };
+    return { st: 'fire', hot: 'fireLever', text: b.shell === 'illum' ? 'ОГОНЬ: осветительный в стволе — спуск вниз! Затем пост НАБЛЮДЕНИЕ → поправка по сетке' : blind && needIllum ? 'ОГОНЬ: цель не освещена — лучше сначала осветительный. Спуск — вниз' : 'ОГОНЬ: потяните спуск вниз!' };
   }
 
   // ---------- подсветка органа управления ----------
@@ -281,7 +396,44 @@ export function createShell({ engine, game, stations = [] }) {
     hl.style.left = (sc.x - 32) + 'px'; hl.style.top = (sc.y - 32) + 'px';
   }
 
-  const shellSeen = {}; let shKey = '', wxKey = '', windChangedAt = -1e9;
+  const shellSeen = {}; let shKey = '', wxKey = '', windChangedAt = -1e9, obKey = '', forcesKey = '', raidOn = false;
+  const DEV = (v, plus, minus) => (v > 0 ? plus : minus) + ' ' + Math.abs(Math.round(v)) + ' м';
+  /** Коротко: что доложил корректировщик (state.lastReport). */
+  function spotterBrief() {
+    const lr = s.lastReport;
+    if (s.reportDue != null) return 'доклад в пути…';
+    if (!lr || lr.special) return '';
+    if (lr.blind) return 'нет — только свой глаз';
+    if (lr.dark) return 'не видит (темно)';
+    if (!lr.observed) return 'разрыв не наблюдал';
+    const p = []; if (lr.over) p.push(DEV(lr.over, 'перелёт', 'недолёт')); if (lr.right) p.push(DEV(lr.right, 'вправо', 'влево'));
+    return (lr.bracket ? 'вилка · ' : '') + (p.join(', ') || 'в цель');
+  }
+  /** Коротко: что видел свой наблюдатель в трубу (state.scope.last). */
+  function scopeBrief() {
+    const o = s.scope && s.scope.last; if (!o) return '';
+    if (o.targetId == null || o.dBearing == null) return '№ ' + o.n + ': целей рядом не видно';
+    const d = Math.abs(o.dBearing).toFixed(1).replace('.', ',');
+    return '№ ' + o.n + ' · Ц' + o.targetId + ': ' + (o.over === 0 ? 'попадание' : (Math.abs(o.dBearing) < 0.05 ? 'по направлению верно' : (o.dBearing > 0 ? 'правее ' : 'левее ') + d + '°') + ', ' + (o.over > 0 ? 'перелёт' : 'недолёт'));
+  }
+  function reportBrief() {
+    const a = spotterBrief(), b = scopeBrief();
+    return (a ? '<b>КОРР.</b> ' + esc(a) : '') + (a && b ? ' &nbsp;·&nbsp; ' : '') + (b ? '<b>ТРУБА</b> ' + esc(b) : '');
+  }
+  /** Тревога, свои в зоне поражения, конвой. */
+  function renderForces() {
+    raidOn = s.phase === 'playing' && (!!(s.raid && s.raid.phase === 'inbound') || s.time < raidUntil);
+    const zone = friendsInZone(), conv = (s.friends || []).filter((f) => f.convoy);
+    const key = (raidOn ? 1 : 0) + (engine.current === 'aa' ? 'a' : '') + '|' + zone.map((f) => f.id).join() + '|' + conv.map((f) => f.hp + (f.alive ? 'a' : 'x') + (f.arrived ? 'h' : '')).join();
+    if (key === forcesKey) return;
+    forcesKey = key;
+    $('hud').classList.toggle('raid', raidOn && engine.current !== 'aa');
+    $('raidBanner').classList.toggle('hidden', !raidOn || engine.current === 'aa');
+    const fw = $('ffWarn'); fw.classList.toggle('hidden', !zone.length);
+    if (zone.length) fw.textContent = '⚠ СВОИ В ЗОНЕ ПОРАЖЕНИЯ · ' + zone.map((f) => f.label).join(', ');
+    const cc = $('convoyChip'); cc.classList.toggle('hidden', !conv.length);
+    if (conv.length) cc.innerHTML = '<span>КОНВОЙ</span>' + conv.map((f) => `<i class="${!f.alive ? 'lost' : f.arrived ? 'home' : f.hp < f.maxHp ? 'dmg' : ''}"></i>`).join('');
+  }
   function renderHud() {
     // пост — в атрибуте HUD: на посту ОГОНЬ строка радио уходит влево, чтобы не закрывать смотровую щель
     const hudEl = $('hud'); if (hudEl.dataset.st !== engine.current) hudEl.dataset.st = engine.current || '';
@@ -310,16 +462,20 @@ export function createShell({ engine, game, stations = [] }) {
     const fr = s.fire || {};
     if (fr.salvo || fr.burst > 1) parts.push((fr.salvo ? '<b>ВИЛКА</b> ±150 м' : '') + (fr.salvo && fr.burst > 1 ? ' ' : '') + (fr.burst > 1 ? `<b>ОЧЕРЕДЬ</b> ${fr.burstLeft > 0 ? fr.burstLeft + '/' : ''}${fr.burst}` : ''));
     $('memo').innerHTML = parts.join(' &nbsp;·&nbsp; ') || '<b>ЗАМЕРОВ НЕТ</b>';
+    const ob = reportBrief(); if (ob !== obKey) { obKey = ob; $('obs').innerHTML = ob; }
+    renderForces();
+    crewUi.render();
 
     const step = nextStep(), hints = s.mission && (s.mission.tutorial || s.difficulty === 0);
-    $('hint').textContent = hints ? step.text : '';
+    $('hint').textContent = hints ? step.text : ''; $('hint').classList.toggle('warn', !!(hints && step.warn));
     hlStep = hints ? step : null;
     renderFaults();
     nav.querySelectorAll('button').forEach((b, i) => {
       const st = STATIONS[i];
       b.classList.toggle('on', engine.current === st.id);
-      b.classList.toggle('done', !!s.checklist[st.check]);
+      b.classList.toggle('done', !!(st.check && s.checklist[st.check]));
       b.classList.toggle('next', hints && step.st === st.id);
+      b.classList.toggle('alarm', st.id === 'aa' && raidOn && engine.current !== 'aa');
     });
     const fc = $('flightChip');
     if (s.flight.length) { const rem = Math.min(...s.flight.map((f) => f.tof - f.t)); fc.innerHTML = 'СНАРЯД В ПОЛЁТЕ <b>' + Math.max(0, rem).toFixed(0) + ' с</b>' + (engine.current !== 'plot' ? ' · НА КАРТЕ ▸' : ''); fc.classList.remove('hidden'); }
@@ -342,6 +498,8 @@ export function createShell({ engine, game, stations = [] }) {
       el.onclick = () => { sfx('tick'); game.repair(k); };
       box.appendChild(el);
     });
+    $('hud').classList.toggle('hasfaults', box.children.length > 0);
+    $('hud').style.setProperty('--fn', String(Math.max(1, box.children.length)));
   }
 
   const smoked = (id) => { try { return !!(s.smokes && s.smokes.length && game.smoked(id)); } catch (e) { return false; } };
@@ -377,6 +535,24 @@ export function createShell({ engine, game, stations = [] }) {
       ((s.lights || []).length ? kv('Осветительные горят', s.lights.map((l) => Math.max(0, Math.round(l.until - s.time)) + ' с').join(', ')) : '') +
       ((s.smokes || []).length ? kv('Дымовая завеса', s.smokes.map((l) => game.fmt.brg(l.bearing) + ' · ' + Math.max(0, Math.round(l.until - s.time)) + ' с').join(', ')) : '') +
       kv('Расчёт', getRank().name.toLowerCase());
+    // свои силы — известны точно
+    const fr = s.friends || [];
+    $('nbFriends').innerHTML = fr.length ? '<h3>СВОИ СИЛЫ</h3>' + fr.map((f) => `<div class="nb-f${f.alive ? '' : ' dead'}"><b>${f.label}</b> — ${esc(f.name)}` +
+      (f.convoy ? '<span class="tag">КОНВОЙ</span>' : '') + (f.arrived ? '<span class="tag">ДОШЁЛ</span>' : !f.alive ? '<span class="tag bad">ПОТОПЛЕН</span>' : f.hp < f.maxHp ? '<span class="tag bad">ПОВРЕЖДЁН</span>' : '') +
+      (f.alive ? `<span class="co">X ${game.fmt.km(f.x)}  Y ${game.fmt.km(f.y)}${f.speed > 0 ? `  курс ${String(Math.round(f.heading)).padStart(3, '0')}°  ${Math.round(f.speed)} км/ч` : f.arrived ? '' : '  стоит'}  прочность ${f.hp}/${f.maxHp}</span>` : '') + '</div>').join('') : '';
+    const rep = (k, v) => `<div class="nb-rep"><b>${k}</b>${esc(v)}</div>`, lr = s.lastReport;
+    $('nbObs').innerHTML = rep('КОРРЕКТИРОВЩИК', s.reportDue != null ? 'доклад в пути…' : lr && lr.text ? lr.text : spotterBrief() || 'докладов пока нет') +
+      rep('СВОЙ ГЛАЗ (ТРУБА)', scopeBrief() || 'разрывов в трубу не наблюдали — наведите пост НАБЛЮДЕНИЕ на цель') +
+      (s.mission.night ? '<div class="nb-rep">Ночью: осветите район → пост НАБЛЮДЕНИЕ → поправка по сетке.</div>' : '');
+    const cr = s.crew || {};
+    $('nbCrew').innerHTML = ['gunner', 'loader', 'radio'].filter((r) => cr[r]).map((r) => { const m = cr[r]; return `<div class="nb-kv"><span>${m.title[0] + m.title.slice(1).toLowerCase()} ${esc(m.name)}</span><b class="${m.state}">${crewStateText(m)}${m.state === 'wounded' ? ' ' + Math.max(0, Math.ceil(m.woundedUntil - s.time)) + ' с' : ''} · усталость ${Math.round(m.fatigue * 100)}%</b></div>`; }).join('') +
+      kv('Аптечки', s.medkits != null ? s.medkits : '—');
+    const aa = s.aa, pl = s.raid ? (s.raid.planes || []).filter((p) => p.alive && !p.attacked).length : 0;
+    $('nbAA').innerHTML = aa ? kv('Патроны', aa.ammo + ' / ' + ((game.C && game.C.AA_AMMO) || 400)) + kv('Нагрев ствола', Math.round(aa.heat * 100) + '%' + (aa.jammed ? ' — КЛИН' : '')) +
+      kv('Воздух', s.raid && s.raid.phase === 'inbound' ? 'НАЛЁТ: в воздухе ' + pl : s.mission.night ? 'ночью налётов нет' : 'чисто') +
+      (s.stats ? kv('Сбито / бомб по батарее', (s.stats.planesDown || 0) + ' / ' + (s.stats.bombs || 0)) : '') : '';
+    let ups = []; try { ups = game.upgrades().filter((u) => u.level > 0); } catch (e) { /* старая логика */ }
+    $('nbUp').innerHTML = '<h3>СНАБЖЕНИЕ</h3>' + (ups.length ? ups.map((u) => kv(esc(u.title[0] + u.title.slice(1).toLowerCase()) + ' · ур. ' + u.level, esc(u.effect || ''))).join('') : '<div>Улучшений башни нет — «СНАБЖЕНИЕ» в меню.</div>');
     $('nbRadio').innerHTML = s.radio.slice().reverse().map((m) => `<div class="nb-msg ${m.kind}"><span class="t">${game.fmt.time(m.time)}</span><b>${m.from}</b>${esc(m.text)}</div>`).join('') || '<div>Эфир молчит.</div>';
   }
 
@@ -391,9 +567,9 @@ export function createShell({ engine, game, stations = [] }) {
   game.on('phase', (ph) => {
     if (ph === 'menu') showMenu();
     else if (ph === 'briefing') showBriefing();
-    else if (ph === 'playing') { closeAll(); $('hud').classList.remove('hidden'); unread = 0; lastEnd = null; Object.keys(shellSeen).forEach((k) => delete shellSeen[k]); Object.keys(SH()).forEach((k) => { if (s.shells[k] > 0) shellSeen[k] = true; }); shKey = wxKey = ''; windChangedAt = -1e9; $('radio').className = ''; engine.gotoStation('plot', { instant: true }); sfx('ambient', true); dirty = true; }
+    else if (ph === 'playing') { closeAll(); $('hud').classList.remove('hidden'); unread = 0; lastEnd = null; Object.keys(shellSeen).forEach((k) => delete shellSeen[k]); Object.keys(SH()).forEach((k) => { if (s.shells[k] > 0) shellSeen[k] = true; }); shKey = wxKey = obKey = forcesKey = ''; windChangedAt = -1e9; resetLog(); crewUi.render(true); $('radio').className = ''; engine.gotoStation('plot', { instant: true }); sfx('ambient', true); dirty = true; }
   });
-  game.on('missionEnd', (e) => { sfx('alarm', false); lastEnd = e; setTimeout(() => { if ((s.phase === 'won' || s.phase === 'lost') && lastEnd === e) showResult(e); }, 1400); });
+  game.on('missionEnd', (e) => { sfx('alarm', false); lastEnd = e; raidUntil = -1; sampleFriends(true); forcesKey = ''; renderForces(); nav.querySelectorAll('button.alarm').forEach((b) => b.classList.remove('alarm')); setTimeout(() => { if ((s.phase === 'won' || s.phase === 'lost') && lastEnd === e) showResult(e); }, 1400); });
   game.on('wind', () => { windChangedAt = s.time; dirty = true; });
   game.on('wave', (w) => { if (w && w.cleared) flash('wave'); dirty = true; });
   game.on('radio', (m) => {
@@ -404,24 +580,48 @@ export function createShell({ engine, game, stations = [] }) {
     dirty = true;
   });
   game.on('denied', (d) => { sfx('buzz'); toast(d.reason); });
-  game.on('fired', () => { sfx('fire'); try { engine.shake(0.06, 0.7); } catch (e) { /* нет тряски */ } flash('fire'); if (navigator.vibrate) try { navigator.vibrate(150); } catch (e) { /* нет вибро */ } });
+  game.on('fired', () => { sfx('fire'); try { engine.shake(0.06, 0.7); } catch (e) { /* нет тряски */ } flash('fire'); vibro('shot'); });
   // гром нашего разрыва доходит с задержкой и тем тише, чем дальше
   game.on('impact', (e) => {
+    if (e.observed && blog) blog.observed[e.n] = true;
     const bat = s.mission && s.mission.battery;
     const d = bat ? Math.hypot(e.x - bat.x, e.y - bat.y) : 8;
     setTimeout(() => sfx('thunder', 1.3 - d / 20), Math.min(3500, d * 260) / (s.speed || 1));
   });
+  // налёт: тревога, плашка «НА ЗЕНИТКУ», итог налёта
+  game.on('raid', (e) => {
+    if (e.phase === 'warning') { raidUntil = s.time + (e.eta || 10) + 1; sfx('siren'); vibro('fault'); }
+    else if (e.phase === 'start') { raidUntil = Math.max(raidUntil, s.time + 1); sfx('siren'); }
+    else if (e.phase === 'end') { raidUntil = -1; toast((e.bombed ? 'НАЛЁТ ОКОНЧЕН' : 'НАЛЁТ ОТБИТ') + ': СБИТО ' + (e.shot || 0) + ', ПРОРВАЛОСЬ ' + (e.bombed || 0)); }
+    forcesKey = ''; dirty = true;
+  });
+  game.on('plane', (e) => {
+    if (e.down) toast('САМОЛЁТ СБИТ!');
+    else if (e.bombed && blog) blog.bombs.push({ t: s.time, id: e.id, from: s.raid ? s.raid.from : 0 });
+  });
+  game.on('aa', (e) => { if (e.jammed) { sfx('buzz'); toast('ЗЕНИТКА: КЛИН — СТВОЛ ПЕРЕГРЕТ'); } });
+  game.on('observed', () => { dirty = true; });
+  game.on('report', () => { dirty = true; });
+  // свои силы
+  game.on('friend', (e) => {
+    const f = (s.friends || []).find((x) => x.id === e.id), nm = f ? f.label : 'СВОИ';
+    if (e.sunk) { flash('hit'); toast(e.by === 'own' ? nm + ' ПОТОПЛЕН ВАШИМ ОГНЁМ!' : nm + ' ПОТОПЛЕН ПРОТИВНИКОМ'); }
+    else if (e.hit && e.by === 'own') { vibro('hit'); toast('ОГОНЬ ПО СВОИМ! ПОПАДАНИЕ: ' + nm); }
+    else if (e.hit) toast(nm + ' ПОД ОГНЁМ' + (s.shells.smoke > 0 ? ' — ПРИКРОЙТЕ ДЫМОВЫМ СНАРЯДОМ' : ''));
+    else if (e.arrived) toast(nm + ' ДОШЁЛ ДО ПОРТА');
+    sampleFriends(true); forcesKey = ''; dirty = true;
+  });
   game.on('incoming', (e) => { sfx('whistle', e.eta * 0.92 / (s.speed || 1)); });
-  game.on('fault', (e) => { if (!e.fixed) { sfx('alarm', true); setTimeout(() => sfx('alarm', false), 1600); } faultsKey = ''; });
+  game.on('fault', (e) => { if (!e.fixed) { vibro('fault'); sfx('alarm', true); setTimeout(() => sfx('alarm', false), 1600); } faultsKey = ''; });
   $('flightChip').addEventListener('click', () => { if (s.phase === 'playing') goto('plot'); });
-  game.on('batteryHit', (h) => { sfx(h.damage > 0 ? 'impactNear' : 'impactFar'); if (h.damage > 0) { flash('hit'); try { engine.shake(0.04, 0.5); } catch (e) { /* нет тряски */ } if (navigator.vibrate) try { navigator.vibrate(300); } catch (e) { /* нет вибро */ } toast((h.escape ? 'ЦЕЛЬ ПРОРВАЛАСЬ: −' : 'ПОПАДАНИЕ ПО БАТАРЕЕ: −') + h.damage + '%'); } });
+  game.on('batteryHit', (h) => { sfx(h.damage > 0 ? 'impactNear' : 'impactFar'); if (h.damage > 0) { flash('hit'); try { engine.shake(0.04, 0.5); } catch (e) { /* нет тряски */ } vibro(h.by === 'air' ? 'bomb' : 'hit'); toast((h.escape ? 'ЦЕЛЬ ПРОРВАЛАСЬ: −' : 'ПОПАДАНИЕ ПО БАТАРЕЕ: −') + h.damage + '%'); } });
   engine.on('station', () => { $('hud').dataset.st = engine.current || ''; dirty = true; });
   engine.on('swipe', (dir) => { if (s.phase === 'playing' && !s.paused) neighbor(dir > 0 ? 1 : -1); });
 
   const baseExposure = engine.renderer.toneMappingExposure || 1;
   let flick = 0, nightOn = false;
   engine.onFrame((dt) => {
-    if (s.phase === 'playing') placeHighlight(); else hl.style.display = 'none';
+    if (s.phase === 'playing') { placeHighlight(); sampleFriends(false); } else hl.style.display = 'none';
     // отказ освещения: в башне темно, аварийный свет мигает
     const dark = s.phase === 'playing' && s.faults && s.faults.lights;
     flick = Math.max(0, flick - dt);
@@ -433,7 +633,7 @@ export function createShell({ engine, game, stations = [] }) {
     engine.renderer.toneMappingExposure += (baseExposure * target - engine.renderer.toneMappingExposure) * Math.min(1, dt * (flick > 0 ? 30 : 4));
   });
   engine.onFrame((dt, time) => {
-    if (!dirty && !s.flight.length) return;
+    if (!dirty && !s.flight.length && !s.raid) return;
     const now = time != null ? time * 1000 : performance.now();
     if (now - lastRender < 110 && lastRender <= now) return;
     lastRender = now; dirty = false;
@@ -444,6 +644,11 @@ export function createShell({ engine, game, stations = [] }) {
   const ACT = {
     campaign: showMissions,
     skirmish: () => game.startSkirmish(),
+    daily: () => game.startDaily(todayKey()),
+    upgrades: () => upgradesUi.open(),
+    settings: () => settingsUi.open(showMenu),
+    resume: () => { const r = game.restore(); if (!r || !r.ok) { game.discardResume(); refreshMenu(); } },
+    discardResume: () => { game.discardResume(); refreshMenu(); },
     survival: () => game.startSurvival(),
     debriefZoom: () => debrief.toggleZoom(),
     closeDebrief,
@@ -451,6 +656,7 @@ export function createShell({ engine, game, stations = [] }) {
     news: () => showNews(CHANGELOG, true),
     toMenu: showMenu,
     pause: showPause,
+    toAA: () => { if (s.phase === 'playing') goto('aa'); },
     notebook: () => { unread = 0; renderNotebook(); show('notebook'); dirty = true; },
     closeNotebook: () => { closeAll(); dirty = true; },
     speed: () => { game.setSpeed(s.speed === 1 ? 3 : 1); },
@@ -473,7 +679,7 @@ export function createShell({ engine, game, stations = [] }) {
   window.addEventListener('keydown', (e) => {
     if (s.phase !== 'playing') return;
     if (e.key === 'ArrowRight') neighbor(1); else if (e.key === 'ArrowLeft') neighbor(-1);
-    else if (/^[1-6]$/.test(e.key)) goto(STATIONS[+e.key - 1].id);
+    else if (/^[1-8]$/.test(e.key)) goto(STATIONS[+e.key - 1].id);
   });
 
   // системная кнопка «Назад» и сворачивание приложения (вызываются из MainActivity)
@@ -482,10 +688,16 @@ export function createShell({ engine, game, stations = [] }) {
     if ($('debrief').classList.contains('show')) { closeDebrief(); return true; }
     if ($('dialog').classList.contains('show')) { if (dialogDismiss) dialogDismiss(); return true; }
     if ($('missions').classList.contains('show')) { showMenu(); return true; }
+    if (settingsUi.isOpen()) { settingsUi.close(); return true; }
+    if (upgradesUi.isOpen()) { upgradesUi.close(); return true; }
     if (s.phase === 'playing') { showPause(); return true; }
     return false;
   };
-  window.onAppPause = () => { if (s.phase === 'playing' && !s.paused) showPause(); };
+  // уход в фон: бой сразу записывается (save.resume) — если систему выгрузит игру, меню предложит «ПРОДОЛЖИТЬ БОЙ»
+  const suspend = () => { if (s.phase === 'playing') try { game.suspend(); } catch (e) { /* сохранить не удалось */ } };
+  window.onAppPause = () => { suspend(); if (s.phase === 'playing' && !s.paused) showPause(); };
+  document.addEventListener('visibilitychange', () => { if (document.hidden) suspend(); });
+  window.addEventListener('pagehide', suspend);
 
   // Обновление «по воздуху» (см. MainActivity/Updater): приложение спрашивает, можно ли перезапустить игру сейчас.
   window.onUpdateReady = (version) => {
@@ -517,5 +729,5 @@ export function createShell({ engine, game, stations = [] }) {
   sfx('setMuted', game.save.muted);
   showMenu();
   maybeShowNews();
-  return { showMenu, goto, toast, nextStep, showDebrief, debrief };
+  return { showMenu, goto, toast, nextStep, showDebrief, debrief, settings: settingsUi, upgrades: upgradesUi, vibro, crew: crewUi, friendsInZone };
 }

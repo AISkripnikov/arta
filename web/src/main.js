@@ -1,4 +1,4 @@
-// Точка входа: движок, игра, шесть постов башни и оболочка.
+// Точка входа: движок, игра, восемь постов башни и оболочка.
 import { createEngine } from './engine/index.js';
 import { createGame } from './game/index.js';
 import { createShell } from './ui/shell.js';
@@ -8,6 +8,8 @@ import { createLoadingStation } from './stations/loading.js';
 import { createTraverseStation } from './stations/traverse.js';
 import { createElevationStation } from './stations/elevation.js';
 import { createFireStation } from './stations/fire.js';
+import { createObserveStation } from './stations/observe.js';
+import { createAAStation } from './stations/aa.js';
 
 const storage = {
   get: (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } },
@@ -20,7 +22,8 @@ const storage = {
     const game = createGame({ storage });
     const engine = await createEngine(document.getElementById('stage'), {});
     const ctx = { engine, THREE: engine.THREE, ui: engine.ui, mat: engine.mat, audio: engine.audio, game };
-    const stations = [createPlotStation, createComputerStation, createLoadingStation, createTraverseStation, createElevationStation, createFireStation]
+    const stations = [createPlotStation, createComputerStation, createLoadingStation, createTraverseStation, createElevationStation, createFireStation,
+      createObserveStation, createAAStation]
       .map((make) => make(ctx));
     stations.forEach((st) => engine.addStation(st));
     engine.onFrame((dt) => game.update(dt));

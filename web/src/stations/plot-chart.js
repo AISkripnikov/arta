@@ -282,13 +282,15 @@ function drawRose(ctx, cx, cy, R, label) {
 
 /** Столбцов в атласе фишек: столбец цели = (id − 1) % PIN_COLS, подпись столбца перерисовывается под нужный номер. */
 export const PIN_COLS = 8;
+/** Строк в атласе фишек: 0 — обычная, 1 — выбранная, 2 — поражённая (крест), 3 — тонет/догорает (серая, волны). */
+export const PIN_ROWS = 4;
 const PIN_CELL = 96;
-/** Перерисовать один столбец атласа (3 строки: обычная, выбранная, поражённая) с номером text. */
+/** Перерисовать один столбец атласа (PIN_ROWS строк) с номером text. */
 export function drawPinColumn(canvas, label, c, text) {
   const cell = PIN_CELL, ctx = canvas.getContext('2d');
-  const rows = [['#ece4cc', '#16171a'], ['#f4b63a', '#16171a'], ['#7f858a', '#3a3d40']];
+  const rows = [['#ece4cc', '#16171a'], ['#f4b63a', '#16171a'], ['#7f858a', '#3a3d40'], ['#8d979e', '#2c3238']];
   const size = cell * (text.length > 2 ? 0.3 : text.length > 1 ? 0.4 : 0.5);
-  for (let r = 0; r < 3; r++) {
+  for (let r = 0; r < PIN_ROWS; r++) {
     const x = c * cell, y = r * cell;
     ctx.fillStyle = rows[r][0]; ctx.fillRect(x, y, cell, cell);
     ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = 4;
@@ -301,11 +303,23 @@ export function drawPinColumn(canvas, label, c, text) {
       ctx.moveTo(x + cell * 0.76, y + cell * 0.24); ctx.lineTo(x + cell * 0.24, y + cell * 0.76);
       ctx.stroke();
     }
+    if (r === 3) {
+      // тонет: две волны под номером
+      ctx.strokeStyle = '#1f4f86'; ctx.lineWidth = 6; ctx.lineCap = 'round';
+      for (const wy of [0.74, 0.86]) {
+        ctx.beginPath();
+        for (let i = 0; i <= 12; i++) {
+          const px = x + cell * (0.24 + 0.52 * i / 12), py = y + cell * wy + Math.sin(i / 12 * Math.PI * 3) * cell * 0.035;
+          if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py);
+        }
+        ctx.stroke();
+      }
+    }
   }
 }
-/** Атлас номеров фишек: PIN_COLS столбцов (изначально 1…PIN_COLS) × 3 строки. */
+/** Атлас номеров фишек: PIN_COLS столбцов (изначально 1…PIN_COLS) × PIN_ROWS строк. */
 export function drawPinAtlas(canvas, label) {
-  canvas.width = PIN_CELL * PIN_COLS; canvas.height = PIN_CELL * 3;
+  canvas.width = PIN_CELL * PIN_COLS; canvas.height = PIN_CELL * PIN_ROWS;
   for (let c = 0; c < PIN_COLS; c++) drawPinColumn(canvas, label, c, String(c + 1));
 }
 

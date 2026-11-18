@@ -26,7 +26,7 @@ const fbm = (x, y, seed) => vnoise(x, y, seed) * 0.6 + vnoise(x * 2.3, y * 2.3, 
 // длина корабля (м) и «ширина» по типу
 const SHIPS = {
   barge: [45, 12], transport: [125, 18], destroyer: [115, 11], cruiser: [180, 19], battleship: [240, 32],
-  minelayer: [85, 12], submarine: [75, 7], tanker: [165, 24], landing: [16, 5],
+  minelayer: [85, 12], submarine: [75, 7], tanker: [165, 24], landing: [16, 5], patrol: [38, 7],
 };
 
 /** Box-размытие маски radius×radius (дважды, раздельно по осям) → Float32Array 0…1. */
@@ -68,7 +68,7 @@ export function createPhotos({ THREE, TX, K, kmU, kmV, game }) {
   }
 
   /** Нарисовать снимок разрыва im (из state.impacts). */
-  function render(im, mission) {
+  function render(im, mission, friends) {
     const seed = (mission.mapSeed | 0) + 17;
     const cv = TX.makeCanvas(PX, PX), ctx = cv.getContext('2d');
     const kmPx = PX / SIZE, mPx = kmPx / 1000;          // пикселей на км и на метр
@@ -148,6 +148,26 @@ export function createPhotos({ THREE, TX, K, kmU, kmV, game }) {
 
     // --- цели ---
     for (const t of im.snap || []) drawTarget(ctx, t, px(t.x), py(t.y), big);
+
+    // --- свои корабли в кадре (их место известно всегда) ---
+    for (const f of friends || []) {
+      if (f.sunk || Math.abs(f.x - im.x) > SIZE / 2 + 0.2 || Math.abs(f.y - im.y) > SIZE / 2 + 0.2) continue;
+      const fpx = px(f.x), fpy = py(f.y);
+      drawTarget(ctx, { kind: f.kind === 'transport' ? 'transport' : 'patrol', course: f.heading || 0, alive: f.alive, moving: f.speed > 0 && !f.arrived, damaged: f.burning || f.hp < f.maxHp }, fpx, fpy, big);
+      // пометка дешифровщика: белая рамка-уголки и подпись
+      const r = 0.16 * kmPx;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(250,250,250,0.92)'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+        ctx.moveTo(fpx + a * r, fpy + b * r * 0.5); ctx.lineTo(fpx + a * r, fpy + b * r); ctx.lineTo(fpx + a * r * 0.5, fpy + b * r);
+      }
+      ctx.stroke();
+      ctx.font = '600 15px Oswald, "Arial Narrow", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.strokeText(f.label || 'СВОИ', fpx, fpy - r - 3);
+      ctx.fillStyle = 'rgba(250,250,250,0.95)'; ctx.fillText(f.label || 'СВОИ', fpx, fpy - r - 3);
+      ctx.restore();
+    }
 
     // --- свежий разрыв ---
     if (im.land) crater(ctx, px(im.x), py(im.y), big, true);
@@ -322,8 +342,9 @@ export function createPhotos({ THREE, TX, K, kmU, kmV, game }) {
     ctx.closePath();
   }
 
-  function add(im, mission) {
-    const cv = render(im, mission);
+  function add(im, mission, friends) {
+    const cv = render(im, mission, friends);
+    const seen = (friends || []).filter((f) => !f.sunk && Math.abs(f.x - im.x) <= SIZE / 2 && Math.abs(f.y - im.y) <= SIZE / 2).map((f) => f.id);
     const tex = TX.canvasTexture(cv, { aniso: 4 });
     const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false, color: 0xe6e2d8 });
     const side = (SIZE + 2 * BORDER) * K;
@@ -331,7 +352,7 @@ export function createPhotos({ THREE, TX, K, kmU, kmV, game }) {
     mesh.position.set(kmU(im.x), kmV(im.y), 0.00012 + (im.n % 50) * 0.000002);
     mesh.renderOrder = 0;
     group.add(mesh);
-    photos.set(im.n, { mesh, mat, tex, born: im.time });
+    photos.set(im.n, { mesh, mat, tex, born: im.time, friends: seen });
     // держим только последние KEEP снимков
     if (photos.size > KEEP) {
       const oldest = [...photos.keys()].sort((a, b) => a - b)[0];
@@ -354,7 +375,7 @@ export function createPhotos({ THREE, TX, K, kmU, kmV, game }) {
         // ночью самолёт снимает только то, что освещено
         if (s.mission.night && !(game.lit ? game.lit(im.x, im.y) : false)) { skipped.add(im.n); continue; }
         if (made++ >= 1) break;                      // не больше одного снимка за кадр
-        add(im, s.mission);
+        add(im, s.mission, s.friends);
       }
       for (const p of photos.values()) {
         const a = Math.min(1, Math.max(0, (s.time - p.born - DELAY) / 0.8));
@@ -363,6 +384,8 @@ export function createPhotos({ THREE, TX, K, kmU, kmV, game }) {
     },
     /** Для тестов: номера выстрелов, по которым есть снимок. */
     get shown() { return [...photos.keys()]; },
+    /** Для тестов: id своих кораблей, попавших на снимок выстрела n. */
+    friendsOn(n) { const p = photos.get(n); return p ? p.friends.slice() : []; },
     /** Есть ли проявившийся снимок, накрывающий точку листа (u, v)? */
     covers(u, v) {
       const h = (SIZE / 2 + BORDER) * K;

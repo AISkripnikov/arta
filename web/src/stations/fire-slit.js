@@ -2,6 +2,12 @@
 // дульная вспышка и дым, далёкие разрывы, ночь со звёздами и «люстрами», туман, шторм.
 // Одна плоскость с canvas-текстурой (1 вызов отрисовки, без источников света). Перерисовка — только когда пост
 // на экране: ~6 раз/с ради зыби, чаще — пока идут короткие анимации (вспышка, дым, всплеск) или вращается башня.
+// Корабли, свои и самолёты налёта — настоящие модели из ships.js: отдельная маленькая сцена с ортокамерой в пикселях
+// холста рисуется в свою текстуру (тем же тактом, что и холст) и ложится прозрачным слоем поверх плоскости
+// (+1 вызов отрисовки, и только когда в щели кто-то есть). Общие с трубой наблюдения (observe.js) вещи экспортируются:
+// SKY, createLandProfile, hash, wrap180, clamp.
+import { createFleet, createAirWing } from './ships.js';
+
 const DEG = Math.PI / 180;
 const CW = 640, CH = 100;            // холст
 const FOV = 48;                      // ° по ширине щели
@@ -10,11 +16,11 @@ const HOR = 56;                      // y горизонта на холсте
 const VIEW_HALF = 20;                // ° — разрыв виден, если он в пределах ±20° от пеленга башни
 const NIGHT_SEE = 12;                // км — дальше ночью без света разрыв не виден
 
-const hash = n => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
-const wrap180 = a => ((a + 540) % 360 + 360) % 360 - 180;
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+export const hash = n => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+export const wrap180 = a => ((a + 540) % 360 + 360) % 360 - 180;
+export const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-const SKY = {
+export const SKY = {
   day:        { top: '#6f93b6', low: '#cfdbdf', sea0: '#5b7890', sea1: '#243a4c', land: '#3d4a3f', swell: '236,243,246', haze: null },
   storm:      { top: '#2f3a44', low: '#737d82', sea0: '#3f4d55', sea1: '#161f26', land: '#222a27', swell: '225,232,234', haze: null },
   fog:        { top: '#8d979b', low: '#b3b9b9', sea0: '#8f999b', sea1: '#566267', land: '#6f7876', swell: '225,230,230', haze: 'rgba(170,176,176,0.6)' },
@@ -22,6 +28,43 @@ const SKY = {
   nightStorm: { top: '#030508', low: '#111a24', sea0: '#0b131a', sea1: '#010203', land: '#000101', swell: '110,125,140', haze: null },
   nightFog:   { top: '#0b0e11', low: '#191e22', sea0: '#12171a', sea1: '#06080a', land: '#07090a', swell: '90,100,108', haze: 'rgba(28,33,37,0.6)' },
 };
+
+/** Палитра неба/моря по заданию: день/ночь × ясно/туман/шторм. */
+export function skyFor(mission) {
+  const m = mission || {}, w = m.weather;
+  if (m.night) return w === 'storm' ? SKY.nightStorm : w === 'fog' ? SKY.nightFog : SKY.night;
+  return w === 'storm' ? SKY.storm : w === 'fog' ? SKY.fog : SKY.day;
+}
+
+/**
+ * Профиль берега: () → Float32Array(360) | null — расстояние (км) до ближайшей суши по каждому градусу пеленга
+ * от батареи (0 — суши нет). Считается один раз на карту задания.
+ */
+export function createLandProfile(game) {
+  let landMap = null, landFor = null;
+  const get = () => {
+    const m = game.state.mission;
+    if (!m || !m.battery) return null;
+    if (landFor === m.map && landMap) return landMap;
+    landFor = m.map; landMap = new Float32Array(360);
+    const bx = m.battery.x, by = m.battery.y, max = (game.C && game.C.MAP) || 20;
+    for (let a = 0; a < 360; a++) {
+      const sx = Math.sin(a * DEG), sy = Math.cos(a * DEG);
+      let found = 0;
+      for (let d = 0.5; d <= 22; d += d < 4 ? 0.15 : 0.3) {
+        const x = bx + sx * d, y = by + sy * d;
+        if (x < 0 || y < 0 || x > max || y > max) break;
+        let isL = false;
+        try { isL = game.isLand(x, y); } catch (e) { isL = false; }
+        if (isL) { found = d; break; }
+      }
+      landMap[a] = found;
+    }
+    return landMap;
+  };
+  get.reset = () => { landFor = null; };
+  return get;
+}
 
 /**
  * o: { w, h } — размер плоскости, м.
@@ -42,32 +85,98 @@ export function createSlitView(ctx, o) {
   let dirty = true;
   let muzzle = null;          // { t, twin, drift }
   const splashes = [];        // { b, d, t, kind: 'water'|'land'|'hit'|'puff', dim }
-  let landMap = null, landFor = null;
-  const info = { redraws: 0, mode: 'day', weather: 'clear', night: false, splashes: 0, flares: 0, smokes: 0, muzzle: false, bearing: 0 };
+  const info = { redraws: 0, mode: 'day', weather: 'clear', night: false, splashes: 0, flares: 0, smokes: 0, muzzle: false, bearing: 0, ships: 0, planes: 0 };
 
   const X = b => CW / 2 + wrap180(b - info.bearing) * PPD;
   const seaY = d => HOR + clamp(26 / Math.max(0.3, d), 1, CH - HOR - 4);
 
-  // профиль берега: расстояние до ближайшей суши по каждому градусу пеленга (один раз на задание)
-  function land() {
-    const m = game.state.mission;
-    if (!m || !m.battery) return null;
-    if (landFor === m.map && landMap) return landMap;
-    landFor = m.map; landMap = new Float32Array(360);
-    const bx = m.battery.x, by = m.battery.y, max = (game.C && game.C.MAP) || 20;
-    for (let a = 0; a < 360; a++) {
-      const sx = Math.sin(a * DEG), sy = Math.cos(a * DEG);
-      let found = 0;
-      for (let d = 0.5; d <= 22; d += d < 4 ? 0.15 : 0.3) {
-        const x = bx + sx * d, y = by + sy * d;
-        if (x < 0 || y < 0 || x > max || y > max) break;
-        let isL = false;
-        try { isL = game.isLand(x, y); } catch (e) { isL = false; }
-        if (isL) { found = d; break; }
-      }
-      landMap[a] = found;
+  const land = createLandProfile(game);
+
+  // --- слой моделей (ships.js): корабли, свои, самолёты налёта ---
+  const RW = 960, RH = 150;            // текстура слоя
+  const EX = 2.4;                      // силуэты крупнее натуры (иначе в щели шириной 48° корабль — точка)
+  const F_PX = PPD / DEG;              // px на радиан
+  let layer = null, hot = false, maskN = 0;
+  function makeLayer() {
+    const scene = new THREE.Scene();
+    const cam = new THREE.OrthographicCamera(0, CW, CH, 0, 1, 6000);
+    cam.position.z = 3000;
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x3a444c, 2.6), sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
+    sun.position.set(-0.5, 1, 0.7);
+    scene.add(hemi, sun);
+    const rt = new THREE.WebGLRenderTarget(RW, RH, { depthBuffer: true, samples: 4 });
+    rt.texture.colorSpace = THREE.SRGBColorSpace;
+    const mat = new THREE.MeshBasicMaterial({
+      map: rt.texture, transparent: true, toneMapped: false, depthWrite: false,
+      blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+    });
+    const m = new THREE.Mesh(mesh.geometry, mat);
+    m.name = 'visionSlitShips'; m.position.z = 0.0006; m.renderOrder = 2; m.visible = false;
+    mesh.add(m);
+    layer = {
+      scene, cam, hemi, sun, rt, mat, mesh: m, fleet: createFleet(game, scene), wing: createAirWing(game, scene),
+      masks: [], maskGeo: new THREE.PlaneGeometry(1, 1), maskMat: new THREE.MeshBasicMaterial({ colorWrite: false }),
+      clear: new THREE.Color(),
+    };
+  }
+  // цель/свой → место на холсте (px, y вверх), масштаб, ракурс. false — вне щели.
+  function placeShip(o, g) {
+    const bat = game.state.mission.battery, dxk = o.x - bat.x, dyk = o.y - bat.y;
+    const d = Math.max(0.3, Math.hypot(dxk, dyk)), b = Math.atan2(dxk, dyk) / DEG, dx = wrap180(b - info.bearing);
+    if (Math.abs(dx) > FOV / 2 + 3) return false;
+    const isLand = g.userData.land, x = CW / 2 + dx * PPD;
+    let y = CH - seaY(d);
+    if (isLand) {                                  // постройка на острове: над гребнем нарисованного берега
+      const lm = land(), dl = lm ? lm[((Math.round(b) % 360) + 360) % 360] : 0;
+      y = CH - HOR + (dl > 0 ? clamp(34 / dl, 1.5, HOR - 20) * 0.55 : 1);
     }
-    return landMap;
+    g.position.set(x, y, -d * 100);
+    g.rotation.set(0.08, (isLand ? -90 : 90 - (o.heading - b)) * DEG, 0);
+    g.scale.setScalar(Math.max(F_PX / (d * 1000) * EX, 3.5 / g.userData.size.length));
+    if (o.sinking || o.burning) hot = true;
+    if (o.sinking && !isLand) {                    // вода закрывает уходящий под неё корпус
+      let mk = layer.masks[maskN];
+      if (!mk) { mk = layer.masks[maskN] = new THREE.Mesh(layer.maskGeo, layer.maskMat); mk.renderOrder = -1; layer.scene.add(mk); }
+      maskN++;
+      mk.visible = true; mk.scale.set(260, 200, 1); mk.position.set(x, y - 100, -d * 100 + 90);
+    }
+    return true;
+  }
+  // самолёт: угол места в щели сжат (в натуре щель видит всего ~4° над горизонтом)
+  function placePlane(p, g, down) {
+    const dx = wrap180(p.bearing - info.bearing);
+    if (Math.abs(dx) > FOV / 2 + 2) return false;
+    const y = CH - HOR + p.elevation * 0.45 * PPD * (1 - 0.8 * down);
+    if (y > CH + 6) return false;
+    g.position.set(CW / 2 + dx * PPD, y, -50);
+    g.rotation.set(0.12, (p.attacked ? 90 : -90) * DEG, p.attacked ? 0 : 0.25);
+    g.scale.setScalar(clamp(F_PX / (Math.max(0.4, p.range) * 1000) * EX * 1.6, 1.3, 3.2));
+    hot = true;
+    return true;
+  }
+  function drawLayer() {
+    const s = game.state;
+    if (!layer) {
+      if (!s.mission || !((s.targets && s.targets.length) || (s.friends && s.friends.length) || s.raid)) return;
+      makeLayer();
+    }
+    hot = false; maskN = 0;
+    layer.fleet.sync(0.1, vt, placeShip);
+    layer.wing.sync(0.1, vt, placePlane);
+    for (let i = maskN; i < layer.masks.length; i++) layer.masks[i].visible = false;
+    info.ships = layer.fleet.shown; info.planes = layer.wing.shown;
+    const any = info.ships + info.planes > 0;
+    layer.mesh.visible = any;
+    if (!any) return;
+    const night = info.night, fog = info.weather === 'fog';
+    layer.hemi.intensity = night ? 0.9 : fog ? 2.2 : 2.6;
+    layer.sun.intensity = night ? 0.8 : fog ? 0.6 : 2.2;
+    layer.mat.opacity = fog ? 0.75 : 1;
+    const r = engine.renderer, prev = r.getRenderTarget(), a = r.getClearAlpha();
+    r.getClearColor(layer.clear);
+    r.setRenderTarget(layer.rt); r.setClearColor(0x000000, 0);
+    r.clear(); r.render(layer.scene, layer.cam);
+    r.setRenderTarget(prev); r.setClearColor(layer.clear, a);
   }
 
   function palette() {
@@ -293,6 +402,7 @@ export function createSlitView(ctx, o) {
     info.splashes = splashes.length; info.muzzle = !!muzzle;
     info.redraws++;
     tex.needsUpdate = true;
+    drawLayer();
     dirty = false; last = vt; lastBearing = b0;
   }
 
@@ -328,7 +438,7 @@ export function createSlitView(ctx, o) {
       dirty = true;
       return true;
     },
-    reset() { muzzle = null; splashes.length = 0; dirty = true; landFor = null; },
+    reset() { muzzle = null; splashes.length = 0; dirty = true; land.reset(); if (layer) { layer.fleet.clear(); layer.wing.clear(); layer.mesh.visible = false; } },
     /** here — пост на экране: только тогда холст перерисовывается. */
     update(dt, here) {
       vt += dt;
@@ -336,11 +446,14 @@ export function createSlitView(ctx, o) {
       for (let i = splashes.length - 1; i >= 0; i--) if ((splashes[i].t += dt) > 3.3) { splashes.splice(i, 1); dirty = true; }
       if (!here) { dirty = true; return; }
       const b = game.state.turret ? game.state.turret.bearing : 0;
-      const anim = !!muzzle || splashes.length > 0;
+      const anim = !!muzzle || splashes.length > 0 || hot;
       const gap = vt - last;
       if (last < 0 || (dirty && gap >= 0.03) || (b !== lastBearing && gap >= 0.03) || gap >= (anim ? 0.045 : 0.16)) draw();
     },
-    dispose() { tex.dispose(); material.dispose(); mesh.geometry.dispose(); },
+    dispose() {
+      if (layer) { layer.fleet.clear(); layer.wing.clear(); layer.rt.dispose(); layer.mat.dispose(); layer.maskGeo.dispose(); layer.maskMat.dispose(); layer = null; }
+      tex.dispose(); material.dispose(); mesh.geometry.dispose();
+    },
   };
   return api;
 }

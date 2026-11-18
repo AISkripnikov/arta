@@ -264,5 +264,65 @@ export function createAudio() {
     /** Освободить контекст. */
     dispose() { try { if (ctx) ctx.close(); } catch (e) { /* тихо */ } ctx = null; servoNode = alarmNode = ambientNode = null; },
   };
+  // ----- зенитный пост (добавлено постом «ЗЕНИТКА»; всё ниже — только новые функции) -----
+  let droneNode = null;
+  /** Один выстрел зенитного автомата (вызывать ~8 раз/с, пока идёт очередь). */
+  api.aaBurst = safe(() => {
+    if (!limited('aaBurst', 0.07)) return;
+    const t = now();
+    noise(t, 0.07, { type: 'bandpass', f: 1500, f2: 420, q: 0.7, gain: 0.34, attack: 0.001 });
+    tone(t, 0.06, { type: 'square', f: 170, f2: 70, gain: 0.16, attack: 0.001 });
+  });
+  /** Гул самолётов: level 0..1 (0 — затихает). Вызывать при изменении или каждый кадр. */
+  api.planeDrone = function (level) {
+    try {
+      level = Math.max(0, Math.min(1, +level || 0));
+      if (!ctx) return;
+      if (level > 0 && !droneNode) {
+        const o1 = ctx.createOscillator(), o2 = ctx.createOscillator(), lfo = ctx.createOscillator(), lg = ctx.createGain();
+        const f = ctx.createBiquadFilter(), g = ctx.createGain();
+        o1.type = 'sawtooth'; o1.frequency.value = 92; o2.type = 'sawtooth'; o2.frequency.value = 97.5;
+        lfo.frequency.value = 11; lg.gain.value = 5; lfo.connect(lg); lg.connect(o1.frequency);
+        f.type = 'lowpass'; f.frequency.value = 380; f.Q.value = 1.4; g.gain.value = 0;
+        o1.connect(f); o2.connect(f); f.connect(g); g.connect(master);
+        o1.start(); o2.start(); lfo.start();
+        droneNode = { o1, o2, lfo, f, gain: g.gain };
+      }
+      if (!droneNode) return;
+      const t = ctx.currentTime;
+      droneNode.gain.setTargetAtTime(0.012 + 0.11 * level * level, t, 0.25);
+      droneNode.f.frequency.setTargetAtTime(300 + 900 * level, t, 0.3);
+      droneNode.o1.frequency.setTargetAtTime(88 + 40 * level, t, 0.4);
+      droneNode.o2.frequency.setTargetAtTime(93 + 43 * level, t, 0.4);
+      if (level <= 0) {
+        const d = droneNode; droneNode = null;
+        d.gain.setTargetAtTime(0, t, 0.3);
+        d.o1.stop(t + 1.6); d.o2.stop(t + 1.6); d.lfo.stop(t + 1.6);
+      }
+    } catch (e) { /* тихо */ }
+  };
+  /** Близкий разрыв авиабомбы. */
+  api.bombHit = safe(() => {
+    if (!limited('bombHit', 0.25)) return;
+    const t = now();
+    tone(t, 0.28, { type: 'sawtooth', f: 1500, f2: 380, gain: 0.07, attack: 0.02 });       // свист
+    noise(t + 0.22, 1.3, { type: 'lowpass', f: 900, f2: 60, gain: 0.7, attack: 0.004 });
+    tone(t + 0.22, 0.9, { f: 74, f2: 26, gain: 0.55, attack: 0.004 });
+    noise(t + 0.5, 1.8, { type: 'bandpass', f: 500, f2: 120, q: 0.6, gain: 0.12, attack: 0.3 });
+  });
+  /** Сирена воздушной тревоги: три завывания (~4 с). */
+  api.siren = safe(() => {
+    if (!limited('siren', 5)) return;
+    const t = now();
+    for (let i = 0; i < 3; i++) {
+      const o = ctx.createOscillator(), g = ctx.createGain(), f = ctx.createBiquadFilter(), t0 = t + i * 1.35;
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(300, t0); o.frequency.linearRampToValueAtTime(640, t0 + 0.6); o.frequency.linearRampToValueAtTime(330, t0 + 1.3);
+      f.type = 'bandpass'; f.frequency.value = 800; f.Q.value = 0.8;
+      g.gain.setValueAtTime(0.0001, t0); g.gain.linearRampToValueAtTime(0.11, t0 + 0.25); g.gain.linearRampToValueAtTime(0.0001, t0 + 1.33);
+      o.connect(f); f.connect(g); g.connect(master);
+      o.start(t0); o.stop(t0 + 1.4);
+    }
+  });
   return api;
 }

@@ -1,6 +1,7 @@
 // engine.input — касания и мышь (DESIGN §5.1).
 //  * луч бросается только по интерактивным объектам ТЕКУЩЕГО поста (и «глобальным», вне постов);
-//  * один активный указатель: второй палец игнорируется и не ломает перетаскивание;
+//  * один активный указатель: второй палец игнорируется и не ломает перетаскивание — кроме пары, где один из двух
+//    органов объявлен { multi: true } (гашетка зенитки: один палец ведёт прицел, второй давит огонь);
 //  * касание (tap) = отпускание без заметного сдвига; свайп по пустому месту → событие 'swipe'.
 import * as THREE from 'three';
 
@@ -13,6 +14,7 @@ export function createInput(engine, canvas) {
   const ndc = new THREE.Vector2();
   const _v = new THREE.Vector3();
   let active = null;                           // { id, item, startX, startY, lastX, lastY, t0, maxDist, type }
+  let second = null;                           // второй палец на другом органе (см. opts.multi) — та же запись
   let hoverItem = null;
 
   canvas.style.touchAction = 'none';
@@ -59,8 +61,7 @@ export function createInput(engine, canvas) {
     return best;
   }
 
-  function makeEvent(ev, p, withPoint) {
-    const a = active;
+  function makeEvent(ev, p, withPoint, a = active) {
     const e = {
       x: p.x, y: p.y,
       dx: a ? p.x - a.lastX : 0, dy: a ? p.y - a.lastY : 0,
@@ -88,7 +89,7 @@ export function createInput(engine, canvas) {
   }
 
   function onDown(ev) {
-    if (active) return;                                  // второй палец не мешает первому
+    if (active) { secondDown(ev); return; }              // второй палец не мешает первому
     if (ev.pointerType === 'mouse' && ev.button !== 0) return;
     const p = local(ev);
     setRay(p.x, p.y, p.w, p.h);
@@ -107,8 +108,35 @@ export function createInput(engine, canvas) {
     }
   }
 
+  // второй палец: принимается, только если попал в ДРУГОЙ орган и хотя бы один из двух органов — multi
+  function secondDown(ev) {
+    if (second || ev.pointerId === active.id || ev.pointerType === 'mouse' || !api.enabled || engine.flying) return;
+    const p = local(ev);
+    setRay(p.x, p.y, p.w, p.h);
+    const found = pick();
+    if (!found || found.item === active.item || !(found.item.multi || (active.item && active.item.multi))) return;
+    second = {
+      id: ev.pointerId, item: found.item, type: ev.pointerType || 'touch',
+      startX: p.x, startY: p.y, lastX: p.x, lastY: p.y, t0: performance.now(), maxDist: 0, dragging: false,
+    };
+    try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* не критично */ }
+    if (ev.cancelable) ev.preventDefault();
+    const e = makeEvent(ev, p, false, second);
+    e.point = found.hit.point.clone();
+    call(found.item, 'onDown', e);
+  }
+  function track(a, ev, p) {
+    setRay(p.x, p.y, p.w, p.h);
+    const dist = Math.hypot(p.x - a.startX, p.y - a.startY);
+    if (dist > a.maxDist) a.maxDist = dist;
+    if (!a.dragging && dist > (a.type === 'mouse' ? TAP_SLOP_MOUSE : TAP_SLOP_TOUCH)) a.dragging = true;
+    if (a.item) call(a.item, 'onDrag', makeEvent(ev, p, true, a));
+    a.lastX = p.x; a.lastY = p.y;
+  }
+
   function onMove(ev) {
     const p = local(ev);
+    if (second && ev.pointerId === second.id) { track(second, ev, p); return; }
     if (!active) {
       if (ev.pointerType === 'mouse' && api.enabled) {     // курсор-подсказка на ПК
         setRay(p.x, p.y, p.w, p.h);
@@ -119,27 +147,24 @@ export function createInput(engine, canvas) {
       return;
     }
     if (ev.pointerId !== active.id) return;
-    setRay(p.x, p.y, p.w, p.h);
-    const dist = Math.hypot(p.x - active.startX, p.y - active.startY);
-    if (dist > active.maxDist) active.maxDist = dist;
-    if (!active.dragging && dist > (active.type === 'mouse' ? TAP_SLOP_MOUSE : TAP_SLOP_TOUCH)) active.dragging = true;
-    if (active.item) call(active.item, 'onDrag', makeEvent(ev, p, true));
-    active.lastX = p.x; active.lastY = p.y;
+    track(active, ev, p);
   }
 
   function finish(ev, cancelled) {
-    if (!active || ev.pointerId !== active.id) return;
+    const isSecond = !!second && ev.pointerId === second.id;
+    if (!isSecond && (!active || ev.pointerId !== active.id)) return;
     const p = local(ev);
     setRay(p.x, p.y, p.w, p.h);
-    const a = active;
-    const e = makeEvent(ev, p, true);
+    const a = isSecond ? second : active;
+    const e = makeEvent(ev, p, true, a);
     e.cancelled = cancelled;
-    active = null;
+    if (isSecond) second = null;
+    else { active = second; second = null; }             // первый палец ушёл — второй становится основным
     try { if (canvas.hasPointerCapture(ev.pointerId)) canvas.releasePointerCapture(ev.pointerId); } catch (err) { /* не критично */ }
     if (a.item) {
       call(a.item, 'onUp', e);
       if (!cancelled && !a.dragging && e.duration < TAP_MAX_MS && items.has(a.item.object)) call(a.item, 'onTap', e);
-    } else if (!cancelled && api.enabled) {
+    } else if (!cancelled && api.enabled && !isSecond) {
       const dx = e.totalDx, dy = e.totalDy;
       if (Math.abs(dx) > SWIPE_MIN_PX && Math.abs(dx) > Math.abs(dy) * 1.6 && e.duration < SWIPE_MAX_MS) {
         engine.emit('swipe', dx < 0 ? 1 : -1);          // палец влево → следующий пост (+1)
@@ -149,10 +174,9 @@ export function createInput(engine, canvas) {
 
   // страховка: окно потеряло фокус посреди жеста — завершаем его как отменённый
   function cancelActive() {
-    if (!active) return;
-    const a = active;
-    active = null;
-    if (a.item) {
+    const list = [active, second];
+    active = null; second = null;
+    for (const a of list) if (a && a.item) {
       call(a.item, 'onUp', {
         x: a.lastX, y: a.lastY, dx: 0, dy: 0, startX: a.startX, startY: a.startY, totalDx: a.lastX - a.startX, totalDy: a.lastY - a.startY,
         dragging: a.dragging, duration: performance.now() - a.t0, pointerType: a.type, ray: raycaster.ray.clone(), point: null,
@@ -179,13 +203,14 @@ export function createInput(engine, canvas) {
 
     /**
      * Сделать объект интерактивным. handlers: { onTap(e), onDown(e), onDrag(e), onUp(e) }.
-     * opts: { priority=0 } — при пересечении нескольких объектов побеждает больший приоритет, затем ближний.
+     * opts: { priority=0, multi=false } — при пересечении нескольких объектов побеждает больший приоритет, затем ближний;
+     * multi — орган можно нажать вторым пальцем, пока первый держит другой орган (и наоборот).
      * → remove(); у функции есть поле .item ({ enabled, priority }) для временного отключения.
      */
     add(object, handlers = {}, opts = {}) {
-      const item = { object, handlers, priority: opts.priority || 0, enabled: true };
+      const item = { object, handlers, priority: opts.priority || 0, multi: !!opts.multi, enabled: true };
       items.set(object, item);
-      const remove = () => { if (items.get(object) === item) items.delete(object); if (active && active.item === item) active.item = null; };
+      const remove = () => { if (items.get(object) === item) items.delete(object); if (active && active.item === item) active.item = null; if (second && second.item === item) second = null; };
       remove.item = item;
       return remove;
     },
@@ -212,7 +237,7 @@ export function createInput(engine, canvas) {
     cancel: cancelActive,
 
     /** Идёт ли сейчас перетаскивание какого-либо органа. */
-    get busy() { return !!(active && active.item); },
+    get busy() { return !!((active && active.item) || second); },
 
     dispose() {
       canvas.removeEventListener('pointerdown', onDown);
@@ -222,7 +247,7 @@ export function createInput(engine, canvas) {
       canvas.removeEventListener('lostpointercapture', onCancel);
       canvas.removeEventListener('contextmenu', onCtx);
       window.removeEventListener('blur', cancelActive);
-      items.clear(); active = null;
+      items.clear(); active = null; second = null;
     },
   };
   return api;

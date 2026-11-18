@@ -40,7 +40,7 @@ h2, h3 { margin: 0; font-weight: 600; letter-spacing: .1em; }
 #radio.bad { border-left-color: var(--red); } #radio.good { border-left-color: var(--green); }
 #toast { position: absolute; left: 50%; bottom: 66px; transform: translateX(-50%); background: rgba(143,29,20,.95); border: 1px solid #000; padding: 5px 14px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none !important; white-space: nowrap; }
 #toast.show { opacity: 1; }
-#flightChip { cursor: pointer; pointer-events: auto !important; position: absolute; right: max(8px, env(safe-area-inset-right)); top: 46px; background: rgba(17,19,22,.9); border: 1px solid #000; border-left: 3px solid var(--amber); padding: 3px 9px; font-size: 12px; }
+#flightChip { cursor: pointer; pointer-events: auto !important; background: rgba(17,19,22,.9); border: 1px solid #000; border-left: 3px solid var(--amber); padding: 3px 9px; font-size: 12px; }
 #flightChip b { font: 600 14px var(--font); color: var(--amber); }
 
 #bottombar { position: absolute; left: 0; right: 0; bottom: 0; height: 56px; background: linear-gradient(#161b20, #232b33); border-top: 1px solid #000; box-shadow: 0 -3px 8px rgba(0,0,0,.5); display: flex; flex-direction: column; padding: 0 max(6px, env(safe-area-inset-left)); }
@@ -48,14 +48,15 @@ h2, h3 { margin: 0; font-weight: 600; letter-spacing: .1em; }
 #memo { color: var(--ivory); overflow: hidden; text-overflow: ellipsis; } #memo b { color: var(--dim); font-weight: 500; }
 #hint { color: var(--amber); overflow: hidden; text-overflow: ellipsis; text-align: right; }
 #nav { flex: 1; display: flex; gap: 1px; }
-#nav button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; font-weight: 600; font-size: 13px; color: var(--dim); border-left: 1px solid #0b0d0f; border-top: 2px solid transparent; position: relative; min-width: 0; }
+#nav button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; font-weight: 600; font-size: 13px; color: var(--dim); border-left: 1px solid #0b0d0f; border-top: 2px solid transparent; position: relative; min-width: 0; white-space: nowrap; overflow: hidden; padding: 0 2px; }
 #nav button:last-child { border-right: 1px solid #0b0d0f; }
 #nav button .n { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid currentColor; font-size: 11px; line-height: 15px; flex: none; }
 #nav button.done .n { background: var(--green); border-color: var(--green); color: #0d1410; }
 #nav button.on { color: var(--ochre); border-top-color: var(--ochre); background: rgba(211,154,30,.1); }
 #nav button.next:not(.on) { color: var(--ivory); animation: pulse 1.4s infinite; }
 @keyframes pulse { 50% { background: rgba(255,179,71,.2); } }
-@media (max-width: 700px) { #nav button { font-size: 11px; gap: 4px; } .tb-cell.grow { min-width: 70px; } }
+@media (max-width: 800px) { #nav button { font-size: 12px; gap: 4px; } #nav button .n { width: 16px; height: 16px; font-size: 10px; line-height: 13px; } }
+@media (max-width: 700px) { #nav button { font-size: 11px; gap: 3px; } .tb-cell.grow { min-width: 70px; } }
 
 /* ---------- экраны ---------- */
 .screen { position: fixed; inset: 0; z-index: 20; display: none; align-items: center; justify-content: center; background: rgba(8,10,12,.72); padding: 10px max(12px, env(safe-area-inset-right)) 10px max(12px, env(safe-area-inset-left)); }
@@ -147,3 +148,126 @@ table.dbf tr.on td { background: rgba(211,154,30,.22); } table.dbf tbody tr { cu
 .dbf-empty { color: var(--dim); padding: 10px 0; }
 .nb-t .ar { display: block; font: 600 13px var(--mono); color: #8f1d14; } .nb-t .tag { font-size: 10px; letter-spacing: .1em; font-weight: 600; margin-left: 6px; padding: 0 4px; border: 1px solid currentColor; border-radius: 2px; }
 #flash.wave { background: radial-gradient(circle, transparent 40%, rgba(75,227,106,.35)); animation: fl 1.2s ease-out; }
+
+/* ---------- меню: продолжить бой, задание дня, снабжение ---------- */
+.menu-row.three .btn { font-size: 12px; letter-spacing: .08em; padding-left: 4px; padding-right: 4px; white-space: nowrap; }
+.menu-row .btn { min-width: 0; }
+#resumeBox { align-items: center; } #resumeBox .btn { flex: 1; } .btn.resume small { color: #3a2c08; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.link { flex: none; font-size: 11px; letter-spacing: .06em; color: var(--dim); text-decoration: underline; text-transform: none; padding: 8px 4px; }
+.rank-row { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; } .rank-row .rank { flex: 1; margin: 0; min-width: 0; }
+#upgradesBtn { position: relative; flex: none; }
+.badge { position: absolute; top: -6px; right: -6px; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px; background: var(--red); color: #fff; font: 600 10px/16px var(--font); font-style: normal; letter-spacing: 0; text-align: center; display: none; }
+.badge.show { display: block; }
+@media (max-height: 440px) {
+  #menu .logo-t { font-size: 30px; display: inline-block; vertical-align: baseline; } #menu .logo-s { display: inline-block; margin: 0 0 0 10px; font-size: 10px; letter-spacing: .2em; }
+  #menu .menu-btns { margin: 8px 0 8px; gap: 5px; } #menu .btn { padding: 6px 8px; font-size: 14px; } #menu .btn.small, #menu .menu-row.three .btn { font-size: 12px; }
+  #menu .rank-row { margin-bottom: 6px; } .menu-row { gap: 6px; }
+}
+.menu-box { overflow-y: auto; touch-action: pan-y; scrollbar-width: none; padding: 6px 6px 0 0; } .menu-box::-webkit-scrollbar { display: none; }
+
+/* ---------- снабжение ---------- */
+.up-tools { display: flex; align-items: center; gap: 8px; } .up-pts { font-size: 11px; letter-spacing: .14em; color: var(--dim); white-space: nowrap; } .up-pts b { font-size: 18px; color: var(--ochre); margin-left: 4px; vertical-align: -2px; }
+#upGrid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: 1fr; gap: 8px; overflow-y: auto; touch-action: pan-y; }
+.up-card { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 7px 9px; background: linear-gradient(#3d4a57, #2b343d); border: 1px solid #000; border-radius: 3px; box-shadow: 0 1px 0 rgba(255,255,255,.1) inset; }
+.up-h { display: flex; justify-content: space-between; align-items: center; gap: 6px; } .up-h b { font-size: 13px; font-weight: 600; letter-spacing: .08em; line-height: 1.1; }
+.up-pips { display: flex; gap: 3px; flex: none; } .up-pips i { width: 10px; height: 10px; border-radius: 50%; background: #14181c; box-shadow: 0 0 0 1px #000; } .up-pips i.on { background: var(--ochre); }
+.up-d { flex: 1; font-size: 11px; line-height: 1.2; letter-spacing: .01em; color: var(--ivory); text-transform: none; }
+.up-e { font-size: 10px; line-height: 1.25; letter-spacing: .04em; color: var(--dim); }
+.up-card .btn { padding: 5px 6px; font-size: 11px; letter-spacing: .1em; white-space: nowrap; } .btn[disabled] { opacity: .5; filter: none; cursor: default; } .up-card.max .btn { opacity: .7; color: var(--green); }
+.up-foot { flex: none; display: flex; justify-content: space-between; gap: 10px; margin-top: 7px; font-size: 10.5px; letter-spacing: .02em; color: var(--dim); text-transform: none; } #upMsg { color: #ff8a7a; }
+@media (max-height: 380px) { .up-d { font-size: 10.5px; } .up-card { padding: 5px 8px; gap: 2px; } #upgrades .sheet-head { margin-bottom: 6px; } }
+
+/* ---------- настройки ---------- */
+.set-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; touch-action: pan-y; } .set-list .opt { flex-wrap: wrap; color: var(--ivory); font-size: calc(11px * var(--tsc)); }
+.set-list .seg button { padding: 7px 11px; white-space: nowrap; }
+@media (max-height: 380px) { .set-list { gap: 6px; } .set-list .seg button { padding: 5px 10px; } }
+
+/* ---------- итоги: задание дня ---------- */
+#dlgBody .daily-res { display: flex; justify-content: space-between; align-items: baseline; margin: 8px 0 4px; padding: 4px 10px; border: 1px solid var(--ochre); border-radius: 3px; letter-spacing: .12em; font-size: 12px; } #dlgBody .daily-res b { font-size: 22px; color: var(--ochre); }
+#dlgBody .pts { margin-top: 6px; }
+
+/* ---------- размер надписей: --ts полный (1 | 1.15 | 1.3), --tsc не больше 1.15, --tsb для панелей HUD (1 | 1.06 | 1.12) ---------- */
+:root { --ts: 1; --tsc: 1; --tsb: 1; --nav-fs: 13px; }
+@media (max-width: 800px) { :root { --nav-fs: 12px; } } @media (max-width: 780px) { :root { --sh-fs: 13px; } } @media (max-width: 700px) { :root { --nav-fs: 11px; } }
+#radio, #toast { font-size: calc(13px * var(--ts)); } #info { font-size: calc(11.5px * var(--tsc)); } .fault, #flightChip { font-size: calc(12px * var(--ts)); }
+#dlgBody { font-size: calc(14px * var(--ts)); } #dlgBody h2 { font-size: calc(20px * var(--tsc)); } #dlgBody h3 { font-size: calc(13px * var(--ts)); } table.stats { font-size: calc(14px * var(--ts)); }
+.dlg-btns .btn { font-size: calc(15px * var(--tsc)); } .nb-col, .nb-t .co, .nb-t .ms, .nb-kv b { font-size: calc(13px * var(--ts)); } .nb-col h3, .nb-msg b, .nb-msg .t { font-size: calc(11px * var(--ts)); }
+.tb-cell .k { font-size: calc(9px * var(--tsb)); } .tb-cell .v { font-size: calc(15px * var(--tsb)); } #hShells { font-size: calc(var(--sh-fs, 14px) * var(--tsb)); } #hWind { font-size: calc(14px * var(--tsb)); } #nav button { font-size: calc(var(--nav-fs) * var(--tsb)); }
+.m-card .nm { font-size: calc(16px * var(--tsc)); } .m-card .num { font-size: calc(11px * var(--tsc)); } .menu-hint { font-size: calc(12px * var(--tsc)); }
+.up-d { font-size: calc(11px * var(--tsc)); } .up-e { font-size: calc(10px * var(--tsc)); } table.dbf { font-size: calc(11.5px * var(--tsc)); }
+body.text-xl #radio { max-width: min(680px, 86%); } #hTarget { font-size: 15px; }
+
+/* ---------- режим для левши: обвязка HUD зеркалится (3D-посты — нет) ---------- */
+body.lefty #topbar { flex-direction: row-reverse; } body.lefty #info { flex-direction: row-reverse; } body.lefty #hint { text-align: left; }
+body.lefty #radio { border-left: 1px solid #000; border-right: 3px solid var(--ochre); }
+body.lefty #radio.bad { border-right-color: var(--red); } body.lefty #radio.good { border-right-color: var(--green); }
+body.lefty #hud[data-st="fire"] #radio { left: auto; right: max(8px, env(safe-area-inset-right)); }
+body.lefty #faults { left: auto; right: max(8px, env(safe-area-inset-right)); align-items: flex-end; }
+body.lefty #flightChip { border-left: 1px solid #000; border-right: 3px solid var(--amber); }
+body.lefty #hUnread { right: auto; left: 4px; }
+
+/* ---------- бой: расчёт, налёт, свои силы, свой глаз ---------- */
+/* столбик расчёта — у правого края (на всех постах там пустая стена); правая стопка значков — левее него */
+#rcol { position: absolute; right: max(4px, env(safe-area-inset-right)); top: 44px; width: 50px; display: flex; flex-direction: column; gap: 3px; pointer-events: none !important; }
+#crew { display: flex; flex-direction: column; gap: 3px; } #crew > * { pointer-events: auto; }
+.crew-chip { display: flex; flex-direction: column; align-items: stretch; gap: 1px; padding: 2px 4px 3px; background: rgba(17,19,22,.9); border: 1px solid #000; border-left: 3px solid var(--green); border-radius: 2px; text-align: left; min-width: 0; }
+.crew-chip .top { display: flex; justify-content: space-between; align-items: baseline; } .crew-chip b { font: 600 calc(13px * var(--tsb))/1 var(--font); color: var(--ivory); }
+.crew-chip em { font-style: normal; font: 600 calc(8px * var(--tsb))/1 var(--font); letter-spacing: .02em; color: var(--amber); }
+.crew-chip .nm { font-size: calc(8px * var(--tsb)); line-height: 1.1; letter-spacing: .03em; color: var(--dim); white-space: nowrap; overflow: hidden; }
+.crew-chip .fat { display: block; height: 3px; background: #0b0d0f; box-shadow: 0 0 0 1px #000; margin-top: 1px; } .crew-chip .fat u { display: block; height: 100%; width: 0; background: var(--green); transition: width .4s; }
+.crew-chip.tired { border-left-color: var(--amber); } .crew-chip.tired b { color: var(--amber); } .crew-chip.tired .fat u { background: var(--amber); }
+.crew-chip.wounded { border-left-color: var(--red); background: rgba(90,20,14,.94); } .crew-chip.wounded b, .crew-chip.wounded em { color: #ffb0a6; } .crew-chip.wounded .fat u { background: var(--red); }
+.crew-chip.wounded .nm { color: var(--ivory); } .crew-chip.need { animation: need 1s infinite; } @keyframes need { 50% { box-shadow: 0 0 0 2px var(--amber), 0 0 10px rgba(255,179,71,.8); } }
+.crew-chip:active { filter: brightness(1.4); }
+#crewKits { display: flex; justify-content: space-between; align-items: baseline; padding: 1px 4px; background: rgba(17,19,22,.9); border: 1px solid #000; border-radius: 2px; }
+#crewKits span { font-size: calc(6.5px * var(--tsb)); letter-spacing: .02em; color: var(--dim); } #crewKits b { font: 600 calc(12px * var(--tsb))/1.2 var(--font); color: var(--green); } #crewKits.zero b { color: var(--red); }
+#rstack { position: absolute; right: calc(max(4px, env(safe-area-inset-right)) + 56px); top: 46px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; pointer-events: none !important; }
+#rstack > * { pointer-events: auto; }
+#ffWarn { background: rgba(143,29,20,.95); border: 1px solid #000; border-left: 3px solid var(--red); padding: 3px 9px; font-size: calc(12px * var(--ts)); font-weight: 600; letter-spacing: .08em; white-space: nowrap; pointer-events: none; }
+#convoyChip { background: rgba(17,19,22,.9); border: 1px solid #000; border-left: 3px solid #6fc3ff; border-radius: 2px; padding: 2px 4px 3px; font-size: calc(7px * var(--tsb)); line-height: 1.2; letter-spacing: .04em; color: var(--dim); white-space: nowrap; }
+#convoyChip span { display: block; } #convoyChip i { display: inline-block; width: 8px; height: 8px; margin-right: 3px; border-radius: 2px; background: var(--green); box-shadow: 0 0 0 1px #000; vertical-align: -1px; } #convoyChip i.dmg { background: var(--amber); } #convoyChip i.lost { background: var(--red); border-radius: 50%; opacity: .7; } #convoyChip i.home { background: #6fc3ff; }
+#raidBanner { position: absolute; left: 50%; top: 44px; transform: translateX(-50%); padding: 6px 18px; font: 600 calc(15px * var(--tsc))/1.2 var(--font); letter-spacing: .14em; color: #fff3d6; background: #a3160c; border: 1px solid #000; border-radius: 3px; box-shadow: 0 0 0 1px rgba(255,255,255,.18) inset, 0 3px 12px rgba(0,0,0,.6); white-space: nowrap; animation: raid .7s infinite; z-index: 4; }
+@keyframes raid { 50% { background: #e2311f; box-shadow: 0 0 0 1px rgba(255,255,255,.3) inset, 0 0 18px rgba(255,74,58,.9); } }
+#hud.raid:not([data-st="aa"]) #radio { top: 80px; }
+/* пост ОГОНЬ: по центру смотровая щель — тревога уходит вправо, стопка значков — под неё */
+#hud[data-st="fire"] #raidBanner { left: auto; right: calc(max(4px, env(safe-area-inset-right)) + 56px); transform: none; }
+#hud.raid[data-st="fire"] #rstack { top: 82px; } #hud.raid[data-st="fire"] #radio { top: 44px; }
+#nav button.alarm { color: #fff3d6; animation: navraid .7s infinite; } @keyframes navraid { 50% { background: rgba(226,49,31,.75); } }
+#obs { flex: 0 1 auto; color: #9fd4ff; overflow: hidden; text-overflow: ellipsis; min-width: 0; } #obs b { color: var(--dim); font-weight: 500; } #obs:empty { display: none; }
+#memo, #hint { min-width: 0; } #hint.warn { color: #ff8a7a; }
+body.lefty #rcol { right: auto; left: max(4px, env(safe-area-inset-left)); } body.lefty .crew-chip { border-left: 1px solid #000; border-right: 3px solid var(--green); } body.lefty #convoyChip { border-left: 1px solid #000; border-right: 3px solid #6fc3ff; }
+body.lefty .crew-chip.tired { border-right-color: var(--amber); } body.lefty .crew-chip.wounded { border-right-color: var(--red); }
+body.lefty #rstack { right: auto; left: calc(max(4px, env(safe-area-inset-left)) + 56px); align-items: flex-start; }
+body.lefty #faults { top: 46px; right: max(8px, env(safe-area-inset-right)); } body.lefty #hud[data-st="fire"] #raidBanner { right: auto; left: calc(max(4px, env(safe-area-inset-left)) + 56px); }
+/* блокнот: свои силы, доклады, экипаж */
+.nb-f { padding: 4px 8px; margin-bottom: 5px; border: 1.5px solid rgba(20,70,110,.5); border-radius: 3px; } .nb-f b { font-weight: 600; letter-spacing: .06em; } .nb-f.dead { opacity: .5; text-decoration: line-through; }
+.nb-f .co { display: block; font: 600 calc(13px * var(--ts)) var(--mono); } .nb-f .tag { font-size: 10px; letter-spacing: .1em; font-weight: 600; margin-left: 6px; padding: 0 4px; border: 1px solid currentColor; border-radius: 2px; } .nb-f .tag.bad { color: #8f1d14; }
+.nb-rep { padding: 2px 0; border-bottom: 1px dotted rgba(28,26,21,.4); } .nb-rep b { font-weight: 600; font-size: calc(11px * var(--ts)); letter-spacing: .1em; margin-right: 5px; }
+.nb-kv b.tired { color: #8a5a00; } .nb-kv b.wounded { color: #8f1d14; }
+/* итоги и разбор боя */
+table.stats td.bad { color: #ff8a7a !important; } #dlgBody .fr-list { margin: 6px 0 0; color: var(--dim); font-size: calc(12px * var(--ts)); }
+.dbf-sum { margin-top: 8px; padding-top: 6px; border-top: 1px solid #47525c; font-size: calc(11.5px * var(--tsc)); color: var(--ivory); line-height: 1.4; } .dbf-sum b { color: var(--dim); font-weight: 500; letter-spacing: .1em; font-size: 10px; margin-right: 5px; } .dbf-sum .bad { color: #ff8a7a; }
+table.dbf td.ob { color: #9fd4ff; text-align: center; }
+/* узкий экран: плашка тревоги по центру задевает правую стопку — стопка уходит под неё */
+@media (max-width: 820px) { #hud.raid #rstack { top: 80px; } }
+
+/* неисправности слева вверху: радиострока уходит под них, чтобы длинное сообщение не закрывало кнопку «ЧИНИТЬ»; над всплывающей строкой */
+#faults { z-index: 2; }
+/* --fn — число кнопок неисправностей (пишет renderFaults): радиострока встаёт под всю стопку, а не под первую кнопку */
+#hud.hasfaults:not([data-st="fire"]) #radio { top: calc(50px + var(--fn, 1) * (16px * var(--ts) + 14px)); }
+/* тревога «ВОЗДУХ!» по центру задевает стопку неисправностей (крупный шрифт) — при неисправностях она уходит к правой стопке значков */
+#hud.hasfaults #raidBanner { left: auto; right: calc(max(4px, env(safe-area-inset-right)) + 56px); transform: none; }
+#hud.hasfaults.raid #rstack { top: 82px; }
+body.lefty #hud.hasfaults #raidBanner { right: auto; left: calc(max(4px, env(safe-area-inset-left)) + 56px); }
+/* левша, пост ОГОНЬ: справа внизу — крышка и тумблер цепи стрельбы; неисправности остаются слева внизу, как у правши */
+body.lefty #hud[data-st="fire"] #faults { right: auto; left: max(8px, env(safe-area-inset-left)); align-items: flex-start; }
+/* строка подсказки важнее «своего глаза»: сжимаются сначала #obs и #memo */
+#hint { flex: 0 0 auto; max-width: 64%; } #obs { flex-shrink: 5; }
+/* экран 16:9 и уже: органы постов доходят до края кадра (рычаг «ВЫЧИСЛИТЬ») — столбик расчёта сжимается в узкую полоску у самого края */
+@media (max-aspect-ratio: 17/9) {
+  #rcol { width: 22px; right: max(2px, env(safe-area-inset-right)); } body.lefty #rcol { left: max(2px, env(safe-area-inset-left)); }
+  .crew-chip { padding: 5px 2px 5px; align-items: center; } .crew-chip .top { justify-content: center; } .crew-chip .nm, .crew-chip em, #crewKits span { display: none; }
+  .crew-chip .fat { align-self: stretch; } #crewKits { justify-content: center; padding: 1px 0; }
+  #convoyChip span { display: none; } #convoyChip { white-space: normal; text-align: center; padding: 3px 1px; line-height: 10px; } #convoyChip i { margin: 1px; }
+  #rstack { right: calc(max(2px, env(safe-area-inset-right)) + 26px); } body.lefty #rstack { right: auto; left: calc(max(2px, env(safe-area-inset-left)) + 26px); }
+}

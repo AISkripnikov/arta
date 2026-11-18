@@ -383,6 +383,89 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol + 1e-9;
     });
     ok(v && v.pin && v.hot && v.oldGone && v.handle, 'оборона: у цели № 17 есть фишка, фишка ушедшего номера убрана', v);
   }
+  // ---- 8. конвой: свои корабли, пеленг и сектор трубы, тонущая цель, снимок со своим ----
+  console.log('конвой, труба, налёт');
+  {
+    const v = await page.evaluate(() => {
+      const g = window.__dev.game, st = window.T.st, T = window.T; g.quit(); g.startMission(30); g.begin();
+      for (let i = 0; i < 800 && !g.state.targets.some((q) => q.reported); i++) g.update(0.05);
+      T.step(4);
+      const r = { n: g.state.friends.length, friends: st.api.friends, courses: st.api.overlay.courses, lines0: st.api.scopeLines };
+      g.setScope({ bearing: 33, zoom: 10 });
+      T.step(3);
+      r.scope = st.api.scope;
+      r.mark = g.scopeMark(); g.setScope({ bearing: 350 }); g.scopeMark();
+      T.step(3);
+      r.lines = st.api.scopeLines; r.stateLines = g.state.plot.lines.map((q) => q.from);
+      return r;
+    });
+    ok(v.n >= 3 && v.friends.length === v.n && v.friends.every((f) => f.state === 'ok' && !f.ring) && v.courses === v.n, 'свои корабли конвоя на карте с курсами', v);
+    ok(v.scope && near(v.scope.bearing, 33, 0.01) && near(v.scope.fov, 6.4, 0.01), 'сектор трубы на карте следует за state.scope', v.scope);
+    ok(v.lines0 === 0 && v.mark && v.mark.ok && v.lines === 2 && v.stateLines.every((q) => q === 'scope'), 'game.scopeMark() → пеленг трубы на карте', v);
+    await tap(await at("T.hot('btnErase')"));
+    const e = await page.evaluate(() => { window.T.step(3); return { lines: window.T.st.api.scopeLines, st: window.__dev.game.state.plot.lines.length }; });
+    ok(e.lines === 0 && e.st === 0, '«СТЕРЕТЬ» убирает и пеленги трубы', e);
+
+    // свой корабль нельзя ни выбрать, ни утащить
+    const f0 = v.friends[0], act0 = await at('window.__dev.game.state.activeTarget');
+    const fp = await at('T.chart(' + f0.x + ',' + f0.y + ')');
+    await tap(fp);
+    await drag(fp, { x: fp.x + 30, y: fp.y - 20 }, 6);
+    const w = await page.evaluate((id) => {
+      const g = window.__dev.game, st = window.T.st, T = window.T, f = g.state.friends.find((q) => q.id === id);
+      const r = { active: g.state.activeTarget, x: f.x, y: f.y, pins: Object.keys(g.state.plot.pins).length };
+      st.api.setLoupe(true); T.step(30, 0.05);
+      r.ring = st.api.friends.every((q) => q.ring);
+      st.api.setLoupe(false); T.step(30, 0.05);
+      // снимок разрыва рядом со своим
+      g.state.impacts.push({ n: 99, x: f.x + 0.3, y: f.y - 0.2, time: g.state.time - 3, shell: 'he', hit: false, targetId: null, snap: [], craters: [], land: false, pair: null, observed: false });
+      T.step(4);
+      r.photo = st.api.photoFriends(99);
+      // потоплен и дошёл
+      const fs = g.state.friends;
+      fs[0].alive = false; fs[0].sinking = { since: g.state.time, dur: 18 }; fs[1].arrived = true; fs[1].speed = 0;
+      T.step(3);
+      r.states = st.api.friends.map((q) => q.state);
+      fs[0].alive = true; fs[0].sinking = null; fs[1].arrived = false;
+      // цель поражена: фишка серая со знаком «тонет», потом — крест
+      const t = g.state.targets.find((q) => q.reported);
+      g.setPin(t.id, t.reported.x, t.reported.y);
+      T.step(2); r.row0 = st.api.pinRow(t.id);
+      t.alive = false; t.sinking = { since: g.state.time, dur: 18 };
+      T.step(3); r.row1 = st.api.pinRow(t.id); r.sinking = st.api.overlay.sinking.includes(t.id); r.pin1 = st.api.pinVisible(t.id);
+      t.sunk = true;
+      T.step(3); r.row2 = st.api.pinRow(t.id); r.sinking2 = st.api.overlay.sinking.includes(t.id); r.pin2 = st.api.pinVisible(t.id);
+      return r;
+    }, f0.id);
+    ok(w.active === act0 && near(w.x, f0.x, 0.3) && near(w.y, f0.y, 0.3) && w.pins === 0, 'свой корабль не выбирается и не перетаскивается', [w.active, act0, w.pins]);
+    ok(w.ring === true, 'под лупой у своих — круг 0.25 км');
+    ok(w.photo.includes(f0.id), 'на аэрофотоснимке рядом со своим кораблём он виден', w.photo);
+    ok(w.states[0] === 'sunk' && w.states[1] === 'arrived', 'потопленный свой — крест, дошедший — галочка', w.states);
+    ok(w.row0 < 2 && w.row1 === 3 && w.sinking && w.pin1, 'поражённая цель: фишка серая со знаком «ТОНЕТ», пока не скрылась', w);
+    ok(w.row2 === 2 && !w.sinking2 && w.pin2, 'затонула — обычная поражённая фишка с крестом', w);
+  }
+  // налёт: штамп «ВОЗДУХ» с предупреждения и до конца, самолёты на карте (за рамкой — на её краю)
+  {
+    const v = await page.evaluate(() => {
+      const g = window.__dev.game, st = window.T.st, T = window.T; g.quit(); g.startMission(31); g.begin();
+      let warned = false;
+      const off = g.on('raid', (e) => { if (e.phase === 'warning') warned = true; });
+      T.step(3);
+      const r = { before: st.api.raid };
+      for (let i = 0; i < 2400 && !warned && g.state.phase === 'playing'; i++) g.update(0.05);
+      T.step(3); r.warn = st.api.raid; r.warned = warned;
+      for (let i = 0; i < 600 && !g.state.raid && g.state.phase === 'playing'; i++) g.update(0.05);
+      T.step(3); r.start = st.api.raid; r.n = g.state.raid ? g.state.raid.planes.length : 0;
+      if (g.state.raid) { g.state.raid.planes[0].range = 40; T.step(3); r.far = st.api.raid.planes[0]; }
+      off();
+      g.quit(); T.step(3); r.after = st.api.raid; r.friends = st.api.friends.length;
+      return r;
+    });
+    ok(v.before === null && v.warned && v.warn && v.warn.stamp && v.warn.phase === 'warning', 'предупреждение о налёте → штамп «ВОЗДУХ»', [v.before, v.warn]);
+    ok(v.start && v.start.stamp && v.start.phase === 'inbound' && v.n >= 2 && v.start.planes.length === v.n, 'налёт: самолёты на карте', v.start);
+    ok(v.far && v.far.off && v.far.x >= 0 && v.far.x <= 20 && v.far.y >= 0 && v.far.y <= 20, 'самолёт за рамкой карты показан на её краю', v.far);
+    ok(v.after === null && v.friends === 0, 'после выхода штамп и свои корабли сняты', [v.after, v.friends]);
+  }
   await page.evaluate(() => { const g = window.__dev.game; g.quit(); });
   s = await page.evaluate(() => { window.T.step(3); return { phase: window.__dev.game.state.phase, mission: !!window.__dev.game.state.mission }; });
   ok(true, 'выход в меню без ошибок (' + s.phase + ')');

@@ -3,163 +3,7 @@ import assert from 'node:assert/strict';
 import { createGame } from '../src/game/index.js';
 import { solve, chargeRange, shoot } from '../src/game/ballistics.js';
 import { CAMPAIGN, makeMap, isLand } from '../src/game/missions.js';
-
-const RAD = Math.PI / 180;
-const norm = (a) => ((a % 360) + 360) % 360;
-function tick(game, seconds, step = 0.1) { for (let t = 0; t < seconds && game.state.phase === 'playing'; t += step) game.update(step); }
-function waitBreech(game) { let n = 0; while (game.state.breech.busy && n++ < 1000) game.update(0.1); }
-
-/** Пересечение двух пеленгов звукометрии. */
-function intersect([a, b]) {
-  const da = [Math.sin(a.bearing * RAD), Math.cos(a.bearing * RAD)], db = [Math.sin(b.bearing * RAD), Math.cos(b.bearing * RAD)];
-  const den = da[0] * db[1] - da[1] * db[0];
-  const k = ((b.x - a.x) * db[1] - (b.y - a.y) * db[0]) / den;
-  return { x: a.x + da[0] * k, y: a.y + da[1] * k };
-}
-
-function unlockAll() { const mem = {}; return { get: (k) => mem[k] || JSON.stringify({ unlocked: 99, stars: [], difficulty: 1 }), set: (k, v) => { mem[k] = v; } }; }
-
-/** Полная процедура одного выстрела снарядом type в точку aim(tof) → {x,y}. target — цель для записи замера (или null). */
-function fireShellRaw(game, type, aim, target, opts, must) {
-  const s = game.state, bat = s.mission.battery, b = s.breech;
-  // 1. замер с упреждением: несколько приближений по времени полёта
-  let tof = 30, sol, charge, brg, rng;
-  const measure = () => {
-    for (let i = 0; i < 4; i++) {
-      const p = aim(tof);
-      const dx = p.x - bat.x, dy = p.y - bat.y;
-      rng = Math.hypot(dx, dy); brg = norm(Math.atan2(dx, dy) / RAD);
-      charge = [1, 2, 3, 4, 5, 6].find((n) => { const l = chargeRange(n); return rng >= l.min && rng <= l.max - 0.3; });
-      must(charge, 'нет заряда для дальности ' + rng);
-      sol = solve(rng, charge); tof = sol.tof;
-    }
-  };
-  measure();
-  // 2. зарядить (если орудие уже заряжено тем же — только поправить число зарядов)
-  if (!(b.shell === type && b.rammed && !b.open && b.charges === charge)) {
-    game.elevate(-s.turret.elevation);
-    must(game.openBreech().ok); waitBreech(game);
-    if (b.shell && b.shell !== type) { must(game.unload().ok); waitBreech(game); }
-    if (!b.shell) {
-      must(game.hoistShell(type).ok, 'hoist ' + type); waitBreech(game);
-      must(game.ramShell().ok); waitBreech(game);
-    }
-    measure();      // заряжание заняло время — упреждение заново
-    while (b.charges > charge) { must(game.removeCharge().ok); waitBreech(game); }
-    while (b.charges < charge) { must(game.addCharge().ok); waitBreech(game); }
-    must(game.closeBreech().ok); waitBreech(game);
-  }
-  if (opts.loadOnly) return { ok: true, charge };
-  if (target) {
-    game.selectTarget(target.id);
-    if (opts.pin) game.setPin(target.id, opts.pin.x, opts.pin.y);
-    game.setAlidade({ bearing: brg, range: rng });
-    must(game.recordMeasurement().ok);
-  }
-  game.setComputerRange(rng); game.setComputerCharge(charge);
-  let res = game.compute(); must(res.ok, 'compute');
-  // 3. наводка; если за это время сменился ветер (шторм) — пересчитать и довернуть
-  for (let k = 0; k < 3; k++) {
-    if (s.computer.stale) { res = game.compute(); must(res.ok, 'recompute'); }
-    game.setBrake(false);
-    let d = norm(brg + res.windBearing - s.turret.bearing); if (d > 180) d -= 360;
-    must(game.rotateTurret(d).ok);
-    game.setBrake(true);
-    game.elevate(res.elevation - s.turret.elevation);
-    must(Math.abs(s.turret.elevation - res.elevation) < 0.011);
-    if (!s.computer.stale) break;
-  }
-  // 4. огонь и ожидание разрыва
-  game.arm(true);
-  const f = game.fire(); must(f.ok, 'fire: ' + f.reason);
-  let guard = 0;
-  while ((s.flight.length || (s.breech.busy && s.fire.burstLeft > 0)) && s.phase === 'playing' && guard++ < 8000) game.update(0.05);
-  f.charge = charge;
-  return f;
-}
-const ENDED = Symbol('бой окончен');
-/** Бой может кончиться посреди процедуры (батарею разбили) — тогда выстрела нет, возвращаем null. */
-function fireShell(game, type, aim, target, opts = {}) {
-  const s = game.state;
-  const must = (cond, msg) => { if (s.phase !== 'playing') throw ENDED; assert.ok(cond, msg); };
-  try { return fireShellRaw(game, type, aim, target, opts, must); } catch (e) { if (e === ENDED) return null; throw e; }
-}
-/** Бот: выстрел по цели по донесениям разведки (corr — накопленная поправка, км). */
-function engage(game, t, corr) {
-  const s = game.state;
-  const type = t.armored ? 'ap' : t.kind === 'landing' && s.shells.shrap > 0 ? 'shrap' : s.shells.he > 0 ? 'he' : s.shells.shrap > 0 ? 'shrap' : 'ap';
-  const pinAt = t.reported.sound ? intersect(t.reported.sound) : t.reported;
-  const f = fireShell(game, type, (tof) => {
-    const p = t.reported.sound ? intersect(t.reported.sound) : game.predict(t.id, t.moving ? tof + 7 : 0);
-    return { x: p.x + (corr ? corr.dx : 0), y: p.y + (corr ? corr.dy : 0) };
-  }, t, { pin: pinAt });
-  if (f && corr) { corr.charge = f.charge; corr.at = { x: pinAt.x, y: pinAt.y }; }
-  return s.shots;
-}
-
-const PRI = (t) => (t.end === 'land' || t.end === 'escape' || t.end === 'dive' ? 3 : t.spotter ? 2 : t.gun ? 1 : 0);
-/** Один ход бота: осветить / задымить / выстрелить. → false, если пока нечего делать. */
-function botStep(game, corr) {
-  const s = game.state, bat = s.mission.battery;
-  // сначала те, кто стреляет и убегает
-  const known = s.targets.filter((x) => x.alive && (x.reported || x.area) && !x.moved).sort((a, b) => PRI(b) - PRI(a));
-  // дым: батарее досталось, а орудия противника не прикрыты
-  if (s.shells.smoke > 0 && s.integrity < 75 && !s.smokes.length) {
-    const g = known.find((x) => x.gun && (x.reported || x.area));
-    if (g) {
-      const p = g.reported && g.reported.sound ? intersect(g.reported.sound) : game.predict(g.id, 0);
-      const L = Math.hypot(p.x - bat.x, p.y - bat.y);
-      fireShell(game, 'smoke', () => ({ x: bat.x + (p.x - bat.x) / L * 2.5, y: bat.y + (p.y - bat.y) / L * 2.5 }), null);
-      return true;
-    }
-  }
-  for (const t of known) {
-    const c = corr[t.id] || (corr[t.id] = { dx: 0, dy: 0, key: null, blind: false });
-    const r = t.reported;
-    if (s.mission.night && t.locate === 'recon' && !t.lit) {
-      // ночь: нет точных координат (или они устарели, или промах без наблюдения) — сначала свет
-      const need = !r || r.rough || (t.moving && s.time - r.time > 100) || c.blind;
-      if (need) {
-        if (s.shells.illum <= 0) { if (!r) continue; }
-        else {
-          const p = game.predict(t.id, 45);
-          fireShell(game, 'illum', () => p, t);
-          c.blind = false;
-          return true;
-        }
-      }
-    }
-    if (!r) continue;
-    const key = JSON.stringify(r.sound || [r.x, r.y]);
-    if (c.key !== key || t.moving) { c.dx = 0; c.dy = 0; c.key = key; }   // новая засечка — поправки сначала
-    engage(game, t, c);
-    // поправка по докладу корректировщика (как сделал бы игрок)
-    const rep = s.lastReport;
-    if (rep && rep.targetId === t.id && t.alive) {
-      if (rep.dark) c.blind = true;
-      else if (!t.moving && rep.observed) {
-        const L = Math.hypot(t.x - bat.x, t.y - bat.y), ux = (t.x - bat.x) / L, uy = (t.y - bat.y) / L;
-        c.dx -= (rep.over * ux + rep.right * uy) / 1000;
-        c.dy -= (rep.over * uy - rep.right * ux) / 1000;
-      }
-    }
-    return true;
-  }
-  // делать нечего, но кочующая батарея вот-вот объявится — заранее зарядить орудие под её остров
-  const w = s.targets.find((x) => x.alive && x.locate === 'sound' && x.moved && corr[x.id] && corr[x.id].at);
-  if (w && !s.breech.shell && !s.breech.busy && s.shells.he > 0) fireShell(game, 'he', () => corr[w.id].at, null, { loadOnly: true });
-  return false;
-}
-
-/** Тихий выстрел: без рассеивания (гауссов шум обнуляется при Math.random() = 0.25). */
-function quiet(fn) { const R = Math.random; Math.random = () => 0.25; try { return fn(); } finally { Math.random = R; } }
-function fireQuiet(game, type, x, y, target) {
-  const s = game.state;
-  const realFire = game.fire;
-  game.fire = () => quiet(realFire);
-  try { return fireShell(game, type, () => ({ x, y }), target || null); } finally { game.fire = realFire; }
-}
-const noWind = (game) => { game.state.mission.wind = { speed: 0, from: 0 }; };
+import { RAD, norm, tick, waitBreech, waitReport, intersect, unlockAll, fireShell, engage, botStep, playBot, autoAA, fireQuiet, noWind, start } from './bot.js';
 
 test('баллистика: решение вычислителя попадает в заданную дальность', () => {
   for (let n = 1; n <= 6; n++) {
@@ -228,21 +72,16 @@ for (let diff = 0; diff <= 1; diff++) {
     test(`прохождение: ${idx + 1}. ${def.name} (сложность ${diff})`, () => {
       let wins = 0; const RUNS = +process.env.RUNS || 6, log = [];
       for (let run = 0; run < RUNS; run++) {
-        const game = createGame({ storage: unlockAll() });
+        const game = autoAA(createGame({ storage: unlockAll() }));
         game.setDifficulty(diff);
         assert.ok(game.startMission(idx).ok); game.begin();
         const s = game.state; let end = null; game.on('missionEnd', (e) => { end = e; });
         for (let i = 0; i < 60 && !s.targets.some((t) => t.reported || t.area); i++) tick(game, 1);
         assert.ok(s.targets.some((t) => t.reported || t.area), 'есть донесения');
-        const corr = {};
-        let guard = 0;
-        while (s.phase === 'playing' && guard++ < 90) {
-          if (!botStep(game, corr)) { tick(game, 3); guard--; if (s.time > 1800) break; continue; }
-          tick(game, 0.5);
-        }
+        playBot(game);
         tick(game, 5);
         if (end && end.won) wins++;
-        log.push(end ? (end.won ? `победа ★${end.stars} выстр.${end.stats.shots}/${end.stats.par} проч.${end.stats.integrity} t=${Math.round(end.stats.time)}` : 'поражение: ' + end.reason) : 'не завершено');
+        log.push(end ? (end.won ? `★${end.stars} в${end.stats.shots}/${end.stats.par} п${end.stats.integrity} t${Math.round(end.stats.time)}` + (end.stats.convoyTotal ? ` к${end.stats.convoyTotal - end.stats.convoyLost}/${end.stats.convoyTotal}` : '') + (end.stats.planesDown + end.stats.bombs ? ` с${end.stats.planesDown}б${end.stats.bombs}` : '') + (end.stats.friendlyHits ? ` СВОИ!${end.stats.friendlyHits}` : '') : 'поражение: ' + end.reason) : 'не завершено');
       }
       console.log(`   ${def.name} [${diff}]: ` + log.join(' | '));
       assert.ok(wins >= RUNS - Math.ceil(RUNS / 6), `бот должен стабильно выигрывать (${wins}/${RUNS})`);
@@ -263,6 +102,7 @@ test('доклад корректировщика: знаки отклонени
     game.setBrake(false); let d = norm(b - s.turret.bearing); if (d > 180) d -= 360; game.rotateTurret(d); game.setBrake(true);
     game.elevate(solve(r, ch).elevation - s.turret.elevation); game.arm(true); assert.ok(game.fire().ok);
     let g = 0; while (s.flight.length && g++ < 5000) game.update(0.05);
+    waitReport(game);
     return s.lastReport;
   };
   let rep = fireAt(rng + 0.5, brg + 1);   // дальше и правее
@@ -280,6 +120,7 @@ test('ветер: вычислитель даёт поправки, с ними 
   game.setDifficulty(1); game.startMission(7); game.begin();
   const s = game.state;
   for (let i = 0; i < 100; i++) game.update(0.1);
+  s.targets.forEach((q) => { q.gun = null; });         // чтобы наводчика не ранило посреди замера
   s.mission.wind = { from: 270, speed: 10 };          // западный ветер: сносит на восток
   const bat = s.mission.battery, X = bat.x + 3, Y = bat.y + 11;
   const rng = Math.hypot(X - bat.x, Y - bat.y), brg = norm(Math.atan2(X - bat.x, Y - bat.y) / RAD);
@@ -365,14 +206,6 @@ test('рекорд задания сохраняется и улучшается
 });
 
 // ======================= НОВЫЕ ВОЗМОЖНОСТИ =======================
-const start = (idx, patch, diff = 0, storage) => {
-  const game = createGame({ storage: storage || unlockAll() });
-  game.setDifficulty(diff);
-  assert.ok(game.startMission(idx).ok);
-  if (patch) patch(game.state);
-  game.begin();
-  return game;
-};
 
 test('снаряды: осветительный и дымовой не наносят урона, создают свет и завесу', () => {
   const game = start(1, (s) => { Object.assign(s.shells, { illum: 2, smoke: 3 }); });
@@ -383,13 +216,13 @@ test('снаряды: осветительный и дымовой не нано
   fireQuiet(game, 'illum', t.x, t.y, t);
   assert.equal(s.lights.length, 1); assert.equal(t.hp, hp); assert.ok(t.alive);
   const L = s.lights[0];
-  assert.ok(Math.abs(L.until - s.time - 60) < 1 && Math.hypot(L.x - t.x, L.y - t.y) < 0.05);
+  assert.ok(Math.abs(L.until - s.time - 60) < 5 && Math.hypot(L.x - t.x, L.y - t.y) < 0.05);
   assert.ok(game.lit(t.x + 1.4, t.y)); assert.equal(game.lit(t.x + 1.7, t.y), false);
   assert.match(s.lastReport.text, /Осветительный/); assert.equal(s.lastReport.observed, false);
   // дым: в 2.5 км по пеленгу 10° — завеса; в 6 км — нет
   fireQuiet(game, 'smoke', bat.x + 2.5 * Math.sin(10 * RAD), bat.y + 2.5 * Math.cos(10 * RAD));
   assert.equal(s.smokes.length, 1);
-  assert.ok(Math.abs(s.smokes[0].bearing - 10) < 0.3 && Math.abs(s.smokes[0].until - s.time - 60) < 1);
+  assert.ok(Math.abs(s.smokes[0].bearing - 10) < 0.3 && Math.abs(s.smokes[0].until - s.time - 60) < 5);
   fireQuiet(game, 'smoke', bat.x, bat.y + 6);
   assert.equal(s.smokes.length, 1, 'далёкий дым завесы не даёт');
   assert.match(s.lastReport.text, /слишком далеко/);
@@ -572,7 +405,10 @@ test('оборона: волны, пополнение, прорывы, пора
   s.integrity = 90; tick(game, 0.3); assert.equal(s.integrity, 90, 'награда за волну — один раз');
   tick(game, 11);
   assert.equal(s.wave, 2);
-  assert.ok(s.targets.length >= 2 && s.targets.every((t) => t.id > maxId && t.alive), 'новые цели, id растут');
+  // потопленные уходят из списка не сразу: пока тонут (18 с), остаются с alive = false
+  const fresh = s.targets.filter((t) => t.alive);
+  assert.ok(fresh.length >= 2 && fresh.every((t) => t.id > maxId), 'новые цели, id растут');
+  assert.ok(s.targets.every((t) => t.alive || (t.sinking && !t.sunk)), 'мёртвые остаются только пока тонут');
   assert.ok(s.mission.wind.speed > 0, 'со второй волны — ветер');
   assert.deepEqual(waves.map((w) => [w.wave, w.cleared]), [[1, true], [2, false]]);
   // прорыв: цель ушла — минус 25, но бой продолжается

@@ -5,7 +5,7 @@
 // game.setPin / selectTarget / setAlidade / recordMeasurement.
 import { createOverlay } from './plot-overlay.js';
 import { createPhotos } from './plot-photos.js';
-import { CHART, drawChart, drawPinAtlas, drawPinColumn, PIN_COLS, drawLeadAtlas, drawRulerScale, drawTag } from './plot-chart.js';
+import { CHART, drawChart, drawPinAtlas, drawPinColumn, PIN_COLS, PIN_ROWS, drawLeadAtlas, drawRulerScale, drawTag } from './plot-chart.js';
 
 const DEG = Math.PI / 180;
 const TAU = Math.PI * 2;
@@ -288,7 +288,7 @@ export function createPlotStation(ctx) {
   drawPinAtlas(atlasCanvas, label);
   const atlasTex = TX.canvasTexture(atlasCanvas, { aniso: 4 });
   const atlasMat = new THREE.MeshBasicMaterial({ map: atlasTex });
-  const pinBodyMats = [mat.bakelite, mat.ochre, mat.steel];
+  const pinBodyMats = [mat.bakelite, mat.ochre, mat.steel, mat.steel];
   const pinBodyGeo = (() => {
     const ring = G.xf(new THREE.RingGeometry(0.0082, 0.0112, 24), { p: [0, 0, 0.0012] });
     const dot = G.xf(new THREE.CircleGeometry(0.0017, 10), { p: [0, 0, 0.0012] });
@@ -330,7 +330,7 @@ export function createPlotStation(ctx) {
     const col = (pin.id - 1) % PIN_COLS;
     for (let i = 0; i < uv.count; i++) {
       const a = ((pos.getX(i) - HANDLE.x) / HANDLE.r * 0.94 + 1) / 2, b = ((pos.getY(i) - HANDLE.y) / HANDLE.r * 0.94 + 1) / 2;
-      uv.setXY(i, (col + a) / PIN_COLS, (2 - row + b) / 3);
+      uv.setXY(i, (col + a) / PIN_COLS, (PIN_ROWS - 1 - row + b) / PIN_ROWS);
     }
     uv.needsUpdate = true;
   }
@@ -408,6 +408,16 @@ export function createPlotStation(ctx) {
     return P[(s.plot && s.plot.pivot) || 0] || m.battery || (m.map && m.map.battery) || null;
   };
   const isDead = (t) => !t.alive || t.escaped;
+  /** Поражённая цель ещё на плаву (догорает): остаётся в state.targets с alive = false, пока не станет sunk. */
+  const isSinking = (t) => !t.alive && !t.escaped && !!t.sinking && !t.sunk;
+  // события, которых нет в состоянии: вспышка попадания по своему и предупреждение о налёте (за 10 с до него)
+  const fx = { friendHit: {}, raidWarn: null, view: null };
+  disposers.push(game.on('friend', (e) => { if (e && e.hit) fx.friendHit[e.id] = state().time; }));
+  disposers.push(game.on('raid', (e) => {
+    if (!e) return;
+    if (e.phase === 'warning') fx.raidWarn = { from: e.from || 0, until: state().time + (e.eta || 10) + 0.5 };
+    else fx.raidWarn = null;
+  }));
 
   let loupe = false, zoom = 0;                             // zoom: 0 — основной вид … 1 — лупа
   const loupeC = { u: 0, v: 0 };
@@ -463,7 +473,7 @@ export function createPlotStation(ctx) {
   function movePin(id, x, y) {
     x = Math.round(clamp(x, 0, MAP) * 100) / 100; y = Math.round(clamp(y, 0, MAP) * 100) / 100;
     const s = state(), cur = plotOf(s).pins[id], t = targetById(id);
-    if (!known(t)) return;
+    if (!known(t) || !t.alive) return;
     if (!cur || cur.x !== x || cur.y !== y) game.setPin(id, x, y);
     pinMoved[id] = t.reported ? { time: t.reported.time, x: t.reported.x, y: t.reported.y } : { time: -1, x: null, y: null };
   }
@@ -663,6 +673,7 @@ export function createPlotStation(ctx) {
 
   function resetLocal() {
     pinMoved = {};
+    fx.friendHit = {}; fx.raidWarn = null;
     drag = null; lastTap = null;
     accB = accR = 0;
     if (loupe) setLoupe(false);
@@ -732,7 +743,7 @@ export function createPlotStation(ctx) {
       const o = pinOrigin(s, t, _o);
       pin.g.position.set(o.u, o.v, o.tray ? 0.008 - PLANE_Z + 0.0005 : 0.0018 + t.id * 0.0002);
       pin.g.scale.setScalar(o.s);
-      setPinRow(pin, isDead(t) ? 2 : t.id === activeId ? 1 : 0);
+      setPinRow(pin, isSinking(t) ? 3 : isDead(t) ? 2 : t.id === activeId ? 1 : 0);
     }
     // цели, которых больше нет (новое задание, прошлая волна обороны): фишку убираем совсем
     for (const id in pins) if (!pins[id].seen) { const q = pins[id]; plane.remove(q.g); q.capGeo.dispose(); delete pins[id]; delete hotspots['pin' + id]; }
@@ -750,7 +761,9 @@ export function createPlotStation(ctx) {
     lampRecorded.set(!!rec && rec.bearing === a.bearing && rec.range === a.range);
 
     photos.update(s);
-    overlay.update(s, game, performance.now() / 1000, zoom);
+    fx.view = zoom > 0.5 ? { x: uKm(loupeC.u), y: vKm(loupeC.v) } : null;
+    if (fx.raidWarn && (!mission || s.phase !== 'playing' || s.time < fx.raidWarn.until - 12)) fx.raidWarn = null;   // бой кончился или начат заново
+    overlay.update(s, game, performance.now() / 1000, zoom, fx);
 
     // отметки упреждения
     let lead = false;
@@ -839,10 +852,22 @@ export function createPlotStation(ctx) {
       get loupe() { return loupe; },
       get leadVisible() { return leadMesh.visible; },
       get photos() { return photos.shown; },
+      /** id своих кораблей на аэрофотоснимке выстрела n. */
+      photoFriends(n) { return photos.friendsOn(n); },
       /** Что нарисовано на слое карты: { areas:[id целей], lights, smokes, marks:{id:'rough'|'lost'|'fog'}, pairs, tint, wind }. */
       get overlay() { return JSON.parse(JSON.stringify(overlay.info)); },
       /** id целей, чьи квадраты ночного поиска сейчас показаны. */
       get areas() { return overlay.info.areas.slice(); },
+      /** Свои корабли на карте: [{ id, x, y, state: 'ok'|'hit'|'sunk'|'arrived', ring (круг 0.25 км под лупой), convoy }]. */
+      get friends() { return JSON.parse(JSON.stringify(overlay.info.friends)); },
+      /** Сколько пеленгов трубы наблюдательного поста нарисовано. */
+      get scopeLines() { return overlay.info.scopeLines; },
+      /** Сектор трубы на карте: { bearing, fov } | null. */
+      get scope() { return overlay.info.scope ? { ...overlay.info.scope } : null; },
+      /** Налёт на карте: null | { stamp: true, phase, planes: [{ id, x, y, off (за рамкой — на краю со стрелкой), attacked }] }. */
+      get raid() { return overlay.info.raid ? JSON.parse(JSON.stringify(overlay.info.raid)) : null; },
+      /** Строка атласа фишки: 0 обычная, 1 выбранная, 2 поражена/ушла, 3 тонет (догорает). */
+      pinRow(id) { return pins[id] ? pins[id].row : -1; },
       /** Видна ли фишка цели (в лотке или на карте). */
       pinVisible(id) { return !!(pins[id] && pins[id].g.visible); },
       setLoupe(b) { setLoupe(b); },

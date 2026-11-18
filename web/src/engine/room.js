@@ -6,7 +6,9 @@ import * as THREE from 'three';
 import { merge, xf, rivetGeometry, rod, boxUV, lathe, pipeGeometry } from './geom.js';
 import { cageLampParts, valveWheelGeometry } from './controls/decor.js';
 
-export const ROOM = { radius: 3.0, height: 2.6, ring: 2.05, slots: 6 };
+// Восемь постов через 45°. Радиусы подобраны так, чтобы стена оставалась на z ≈ −0.95 в координатах поста,
+// а габарит поста (|x| ≤ 0.9, z ≤ 0.35) не пересекался с соседним: (ring − 0.35)·tg 22.5° ≥ 0.9.
+export const ROOM = { radius: 3.55, height: 2.6, ring: 2.6, slots: 8 };
 
 const TAU = Math.PI * 2, DEG = Math.PI / 180;
 const POOL = 0.15;            // яркость «пятен света» от плафонов
@@ -79,11 +81,12 @@ export function createRoom(engine) {
     wallParts.push(disc);
     for (let k = 0; k < 12; k++) {
       const th = (15 + 30 * k) * DEG;
-      const beam = new THREE.BoxGeometry(0.1, 0.17, 2.36); boxUV(beam, mat.WEAR_REPEAT);
+      const BL = R - 0.64;                                           // от центрального кольца до стены
+      const beam = new THREE.BoxGeometry(0.1, 0.17, BL); boxUV(beam, mat.WEAR_REPEAT);
       // балка идёт вдоль радиуса: её длинная ось Z → после place смотрит к центру
-      wallParts.push(place(beam, th, 0.6 + 2.36 / 2, H - 0.085));
-      const fl = new THREE.BoxGeometry(0.2, 0.014, 2.36); boxUV(fl, mat.WEAR_REPEAT);
-      wallParts.push(place(fl, th, 0.6 + 2.36 / 2, H - 0.176));
+      wallParts.push(place(beam, th, 0.6 + BL / 2, H - 0.085));
+      const fl = new THREE.BoxGeometry(0.2, 0.014, BL); boxUV(fl, mat.WEAR_REPEAT);
+      wallParts.push(place(fl, th, 0.6 + BL / 2, H - 0.176));
     }
     const ring = new THREE.LatheGeometry([[0.48, H], [0.48, H - 0.24], [0.48, H - 0.24], [0.66, H - 0.24], [0.66, H - 0.24], [0.66, H]]
       .map(([r, y]) => new THREE.Vector2(r, y)), 40);
@@ -145,10 +148,11 @@ export function createRoom(engine) {
     }
   }
 
-  // ---------- простенки между постами (на 30° + 60°·k): плафон, стояк с вентилем или кабельная коробка ----------
+  // ---------- простенки между постами (посередине между осями): плафон, стояк с вентилем или кабельная коробка ----------
   const lampSpots = [];
-  for (let k = 0; k < 6; k++) {
-    const th = (30 + 60 * k) * DEG;
+  const STEP = 360 / ROOM.slots;
+  for (let k = 0; k < ROOM.slots; k++) {
+    const th = (k + 0.5) * STEP * DEG;
     const lampY = 1.36;
     // плафон на кронштейне
     const lp = cageLampParts(1.15);
@@ -249,7 +253,7 @@ export function createRoom(engine) {
       }
     };
     for (const s of lampSpots) {             // изогнутые пятна на стене
-      const cols = 8, half = 26 * DEG, y0 = 0.2, y1 = 2.3, rr = R - 0.1, pts = [];
+      const cols = 8, half = 26 * 3.0 / R * DEG, y0 = 0.2, y1 = 2.3, rr = R - 0.1, pts = [];
       for (let c = 0; c <= cols; c++) {
         const t = c / cols, th = s.theta - half + 2 * half * t;
         pts.push([polar(rr, th, y0), t, 0], [polar(rr, th, y1), t, 1]);
@@ -257,8 +261,8 @@ export function createRoom(engine) {
       quadStrip(pts, cols);
     }
     const flat = (y, size) => quadStrip([[[-size, y, -size], 0, 0], [[-size, y, size], 0, 1], [[size, y, -size], 1, 0], [[size, y, size], 1, 1]], 1);
-    flat(H - 0.26, 2.3);                     // потолок вокруг центрального плафона
-    flat(0.05, 2.6);                         // пол под ним
+    flat(H - 0.26, 2.3 * R / 3.0);                     // потолок вокруг центрального плафона
+    flat(0.05, 2.6 * R / 3.0);                         // пол под ним
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));

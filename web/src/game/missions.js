@@ -13,6 +13,12 @@ export function rng(seed) {
 
 export const MAP = 20; // км
 
+/** Свои корабли: hp, скорость (км/ч). */
+export const FRIEND_KINDS = {
+  patrol:    { name: 'Сторожевой катер', hp: 2, speed: 20, names: ['Стриж', 'Чайка', 'Буревестник', 'Кречет'] },
+  transport: { name: 'Транспорт',        hp: 3, speed: 22, names: ['Онега', 'Вятка', 'Двина', 'Ладога'] },
+};
+
 // gun: { range (км), period (с), dmg, p } — ответный огонь по батарее
 export const KINDS = {
   barge:      { name: 'Баржа',             site: 'sea',    armored: false, hp: 1, radius: 0.07, speed: 0 },
@@ -134,7 +140,7 @@ export const CAMPAIGN = [
     brief: 'Береговой форт с толстыми бетонными стенами: только бронебойные, нужно три прямых попадания. РЛС на соседнем острове наводит его огонь.\n\nВыбирайте порядок сами.',
   },
   {
-    id: 'm20', wind: [3, 8], name: 'Танкеры', seed: 220, shells: { he: 18, ap: 4 },
+    id: 'm20', wind: [3, 8], name: 'Танкеры', seed: 220, raids: [{ at: 120, planes: 2, from: 340 }], shells: { he: 18, ap: 4 },
     targets: [{ kind: 'tanker', range: [9, 12], bearing: [310, 350], path: 11 }, { kind: 'tanker', range: [10, 13], bearing: [10, 50], path: 11, delay: 50 }, { kind: 'destroyer', range: [10, 13], bearing: [330, 30], path: 6 }],
     brief: 'Два танкера везут топливо для флота противника. Каждый выдерживает три попадания. Эсминец прикрывает конвой.\n\nНе дайте уйти ни одному танкеру.',
   },
@@ -154,7 +160,7 @@ export const CAMPAIGN = [
     brief: 'Форт прикрывает высадку десанта, а скрытая батарея поддерживает его огнём. Катера выйдут через полторы минуты.\n\nСильный ветер — следите за поправками.',
   },
   {
-    id: 'm24', wind: [5, 10], name: 'Генеральное сражение', seed: 264, shells: { he: 22, ap: 14 },
+    id: 'm24', wind: [5, 10], name: 'Генеральное сражение', seed: 264, raids: [{ at: 110, planes: 3, from: 20 }], shells: { he: 22, ap: 14 },
     targets: [{ kind: 'battleship', range: [14, 17], bearing: [345, 15], path: 6 }, { kind: 'fort', range: [9, 13] }, { kind: 'radar', range: [11, 15] }, { kind: 'submarine', range: [9, 11], bearing: [300, 340], path: 7, delay: 80 }, { kind: 'landing', range: [10, 12], bearing: [5, 30], delay: 150 }],
     brief: 'Всё, что есть у противника, — против одной батареи. Линкор, форт, РЛС, подлодка и десант.\n\nЭто последний бой кампании. Удачи, командир.',
   },
@@ -170,7 +176,7 @@ export const CAMPAIGN = [
     brief: 'Густой туман. Разведка видит цели урывками: донесения приходят вдвое реже, координаты — с точностью до ста метров, а корректировщик оценивает отклонения лишь с точностью до пятидесяти.\n\nКонвой не должен уйти. Пристреливайтесь и не жалейте снарядов — очередь или «вилка» помогут накрыть цель.',
   },
   {
-    id: 'm27', wind: [5, 9], name: 'Штормовая дуэль', seed: 297, weather: 'storm', shells: { he: 16, ap: 4, smoke: 3 },
+    id: 'm27', wind: [5, 9], name: 'Штормовая дуэль', seed: 297, weather: 'storm', raids: [{ at: 90, planes: 2, from: 310 }], shells: { he: 16, ap: 4, smoke: 3 },
     targets: [{ kind: 'destroyer', range: [9, 12], bearing: [330, 30], path: 6 }, { kind: 'battery', range: [10, 14] }],
     brief: 'Шторм. Ветер меняется каждые полторы-две минуты — МЕТЕО сообщит по радио. После каждой смены ветра расчёт вычислителя устаревает: пересчитайте угол и поправку пеленга.\n\nЭсминец и береговая батарея бьют по «Утёсу». Дымовой снаряд (ДЫМ), положенный в 1–4 км от батареи в сторону противника, на минуту сбивает ему прицел.',
   },
@@ -188,6 +194,63 @@ export const CAMPAIGN = [
     id: 'm30', wind: [5, 9], name: 'Ночь и туман', seed: 330, night: true, weather: 'storm', shells: { he: 20, ap: 14, illum: 12, smoke: 4, shrap: 8 },
     targets: [{ kind: 'cruiser', range: [11, 14], bearing: [340, 20], path: 7 }, { kind: 'battery', locate: 'sound', range: [9, 13] }, { kind: 'landing', range: [10.5, 12], bearing: [320, 350], delay: 80 }, { kind: 'landing', range: [11, 12.5], bearing: [10, 40], delay: 170 }],
     brief: 'Штормовая ночь. Крейсер, скрытая батарея и две волны десанта — и всё это в темноте, при ветре, который меняется каждую минуту.\n\nСвет, дым, шрапнель, бронебойные — у вас есть всё. Это последний бой. Удачи, командир.',
+  },
+  // ---------------- ЧАСТЬ V · КОНВОЙ ----------------
+  // friends: path — точки [dx, dy] в км от батареи; near — индекс цели, возле которой ходит дозор
+  {
+    id: 'm31', wind: [2, 5], name: 'Проводка', seed: 341, shells: { he: 18, ap: 0, smoke: 3 },
+    friends: [
+      { kind: 'transport', convoy: true, path: [[-3, 4], [1.6, 4]] },
+      { kind: 'transport', convoy: true, path: [[-3.6, 4], [1, 4]] },
+      { kind: 'transport', convoy: true, path: [[-4.2, 4], [0.4, 4]] },
+    ],
+    targets: [{ kind: 'destroyer', hunts: true, range: [9, 11], bearing: [345, 20] }, { kind: 'submarine', hunts: true, range: [8.5, 10], bearing: [310, 335], delay: 80 }],
+    brief: 'Мимо «Утёса» идёт наш конвой — три транспорта. Они отмечены на планшете как «СВОИ», их положение известно всегда.\n\nЭсминец и подводная лодка противника охотятся на конвой. Утопите их раньше, чем они утопят транспорты, — или продержитесь, пока конвой не дойдёт до порта. Дымовой снаряд, положенный рядом с транспортом (до 1,2 км), сбивает охотникам прицел.\n\nСнаряд, упавший ближе 250 м от своего корабля, попадёт по нему. За каждого потопленного своего — минус звезда.',
+  },
+  {
+    id: 'm32', wind: [3, 6], name: 'Воздух!', seed: 352, shells: { he: 20, ap: 0, smoke: 3 },
+    raids: [{ at: 50, planes: 2, from: 335 }, { at: 135, planes: 3, from: 25 }],
+    friends: [
+      { kind: 'transport', convoy: true, path: [[-3, 4], [1.6, 4]] },
+      { kind: 'transport', convoy: true, path: [[-3.6, 4], [1, 4]] },
+    ],
+    targets: [{ kind: 'destroyer', hunts: true, range: [9, 11], bearing: [340, 20] }, { kind: 'battery', range: [10, 14] }],
+    brief: 'Конвой идёт под ударами с моря и с воздуха. За десять секунд до налёта радист крикнет «ВОЗДУХ!» — переходите на пост ЗЕНИТКА.\n\nКольцевой прицел упреждения не требует: держите самолёт в кольце и давите гашетку. Автомат греется — бейте короткими очередями, иначе заклинит. Каждый прорвавшийся самолёт сбросит бомбы на батарею.\n\nГлавный калибр во время налёта работает как обычно: эсминец охотится на транспорты.',
+  },
+  {
+    id: 'm33', wind: [2, 5], name: 'Свой в тумане', seed: 363, weather: 'fog', shells: { he: 22, ap: 0 },
+    friends: [{ kind: 'patrol', near: 0, loop: true }],
+    targets: [{ kind: 'barge', range: [6.5, 8.5], bearing: [345, 15] }, { kind: 'transport', range: [8.5, 11], bearing: [300, 330], path: 12 }, { kind: 'depot', range: [9, 13] }],
+    brief: 'Туман. У баржи с боеприпасами противника крутится наш сторожевой катер — ведёт разведку и уходить не собирается.\n\nПрежде чем стрелять по барже, посмотрите на планшет: свой катер должен быть не ближе 400 метров от точки прицеливания. В тумане корректировщик видит плохо, а с наблюдательного поста дальше четырёх километров не видно ничего.\n\nТранспорт уйти не должен.',
+  },
+  {
+    id: 'm34', wind: [2, 6], name: 'Рейдеры во тьме', seed: 374, night: true, noSpotter: true, shells: { he: 20, ap: 0, illum: 12, smoke: 3 },
+    friends: [
+      { kind: 'transport', convoy: true, path: [[-3, 4], [1.6, 4]] },
+      { kind: 'transport', convoy: true, path: [[-3.6, 4], [1, 4]] },
+      { kind: 'transport', convoy: true, path: [[-4.2, 4], [0.4, 4]] },
+    ],
+    targets: [{ kind: 'destroyer', hunts: true, range: [9, 11], bearing: [345, 20] }, { kind: 'minelayer', hunts: true, range: [9, 10.5], bearing: [310, 335], delay: 90 }],
+    brief: 'Ночь. На конвой вышли рейдеры. Их выдают только вспышки выстрелов по транспортам — подсветите квадрат осветительным, и разведка даст точные координаты.\n\nКорректировщик этой ночью на связь не вышел. Разрывы наблюдайте сами: на посту НАБЛЮДЕНИЕ наведите трубу на освещённую цель — расчёт доложит, куда лёг снаряд относительно неё.',
+  },
+  {
+    id: 'm35', wind: [3, 7], name: 'Дозор у берега', seed: 385, shells: { he: 18, ap: 0, shrap: 8, smoke: 2 },
+    raids: [{ at: 95, planes: 3, from: 350 }],
+    friends: [{ kind: 'patrol', path: [[-3, 2.6], [3, 2.6]], loop: true }],
+    targets: [{ kind: 'howitzer', locate: 'sound', range: [10, 14] }, { kind: 'landing', range: [10, 11.5], bearing: [330, 355], delay: 20 }, { kind: 'landing', range: [10.5, 12], bearing: [5, 30], delay: 110 }],
+    brief: 'Десант идёт к берегу, скрытая гаубичная батарея бьёт по «Утёсу», а в воздухе — тройка бомбардировщиков.\n\nВдоль берега ходит наш сторожевой катер. Шрапнель косит десант в широком круге — и своих тоже. Бейте катера противника подальше от берега, пока они не подошли к дозору.',
+  },
+  {
+    id: 'm36', wind: [4, 8], name: 'Конвой прорвался', seed: 396, shells: { he: 22, ap: 14, smoke: 4 },
+    raids: [{ at: 70, planes: 3, from: 330 }, { at: 200, planes: 4, from: 30 }],
+    friends: [
+      { kind: 'transport', convoy: true, path: [[-3, 4], [1.6, 4]] },
+      { kind: 'transport', convoy: true, path: [[-3.6, 4], [1, 4]] },
+      { kind: 'transport', convoy: true, path: [[-4.2, 4], [0.4, 4]] },
+      { kind: 'patrol', path: [[-2.4, 4.7], [2.2, 4.7]] },
+    ],
+    targets: [{ kind: 'cruiser', hunts: true, range: [10.5, 12.5], bearing: [345, 20] }, { kind: 'destroyer', hunts: true, range: [9, 10.5], bearing: [310, 335], delay: 70 }, { kind: 'battery', locate: 'sound', range: [10, 14] }],
+    brief: 'Последний конвой с подкреплением идёт в порт. Противник бросил на него всё: крейсер, эсминец, скрытую батарею и две волны авиации.\n\nКрейсер — только бронебойными. Конвой прикрывает сторожевой катер — не заденьте его. Дым у транспортов, зенитка по самолётам, главный калибр по рейдерам.\n\nДоведите конвой, командир.',
   },
 ];
 
@@ -288,4 +351,54 @@ export function soundPosts(map, bat) {
     { name: 'ЗВ-1', x: r2(x1), y: r2(coastAt(map, x1) - 0.3) },
     { name: 'ЗВ-2', x: r2(x2), y: r2(coastAt(map, x2) - 0.3) },
   ];
+}
+
+/** Хэш строки (FNV-1a) → зерно ГПСЧ. */
+export function hashSeed(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+
+const DAILY_A = ['Северный', 'Стальной', 'Тихий', 'Дальний', 'Зимний', 'Штормовой', 'Красный', 'Гранитный', 'Утренний', 'Седой'];
+const DAILY_N = ['прибой', 'маяк', 'ветер', 'залив', 'рубеж', 'дозор', 'якорь', 'горизонт', 'фарватер', 'мыс'];
+
+/** Задание дня: описание полностью определяется датой 'YYYY-MM-DD' (одинаково на всех устройствах). */
+export function dailyDef(dateKey) {
+  const seed = hashSeed('arta-daily-' + dateKey), r = rng(seed);
+  const pick = (a) => a[Math.floor(r() * a.length)];
+  const wr = r();
+  const weather = wr < 0.6 ? 'clear' : wr < 0.8 ? 'fog' : 'storm';
+  const soft = ['barge', 'depot', 'transport', 'radar', 'tanker'];
+  const armed = ['battery', 'howitzer', 'destroyer', 'bunker'];
+  const fast = ['landing', 'minelayer', 'submarine'];
+  const heavy = ['cruiser', 'fort'];
+  const n = 3 + Math.floor(r() * 3), targets = [];
+  for (let i = 0; i < n; i++) {
+    // состав смешанный: первая — «мягкая», вторая — огрызается, дальше — что выпадет (в тумане без быстрых беглецов)
+    const pool = i === 0 ? soft : i === 1 ? armed : i === 2 ? (weather === 'fog' ? soft : fast) : i === 3 ? heavy : soft.concat(armed);
+    let kind = pick(pool), guard = 0;
+    while (targets.some((t) => t.kind === kind) && guard++ < 8) kind = pick(pool);
+    const r0 = kind === 'landing' ? 10 : 6 + r() * 6;
+    const b0 = Math.round(300 + r() * 80) % 360;
+    targets.push({ kind, range: [Math.round(r0 * 10) / 10, Math.round((r0 + 2) * 10) / 10], bearing: [b0, (b0 + 40) % 360], path: kind === 'submarine' ? 7 : 11, delay: i < 2 ? 0 : (i - 1) * 45 });
+  }
+  const has = (k) => targets.some((t) => t.kind === k);
+  const armor = targets.filter((t) => KINDS[t.kind].armored).length;
+  const shells = { he: 8 + 4 * n, ap: armor ? 6 + 5 * armor : 0, smoke: 2, shrap: has('landing') ? 5 : 0 };
+  const w0 = weather === 'storm' ? 5 + Math.floor(r() * 5) : Math.floor(r() * 8);
+  const def = {
+    id: 'daily-' + dateKey, daily: dateKey, seed: seed % 100000, weather, wind: [w0, w0], shells, targets,
+    name: pick(DAILY_A) + ' ' + pick(DAILY_N),
+  };
+  if (r() < 0.4) def.raids = [{ at: 60 + Math.round(r() * 120), planes: 2 + Math.floor(r() * 2), from: Math.round(300 + r() * 120) % 360 }];
+  if (r() < 0.3) def.friends = [{ kind: 'patrol', near: 0, loop: true }];
+  const d = dateKey.split('-');
+  def.title = 'ЗАДАНИЕ ДНЯ · ' + d[2] + '.' + d[1];
+  const names = targets.map((t) => KINDS[t.kind].name.toLowerCase());
+  def.brief = 'Задание дня ' + d[2] + '.' + d[1] + '.' + d[0] + ' — одно на всех, попытки не ограничены, в зачёт идёт лучший счёт.\n\nЦели: ' + names.join(', ') + '. ' +
+    (weather === 'fog' ? 'Туман. ' : weather === 'storm' ? 'Шторм, ветер меняется. ' : 'Видимость хорошая. ') +
+    (def.raids ? 'Возможен налёт авиации — зенитка наготове. ' : '') + (def.friends ? 'В районе целей — наш сторожевой катер, не заденьте. ' : '') +
+    '\n\nСчёт: звёзды, прочность батареи, время, расход снарядов; за огонь по своим — штраф.';
+  return def;
 }

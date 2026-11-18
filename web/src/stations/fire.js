@@ -266,20 +266,22 @@ export function createFireStation(ctx) {
     }),
     game.on('impact', e => {
       view.impact(e);
+      // Доклад корректировщика идёт по радио с задержкой — его текст печатаем по событию 'report',
+      // а здесь только то, что видно из башни сразу: попадание и гибель цели.
       const lines = [];
       const text = e && e.report && e.report.text;
-      if (text) lines.push(text);
       ((e && e.hits) || []).forEach(h => {
         const name = (h.target && h.target.label) || 'ЦЕЛЬ';
         if (h.destroyed) lines.push(name + ' УНИЧТОЖЕНА');
         else if (!text) lines.push(name + ': ПОПАДАНИЕ');
       });
-      // первый снаряд «вилки» без попаданий: доклад придёт со вторым разрывом
-      if (!lines.length && e && e.pair != null && !e.report) return;
+      // доклад с текстом ещё в пути; первый снаряд «вилки» без попаданий — доклад придёт со вторым разрывом
+      if (!lines.length && (text || (e && e.pair != null && !e.report))) return;
       if (!lines.length) lines.push('РАЗРЫВ. ЦЕЛЬ НЕ НАБЛЮДАЮ');
       const animate = visibleNow();
       lines.forEach(l => telegraph.print(l, { animate }));
     }),
+    game.on('report', r => { if (r && r.text) telegraph.print(r.text, { animate: visibleNow() }); }),
   ];
 
   function reset() {

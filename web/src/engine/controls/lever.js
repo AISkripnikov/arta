@@ -225,7 +225,8 @@ export function slewLever(c, opts = {}) {
     onDrag(e) {
       if (!held) return;
       const along = e.totalDx * axis.x + e.totalDy * axis.y;
-      raw = clamp(v0 + along / (axis.ppm * L * Math.sin(SLEW_MAX)), -1, 1);
+      const sens = (c.engine.settings && +c.engine.settings.sens) || 1;   // настройка чувствительности: рычаг отклоняется охотнее
+      raw = clamp(v0 + along * sens / (axis.ppm * L * Math.sin(SLEW_MAX)), -1, 1);
       st.x = raw; st.v = 0; apply();
     },
     onUp() {

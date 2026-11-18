@@ -10,6 +10,8 @@ import { finish, planeMapper, sweepAngle, callSafe, TAU, DEG } from './base.js';
  * onTurn: приращение угла, «по часовой для игрока» = +.
  * → { object3D, angle (накопленный угол, рад), spin(deltaRad) — повернуть визуально без события, enabled }
  */
+const sensOf = (c) => { const v = c.engine.settings && +c.engine.settings.sens; return v > 0 ? v : 1; };
+
 export function handwheel(c, opts = {}) {
   const { radius: R = 0.16, spokes = 4, knob = true } = opts;
   const tube = Math.max(0.009, R * 0.085);
@@ -84,7 +86,8 @@ export function handwheel(c, opts = {}) {
       pu = u; pv = v;
       if (dPhi === 0) return;
       applyVisual(dPhi);                                 // рукоятка идёт за пальцем
-      const delta = mapper.facing ? -dPhi : dPhi;        // по часовой для игрока = +
+      // настройка «чувствительность маховиков» (engine.settings.sens): тот же ход пальца даёт больший/меньший поворот
+      const delta = (mapper.facing ? -dPhi : dPhi) * sensOf(c);   // по часовой для игрока = +
       angle += delta;
       if (tickAngle > 0) {
         tickAcc += Math.abs(delta);

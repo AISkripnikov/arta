@@ -1,4 +1,5 @@
-// Прозрачный слой поверх карты планшета: полёт снаряда, круги разрывов, посты и пеленги звукометрии.
+// Прозрачный слой поверх карты планшета: полёт снаряда, круги разрывов, посты и пеленги звукометрии,
+// свои корабли и их курсы, пеленги и сектор трубы наблюдательного поста, воздушный налёт, тонущие цели.
 // Рисуется на отдельном холсте и перерисовывается только когда что-то изменилось.
 import { CHART } from './plot-chart.js';
 
@@ -10,6 +11,17 @@ const font = (px) => `600 ${Math.round(px * Z)}px Oswald, "Arial Narrow", sans-s
 const cx = (x) => (x - CHART.X0) * S;
 const cy = (y) => PX - (y - CHART.Y0) * S;
 const RAD = Math.PI / 180;
+const M = CHART.MAP;
+const LAND_KINDS = { battery: 1, howitzer: 1, bunker: 1, depot: 1, fort: 1, radar: 1 };
+const q05 = (v) => Math.round(v * 20) / 20;
+/** Сколько км от точки (x, y) по пеленгу до рамки карты [lo…M−lo]; точка вне рамки → 0. */
+function toEdge(x, y, bearing, lo = 0) {
+  const dx = Math.sin(bearing * RAD), dy = Math.cos(bearing * RAD);
+  let k = 1e9;
+  if (dx > 1e-9) k = Math.min(k, (M - lo - x) / dx); else if (dx < -1e-9) k = Math.min(k, (lo - x) / dx);
+  if (dy > 1e-9) k = Math.min(k, (M - lo - y) / dy); else if (dy < -1e-9) k = Math.min(k, (lo - y) / dy);
+  return Math.max(0, k);
+}
 
 export function createOverlay({ THREE, TX, size }) {
   const canvas = TX.makeCanvas(PX, PX);
@@ -21,7 +33,7 @@ export function createOverlay({ THREE, TX, size }) {
   mesh.name = 'plotOverlay';
   let key = '', lastDraw = -1;
   /** Что сейчас нарисовано (для тестов и поста): квадраты, свет, дым, пометки фишек, пары «вилки», тон карты, ветер. */
-  const info = { areas: [], lights: 0, smokes: 0, marks: {}, pairs: 0, tint: 'day', wind: null };
+  const info = { areas: [], lights: 0, smokes: 0, marks: {}, pairs: 0, tint: 'day', wind: null, friends: [], courses: 0, scopeLines: 0, scope: null, raid: null, sinking: [] };
   const PAPER = 'rgba(240,234,214,0.92)';
 
   /** Квадраты ночного поиска, которые ещё нужны: цель жива и точного донесения нет. */
@@ -73,9 +85,163 @@ export function createOverlay({ THREE, TX, size }) {
     return k > 0 ? { x: a.x + da[0] * k, y: a.y + da[1] * k } : null;
   }
 
-  function draw(s, game) {
+  /** Состояние своего корабля для знака: 'sunk' | 'arrived' | 'hit' (вспышка 1.6 с после попадания) | 'ok'. */
+  function friendState(s, f, fx) {
+    if (!f.alive) return 'sunk';
+    if (f.arrived) return 'arrived';
+    const h = fx && fx.friendHit && fx.friendHit[f.id];
+    return h != null && s.time - h >= 0 && s.time - h < 1.6 ? 'hit' : 'ok';
+  }
+  /** Тонущая (догорающая) цель: 0…1 — прогресс, иначе null. */
+  const sinkOf = (s, t) => (!t.alive && !t.escaped && t.sinking && !t.sunk ? Math.min(1, Math.max(0, (s.time - t.sinking.since) / (t.sinking.dur || 18))) : null);
+  /** Где рисовать самолёт: истинное место, а за рамкой карты — на её краю по пеленгу от батареи. */
+  function planeSpot(bat, p) {
+    const lim = toEdge(bat.x, bat.y, p.bearing, 0.35), r = Math.min(p.range, lim), b = p.bearing * RAD;
+    return { x: bat.x + Math.sin(b) * r, y: bat.y + Math.cos(b) * r, off: p.range > lim + 1e-6 };
+  }
+
+  function drawFriends(s, fx) {
+    const G = '24,110,58', DG = '#0f5a2c';
+    info.friends = []; info.courses = 0;
+    for (const f of s.friends || []) {
+      const st = friendState(s, f, fx), x = cx(f.x), y = cy(f.y);
+      // курс: пунктир от корабля по оставшимся точкам маршрута; у конвоя конец пути — «порт»
+      if (f.path && f.path.length > 1 && f.alive && !f.arrived) {
+        info.courses++;
+        ctx.save();
+        ctx.strokeStyle = `rgba(${G},${f.convoy ? 0.8 : 0.45})`; ctx.lineWidth = (f.convoy ? 3.5 : 2.5) * Z; ctx.setLineDash([14 * Z, 9 * Z]);
+        ctx.beginPath();
+        if (f.loop) { ctx.moveTo(cx(f.path[0].x), cy(f.path[0].y)); for (let i = 1; i < f.path.length; i++) ctx.lineTo(cx(f.path[i].x), cy(f.path[i].y)); }
+        else { ctx.moveTo(x, y); for (let i = Math.max(0, f.leg | 0); i < f.path.length; i++) ctx.lineTo(cx(f.path[i].x), cy(f.path[i].y)); }
+        ctx.stroke();
+        ctx.restore();
+      }
+      if (f.convoy && f.path && f.path.length > 1 && !f.loop) {
+        // точка прибытия: кружок с флажком
+        const e = f.path[f.path.length - 1], ex = cx(e.x), ey = cy(e.y), r = 9 * Z;
+        ctx.save();
+        ctx.fillStyle = PAPER; ctx.strokeStyle = DG; ctx.lineWidth = 3 * Z;
+        ctx.beginPath(); ctx.arc(ex, ey, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex, ey - 30 * Z); ctx.stroke();
+        ctx.fillStyle = DG; ctx.beginPath(); ctx.moveTo(ex, ey - 30 * Z); ctx.lineTo(ex + 18 * Z, ey - 24 * Z); ctx.lineTo(ex, ey - 17 * Z); ctx.closePath(); ctx.fill();
+        ctx.restore();
+      }
+      // под лупой — круг 0.25 км: снаряд, упавший внутри, попадёт по своему
+      const ring = Z < 1 && f.alive;
+      if (ring) {
+        ctx.save();
+        ctx.fillStyle = `rgba(${G},0.07)`; ctx.beginPath(); ctx.arc(x, y, 0.25 * S, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+        dashedCircle(x, y, 0.25 * S, `rgba(${G},0.95)`, 3 * Z);
+      }
+      // попадание: красная расходящаяся вспышка
+      if (st === 'hit') {
+        const k = (s.time - fx.friendHit[f.id]) / 1.6;
+        ctx.save();
+        ctx.fillStyle = `rgba(214,40,20,${0.45 * (1 - k)})`; ctx.strokeStyle = `rgba(200,30,16,${1 - k})`; ctx.lineWidth = (7 * (1 - k) + 2) * Z;
+        ctx.beginPath(); ctx.arc(x, y, (0.12 + 0.5 * k) * S * Math.max(Z, 0.6), 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.restore();
+      }
+      // знак: зелёный корпус носом по курсу, в светлой обводке
+      const L = (f.kind === 'transport' ? 26 : 20) * Z, W = (f.kind === 'transport' ? 10 : 7) * Z, dead = st === 'sunk';
+      ctx.save();
+      ctx.translate(x, y); ctx.rotate((f.heading || 0) * RAD);
+      ctx.beginPath();
+      ctx.moveTo(0, -L); ctx.lineTo(W, -L * 0.3); ctx.lineTo(W, L * 0.8); ctx.lineTo(-W, L * 0.8); ctx.lineTo(-W, -L * 0.3); ctx.closePath();
+      ctx.lineJoin = 'round'; ctx.strokeStyle = PAPER; ctx.lineWidth = 7 * Z; ctx.stroke();
+      ctx.fillStyle = dead ? 'rgba(120,130,124,0.9)' : st === 'hit' ? '#c8281a' : `rgb(${G})`; ctx.fill();
+      ctx.strokeStyle = dead ? '#4c5650' : DG; ctx.lineWidth = 2.5 * Z; ctx.stroke();
+      ctx.restore();
+      if (dead) {
+        const c = 22 * Z;
+        ctx.save(); ctx.lineCap = 'round';
+        for (const [col, w] of [[PAPER, 11], ['#b3261a', 6]]) {
+          ctx.strokeStyle = col; ctx.lineWidth = w * Z;
+          ctx.beginPath(); ctx.moveTo(x - c, y - c); ctx.lineTo(x + c, y + c); ctx.moveTo(x + c, y - c); ctx.lineTo(x - c, y + c); ctx.stroke();
+        }
+        ctx.restore();
+      }
+      const lx = x + 30 * Z, ly = y + 26 * Z;
+      text(f.label || 'СВОИ', lx, ly, dead ? '#5a625c' : DG);
+      if (st === 'arrived') {
+        // галочка: дошёл
+        const tx = lx + ctx.measureText(f.label || 'СВОИ').width + 12 * Z;
+        ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        for (const [col, w] of [[PAPER, 11], [DG, 6]]) {
+          ctx.strokeStyle = col; ctx.lineWidth = w * Z;
+          ctx.beginPath(); ctx.moveTo(tx, ly); ctx.lineTo(tx + 9 * Z, ly + 10 * Z); ctx.lineTo(tx + 26 * Z, ly - 14 * Z); ctx.stroke();
+        }
+        ctx.restore();
+      }
+      info.friends.push({ id: f.id, x: f.x, y: f.y, state: st, ring, convoy: !!f.convoy });
+    }
+  }
+
+  function drawRaid(s, fx, bat) {
+    const raid = s.raid, warn = fx && fx.raidWarn && s.time < fx.raidWarn.until ? fx.raidWarn : null;
+    info.raid = null;
+    if (!raid && !warn) return;
+    const RED = '#a51c12';
+    const planes = raid ? raid.planes.filter((p) => p.alive) : [];
+    info.raid = { stamp: true, phase: raid ? raid.phase : 'warning', planes: [] };
+    for (const p of planes) {
+      const q = planeSpot(bat, p), x = cx(q.x), y = cy(q.y), z = Math.max(Z, 0.55);
+      const head = (p.attacked ? p.bearing : p.bearing + 180) * RAD;      // на подходе летит к батарее, после сброса — прочь
+      ctx.save();
+      ctx.translate(x, y); ctx.rotate(head);
+      ctx.beginPath();                                                    // силуэт самолёта, нос вверх
+      ctx.moveTo(0, -20 * z); ctx.lineTo(4 * z, -6 * z); ctx.lineTo(22 * z, 2 * z); ctx.lineTo(22 * z, 7 * z); ctx.lineTo(4 * z, 4 * z);
+      ctx.lineTo(3 * z, 14 * z); ctx.lineTo(9 * z, 18 * z); ctx.lineTo(9 * z, 21 * z); ctx.lineTo(-9 * z, 21 * z); ctx.lineTo(-9 * z, 18 * z); ctx.lineTo(-3 * z, 14 * z);
+      ctx.lineTo(-4 * z, 4 * z); ctx.lineTo(-22 * z, 7 * z); ctx.lineTo(-22 * z, 2 * z); ctx.lineTo(-4 * z, -6 * z); ctx.closePath();
+      ctx.lineJoin = 'round'; ctx.strokeStyle = PAPER; ctx.lineWidth = 6 * z; ctx.stroke();
+      ctx.fillStyle = p.attacked ? 'rgba(120,60,54,0.9)' : RED; ctx.fill();
+      ctx.restore();
+      if (q.off) {
+        // самолёт ещё за рамкой карты: стрелка наружу по пеленгу
+        const b = p.bearing * RAD, dx = Math.sin(b), dy = -Math.cos(b), a0 = 30 * z, a1 = 52 * z;
+        ctx.save(); ctx.strokeStyle = ctx.fillStyle = RED; ctx.lineWidth = 4 * z;
+        ctx.beginPath(); ctx.moveTo(x + dx * a0, y + dy * a0); ctx.lineTo(x + dx * a1, y + dy * a1); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x + dx * (a1 + 12 * z), y + dy * (a1 + 12 * z));
+        ctx.lineTo(x + dx * a1 - dy * 9 * z, y + dy * a1 + dx * 9 * z); ctx.lineTo(x + dx * a1 + dy * 9 * z, y + dy * a1 - dx * 9 * z); ctx.closePath(); ctx.fill();
+        ctx.restore();
+      }
+      info.raid.planes.push({ id: p.id, x: q.x, y: q.y, off: q.off, attacked: !!p.attacked });
+    }
+    // подпись у ближайшего самолёта на подходе: сколько их и дальность
+    const inbound = planes.filter((p) => !p.attacked).sort((a, b) => a.range - b.range);
+    if (inbound.length) {
+      const q = planeSpot(bat, inbound[0]), z0 = Z; Z = Math.max(Z, 0.55);
+      const right = q.x < M - 4;
+      text('САМОЛЁТЫ ' + inbound.length + ' · ' + inbound[0].range.toFixed(1) + ' КМ', cx(q.x) + (right ? 30 : -30) * Z, cy(q.y) - 30 * Z, RED, false, right ? 'left' : 'right');
+      Z = z0;
+    } else if (warn && !raid) {
+      // налёта ещё нет: стрелка на краю карты — откуда ждать
+      const k = toEdge(bat.x, bat.y, warn.from, 0.35), b = warn.from * RAD, x = cx(bat.x + Math.sin(b) * k), y = cy(bat.y + Math.cos(b) * k), z = Math.max(Z, 0.55);
+      const dx = -Math.sin(b), dy = Math.cos(b);
+      ctx.save(); ctx.strokeStyle = ctx.fillStyle = RED; ctx.lineWidth = 5 * z;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + dx * 34 * z, y + dy * 34 * z); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + dx * 50 * z, y + dy * 50 * z);
+      ctx.lineTo(x + dx * 34 * z - dy * 11 * z, y + dy * 34 * z + dx * 11 * z); ctx.lineTo(x + dx * 34 * z + dy * 11 * z, y + dy * 34 * z - dx * 11 * z); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+    // штамп «ВОЗДУХ»: в углу листа, под лупой — в углу кадра
+    const v = fx && fx.view, z = v ? 0.27 : 1;
+    const sx = v ? cx(Math.min(M - 1.2, Math.max(1.2, v.x - 1.85))) : cx(3.3), sy = v ? cy(Math.min(M - 0.5, Math.max(0.6, v.y + 0.82))) : cy(18.95);
+    const w = 300 * z, h = 84 * z;
+    ctx.save();
+    ctx.translate(sx, sy); ctx.rotate(-4 * RAD);
+    ctx.fillStyle = 'rgba(240,234,214,0.8)'; ctx.fillRect(-w / 2, -h / 2, w, h);
+    ctx.strokeStyle = 'rgba(165,28,18,0.92)'; ctx.lineWidth = 7 * z; ctx.strokeRect(-w / 2, -h / 2, w, h);
+    ctx.lineWidth = 2.5 * z; ctx.strokeRect(-w / 2 + 9 * z, -h / 2 + 9 * z, w - 18 * z, h - 18 * z);
+    ctx.font = `700 ${Math.round(54 * z)}px Oswald, "Arial Narrow", sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(165,28,18,0.95)'; ctx.fillText('ВОЗДУХ', 0, 3 * z);
+    ctx.restore();
+  }
+
+  function draw(s, game, fx) {
     ctx.clearRect(0, 0, PX, PX);
     const m = s.mission;
+    info.friends = []; info.courses = 0; info.scopeLines = 0; info.scope = null; info.raid = null; info.sinking = [];
     if (!m) return;
     const bat = m.battery, posts = (m.map && m.map.posts) || [];
     const lights = s.lights || [], smokes = s.smokes || [];
@@ -149,6 +315,31 @@ export function createOverlay({ THREE, TX, size }) {
       text('ЦЕЛЬ ' + a.targetId + '?', x0 + w / 2, y0 + h / 2, '#8f1d14', active, 'center');
     }
 
+    // ---- труба наблюдательного поста: тонкий сектор поля зрения и риска на рамке карты
+    if (s.scope && s.phase === 'playing') {
+      const sb = s.scope.bearing, fov = game.scopeFov ? game.scopeFov() : (s.scope.zoom === 10 ? 6.4 : 16);
+      info.scope = { bearing: sb, fov };
+      const bx = cx(bat.x), by = cy(bat.y), col = m.night ? '150,190,235' : '26,79,156';
+      ctx.save();
+      ctx.beginPath(); ctx.rect(cx(0), cy(M), M * S, M * S); ctx.clip();
+      ctx.fillStyle = `rgba(${col},0.05)`;
+      ctx.beginPath(); ctx.moveTo(bx, by); ctx.arc(bx, by, 40 * S, (sb - fov / 2 - 90) * RAD, (sb + fov / 2 - 90) * RAD); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = `rgba(${col},0.3)`; ctx.lineWidth = 2 * Math.max(Z, 0.5);
+      for (const d of [-fov / 2, fov / 2]) {
+        const [x0, y0, x1, y1] = ray(bat.x, bat.y, sb + d);
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+      }
+      ctx.restore();
+      // риска с «глазом» трубы там, где ось трубы пересекает рамку
+      const k = toEdge(bat.x, bat.y, sb), b = sb * RAD, ex = cx(bat.x + Math.sin(b) * k), ey = cy(bat.y + Math.cos(b) * k);
+      const dx = -Math.sin(b), dy = Math.cos(b), z = Math.max(Z, 0.6);
+      ctx.save();
+      ctx.fillStyle = `rgba(${col},0.95)`; ctx.strokeStyle = PAPER; ctx.lineWidth = 3 * z; ctx.lineJoin = 'round';
+      ctx.beginPath(); ctx.moveTo(ex + dx * 30 * z, ey + dy * 30 * z);
+      ctx.lineTo(ex - dy * 12 * z, ey + dx * 12 * z); ctx.lineTo(ex + dy * 12 * z, ey - dx * 12 * z); ctx.closePath(); ctx.stroke(); ctx.fill();
+      ctx.restore();
+    }
+
     // ---- пеленги звукометрии
     for (const t of s.targets) {
       const r = t.reported;
@@ -182,8 +373,19 @@ export function createOverlay({ THREE, TX, size }) {
     ctx.strokeStyle = 'rgba(40,36,30,0.85)'; ctx.lineWidth = 3.5 * Z;
     for (const ln of lines) {
       const [x0, y0, x1, y1] = ray(ln.x, ln.y, ln.bearing);
-      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
       const b = ln.bearing * RAD;
+      if (ln.from === 'scope') {
+        // пеленг трубы наблюдательного поста: синий штрихпунктир с пометкой «НП»
+        info.scopeLines++;
+        ctx.save();
+        ctx.strokeStyle = PAPER; ctx.lineWidth = 7 * Z; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+        ctx.strokeStyle = 'rgba(22,70,150,0.95)'; ctx.lineWidth = 4 * Z; ctx.setLineDash([26 * Z, 8 * Z, 5 * Z, 8 * Z]);
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+        ctx.restore();
+        text('НП ' + game.fmt.brg(ln.bearing), cx(ln.x + Math.sin(b) * 5.2) + 8 * Z, cy(ln.y + Math.cos(b) * 5.2), '#123a73');
+        continue;
+      }
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
       text(game.fmt.brg(ln.bearing), cx(ln.x + Math.sin(b) * 3.4) + 8 * Z, cy(ln.y + Math.cos(b) * 3.4), 'rgba(40,36,30,0.95)');
     }
     ctx.restore();
@@ -204,6 +406,28 @@ export function createOverlay({ THREE, TX, size }) {
       ctx.fillStyle = '#1a4f9c'; ctx.strokeStyle = '#f0ead6'; ctx.lineWidth = 3 * Z;
       ctx.beginPath(); ctx.moveTo(x, y - 20 * Z); ctx.lineTo(x + 18 * Z, y + 12 * Z); ctx.lineTo(x - 18 * Z, y + 12 * Z); ctx.closePath(); ctx.fill(); ctx.stroke();
       text(q.name, x, y + 38 * Z, '#123a73', false, 'center');
+    }
+
+    // ---- свои корабли
+    drawFriends(s, fx);
+
+    // ---- поражённая цель уходит под воду (постройка — догорает): дуга оставшегося времени у фишки
+    {
+      const pp = (s.plot && s.plot.pins) || {};
+      for (const t of s.targets) {
+        const k = sinkOf(s, t), p = pp[t.id];
+        if (k == null) continue;
+        info.sinking.push(t.id);
+        if (!p) continue;
+        const x = cx(p.x), y = cy(p.y), R = 30 * Z;
+        ctx.save();
+        ctx.strokeStyle = PAPER; ctx.lineWidth = 9 * Z; ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = 'rgba(70,84,96,0.35)'; ctx.lineWidth = 5 * Z; ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = 'rgba(52,66,80,0.95)';
+        ctx.beginPath(); ctx.arc(x, y, R, -Math.PI / 2 + k * Math.PI * 2, Math.PI * 1.5); ctx.stroke();
+        ctx.restore();
+        text(LAND_KINDS[t.kind] ? 'ГОРИТ' : 'ТОНЕТ', x + R + 10 * Z, y + R * 0.6, '#34424f');
+      }
     }
 
     // ---- пометки у фишек: по вспышке (±0.5 км), в тумане (±0.1 км), цель потеряна из света («?»)
@@ -273,6 +497,9 @@ export function createOverlay({ THREE, TX, size }) {
       text('№' + sh.n + ' · ' + Math.max(0, sh.tof - sh.t).toFixed(0) + ' С', cx(p.x) + 18 * Z, cy(p.y) - 22 * Z, '#8a3b06');
     }
 
+    // ---- воздушный налёт
+    drawRaid(s, fx, bat);
+
     // ---- ветер: стрелка «куда дует» и скорость в северо-восточном углу
     const w = m.wind;
     info.wind = w && w.speed > 0 ? { from: w.from, speed: w.speed } : null;
@@ -296,12 +523,12 @@ export function createOverlay({ THREE, TX, size }) {
     mesh,
     info,
     /** Перерисовать при изменениях; во время полёта и анимации разрыва — ~12 раз в секунду. */
-    update(s, game, now, zoom = 0) {
+    update(s, game, now, zoom = 0, fx = null) {
       const z = zoom > 0.5 ? 0.38 : 1;
       const m = s.mission;
       const imps = s.impacts || [];
       const lastImp = imps.length ? imps[imps.length - 1] : null;
-      const animating = (s.flight && s.flight.length) || (lastImp && s.time - lastImp.time < 1.7);
+      let animating = (s.flight && s.flight.length) || (lastImp && s.time - lastImp.time < 1.7);
       const pl = s.plot || {};
       let k = (m ? m.id + m.mapSeed : '') + '|' + imps.length + '|' + s.activeTarget + '|' + s.difficulty + '|' + (pl.pivot || 0) + '|' + JSON.stringify(pl.lines || []);
       for (const t of s.targets || []) if (t.reported && t.reported.sound) k += '|' + t.id + ':' + t.reported.time + (t.alive ? '' : 'x') + (t.moved ? 'm' : '');
@@ -315,12 +542,28 @@ export function createOverlay({ THREE, TX, size }) {
           if (mk) k += '|M' + t.id + mk + p.x + ',' + p.y;
         }
       }
+      // свои корабли, труба, налёт, тонущие цели — с огрублением, чтобы холст не перерисовывался каждый кадр
+      for (const f of s.friends || []) {
+        const st = friendState(s, f, fx);
+        if (st === 'hit') animating = true;
+        k += '|F' + f.id + st + q05(f.x) + ',' + q05(f.y) + ',' + Math.round((f.heading || 0) / 5) + ',' + (f.leg | 0);
+      }
+      if (m && s.scope && s.phase === 'playing') k += '|sc' + Math.round(s.scope.bearing * 2) + '/' + s.scope.zoom;
+      const warn = fx && fx.raidWarn && s.time < fx.raidWarn.until;
+      if (s.raid || warn) {
+        k += '|R' + (s.raid ? s.raid.phase : 'w') + (fx && fx.view ? q05(fx.view.x) + ',' + q05(fx.view.y) : '');
+        if (s.raid) for (const p of s.raid.planes) k += '|' + p.id + (p.alive ? (p.attacked ? 'a' : 'i') + Math.round(p.range * 5) + ',' + Math.round(p.bearing) : 'x');
+      }
+      for (const t of s.targets || []) {
+        const sk = sinkOf(s, t);
+        if (sk != null) k += '|K' + t.id + ':' + Math.floor(sk * 12);
+      }
       k += '|' + z;
       if (k === key && !animating) return;
       if (k === key && now - lastDraw < 0.08) return;
       key = k; lastDraw = now;
       Z = z;
-      draw(s, game);
+      draw(s, game, fx);
       tex.needsUpdate = true;
     },
     dispose() { tex.dispose(); mat.dispose(); mesh.geometry.dispose(); },
