@@ -105,3 +105,4 @@ table.stats { width: 100%; border-collapse: collapse; font-size: 14px; } table.s
 .fault b { color: var(--amber); margin-left: 6px; } .fault i { font-style: normal; color: #ffd9a0; margin-left: 6px; } .fault.fixing { animation: none; background: rgba(90,70,20,.92); }
 .m-card .st em { font-style: normal; font-size: 10px; color: var(--dim); letter-spacing: .08em; margin-left: 8px; }
 #dlgBody .rec { color: var(--ochre); font-weight: 600; letter-spacing: .06em; }
+.menu-row { display: flex; gap: 8px; } .menu-row .btn { flex: 1; }

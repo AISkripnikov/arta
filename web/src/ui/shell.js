@@ -1,3 +1,4 @@
+import { CHANGELOG } from '../changelog.js';
 // DOM-оболочка: меню, HUD, блокнот, брифинг, итоги. Общие эффекты (звук выстрела, тряска, вспышки).
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
@@ -342,6 +343,7 @@ export function createShell({ engine, game, stations = [] }) {
     campaign: showMissions,
     skirmish: () => game.startSkirmish(),
     howto: () => dialog(HOWTO, [{ text: 'ПОНЯТНО', primary: true, fn: showMenu }], showMenu),
+    news: () => showNews(CHANGELOG, true),
     toMenu: showMenu,
     pause: showPause,
     notebook: () => { unread = 0; renderNotebook(); show('notebook'); dirty = true; },
@@ -389,7 +391,25 @@ export function createShell({ engine, game, stations = [] }) {
   window.onAppInfo = (info) => { const el = $('verInfo'); if (el && info) el.textContent = 'ВЕРСИЯ ИГРЫ ' + info.game + (info.bundled ? '' : ' · ОБНОВЛЕНО ПО СЕТИ'); };
   if (window.__appInfo) window.onAppInfo(window.__appInfo);
 
+  // ---------- «ЧТО НОВОГО» ----------
+  const NEWS_KEY = 'arta2.news';
+  const readSeen = () => { try { return +(localStorage.getItem(NEWS_KEY) || 0); } catch (e) { return 0; } };
+  const markSeen = () => { try { localStorage.setItem(NEWS_KEY, String(CHANGELOG[0].id)); } catch (e) { /* хранилище недоступно */ } };
+  function showNews(list, all) {
+    const html = '<h2>ЧТО НОВОГО</h2>' + list.map((e, i) =>
+      `<h3>${esc(e.title.toUpperCase())}${all && i === 0 ? ' · ТЕКУЩАЯ ВЕРСИЯ' : ''}</h3><ul>${e.items.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>`).join('');
+    markSeen();
+    dialog(html, [{ text: 'ПОНЯТНО', primary: true, fn: showMenu }], showMenu);
+  }
+  /** После обновления — один раз показать то, чего игрок ещё не видел (не больше трёх последних выпусков). */
+  function maybeShowNews() {
+    const seen = readSeen(), fresh = CHANGELOG.filter((e) => e.id > seen);
+    if (!fresh.length || s.phase !== 'menu') return;
+    showNews(fresh.slice(0, 3), false);
+  }
+
   sfx('setMuted', game.save.muted);
   showMenu();
+  maybeShowNews();
   return { showMenu, goto, toast };
 }

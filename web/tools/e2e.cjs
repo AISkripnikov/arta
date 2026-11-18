@@ -10,6 +10,8 @@ const path = require('path');
   p.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') { errs++; console.log('CONSOLE', m.text()); } });
   await p.goto('file://' + path.resolve(__dirname, '../../app/src/main/assets/www/index.html'));
   await p.waitForFunction(() => window.__arta);
+  // первое открытие после обновления — окно «ЧТО НОВОГО»
+  if (await p.isVisible('#dialog.show')) await p.click('#dlgBtns .btn');
   await p.click('[data-act=campaign]'); await p.click('.m-card'); await p.click('#dlgBtns .btn');
   const res = await p.evaluate(async () => {
     const { game, engine } = __arta, s = game.state, RAD = Math.PI / 180;
