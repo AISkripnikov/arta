@@ -5,7 +5,7 @@
 // game.setPin / selectTarget / setAlidade / recordMeasurement.
 import { createOverlay } from './plot-overlay.js';
 import { createPhotos } from './plot-photos.js';
-import { CHART, drawChart, drawPinAtlas, drawLeadAtlas, drawRulerScale, drawTag } from './plot-chart.js';
+import { CHART, drawChart, drawPinAtlas, drawPinColumn, PIN_COLS, drawLeadAtlas, drawRulerScale, drawTag } from './plot-chart.js';
 
 const DEG = Math.PI / 180;
 const TAU = Math.PI * 2;
@@ -25,7 +25,6 @@ const MAP = CHART.MAP;
 const CAM = { fov: 50, dist: 1.165, oblique: 5 * DEG, aim: -0.04 };   // основной вид
 const LOUPE = { fov: 14, spanKm: 2.6 };                  // крупный план: высота кадра в км
 const TOKEN_LOUPE = 0.3;                                 // масштаб фишек/визира под лупой
-const MAX_PINS = 6;
 
 const BEARING_PER_TURN = 2;                              // ° на оборот маховика
 const RANGE_PER_TURN = 0.2;                              // км на оборот маховика
@@ -301,6 +300,10 @@ export function createPlotStation(ctx) {
     return G.merge([ring, dot, stem, disc]);
   })();
   const pins = {};                                         // id → { g, body, cap, row }
+  const colLabel = [];                                     // какой номер сейчас нарисован в столбце атласа
+  for (let c = 0; c < PIN_COLS; c++) colLabel[c] = c + 1;
+  /** Цель показывается фишкой: есть донесение или (ночью) хотя бы квадрат поиска. */
+  const known = (t) => !!(t && (t.reported || t.area));
   function makePin(id) {
     const g = new THREE.Group();
     g.name = 'pin' + id;
@@ -311,8 +314,11 @@ export function createPlotStation(ctx) {
     g.add(body, cap);
     g.visible = false;
     plane.add(g);
-    const pin = { id, g, body, cap, row: -1 };
+    const pin = { id, g, body, cap, capGeo, row: -1 };
     pins[id] = pin;
+    // номера целей растут без конца (оборона): столбец атласа перерисовывается под нужный номер
+    const col = (id - 1) % PIN_COLS;
+    if (colLabel[col] !== id) { colLabel[col] = id; drawPinColumn(atlasCanvas, label, col, String(id)); atlasTex.needsUpdate = true; }
     hotspots['pin' + id] = g;
     return pin;
   }
@@ -321,10 +327,10 @@ export function createPlotStation(ctx) {
     pin.row = row;
     pin.body.material = pinBodyMats[row];
     const uv = pin.cap.geometry.attributes.uv, pos = pin.cap.geometry.attributes.position;
-    const col = (pin.id - 1) % 6;
+    const col = (pin.id - 1) % PIN_COLS;
     for (let i = 0; i < uv.count; i++) {
       const a = ((pos.getX(i) - HANDLE.x) / HANDLE.r * 0.94 + 1) / 2, b = ((pos.getY(i) - HANDLE.y) / HANDLE.r * 0.94 + 1) / 2;
-      uv.setXY(i, (col + a) / 6, (2 - row + b) / 3);
+      uv.setXY(i, (col + a) / PIN_COLS, (2 - row + b) / 3);
     }
     uv.needsUpdate = true;
   }
@@ -457,9 +463,9 @@ export function createPlotStation(ctx) {
   function movePin(id, x, y) {
     x = Math.round(clamp(x, 0, MAP) * 100) / 100; y = Math.round(clamp(y, 0, MAP) * 100) / 100;
     const s = state(), cur = plotOf(s).pins[id], t = targetById(id);
-    if (!t || !t.reported) return;
+    if (!known(t)) return;
     if (!cur || cur.x !== x || cur.y !== y) game.setPin(id, x, y);
-    pinMoved[id] = { time: t.reported.time, x: t.reported.x, y: t.reported.y };
+    pinMoved[id] = t.reported ? { time: t.reported.time, x: t.reported.x, y: t.reported.y } : { time: -1, x: null, y: null };
   }
   function setAlidadeTo(xKm, yKm) {
     const bat = battery();
@@ -508,7 +514,7 @@ export function createPlotStation(ctx) {
     if (drag && drag.kind === 'pin' && drag.id === t.id && drag.free) { out.u = drag.free.u; out.v = drag.free.v; out.s = 1; out.tray = false; }
     else if (placed) { out.u = kmU(placed.x); out.v = kmV(placed.y); out.s = tokenScale(); out.tray = false; }
     else {
-      const slot = (t.id - 1) % TRAY.slots, extra = Math.floor((t.id - 1) / TRAY.slots) * 0.012;
+      const slot = (t.id - 1) % TRAY.slots, extra = (Math.floor((t.id - 1) / TRAY.slots) % 2) * 0.012;
       out.u = TRAY.u + extra - HANDLE.x; out.v = TRAY.v0 - BOARD_V - slot * TRAY.pitch - HANDLE.y; out.s = 1; out.tray = true;
     }
     return out;
@@ -519,7 +525,7 @@ export function createPlotStation(ctx) {
     const grab = lerp(0.046, 0.0135, zoom);
     let best = null, bd = grab;
     for (const t of s.targets || []) {
-      if (!t.reported || t.id > MAX_PINS) continue;
+      if (!known(t)) continue;
       const o = pinOrigin(s, t, _o);
       const d = Math.min(Math.hypot(p.u - o.u, p.v - o.v), Math.hypot(p.u - o.u - HANDLE.x * o.s, p.v - o.v - HANDLE.y * o.s));
       if (d < bd) { bd = d; best = { kind: 'pin', id: t.id, dead: isDead(t), su: o.u, sv: o.v, tray: o.tray }; }
@@ -626,6 +632,12 @@ export function createPlotStation(ctx) {
         if (!d.dead && state().activeTarget !== d.id) { game.selectTarget(d.id); audio.tick(); }
         return;
       }
+      if (d.kind === 'none' || d.kind === 'ruler') {
+        // ночью: касание квадрата поиска выбирает цель, о которой ещё нет донесения
+        const s = state(), x = uKm(d.p0.u), y = vKm(d.p0.v);
+        const a = overlay.info.areas.length && s.mission && (s.mission.areas || []).find((q) => overlay.info.areas.includes(q.targetId) && q.targetId !== s.activeTarget && x >= q.x0 && x <= q.x1 && y >= q.y0 && y <= q.y1);
+        if (a) { lastTap = null; game.selectTarget(a.targetId); audio.tick(); return; }
+      }
       if (d.kind === 'pivot') {
         lastTap = null;
         const s = state();
@@ -713,17 +725,17 @@ export function createPlotStation(ctx) {
     for (const id in pins) pins[id].seen = false;
     for (let i = 0; i < targets.length; i++) {
       const t = targets[i];
-      if (t.id > MAX_PINS) continue;
       const pin = pins[t.id] || makePin(t.id);
       pin.seen = true;
-      pin.g.visible = !!t.reported;
-      if (!t.reported) continue;
+      pin.g.visible = known(t);
+      if (!pin.g.visible) continue;
       const o = pinOrigin(s, t, _o);
       pin.g.position.set(o.u, o.v, o.tray ? 0.008 - PLANE_Z + 0.0005 : 0.0018 + t.id * 0.0002);
       pin.g.scale.setScalar(o.s);
       setPinRow(pin, isDead(t) ? 2 : t.id === activeId ? 1 : 0);
     }
-    for (const id in pins) if (!pins[id].seen) pins[id].g.visible = false;
+    // цели, которых больше нет (новое задание, прошлая волна обороны): фишку убираем совсем
+    for (const id in pins) if (!pins[id].seen) { const q = pins[id]; plane.remove(q.g); q.capGeo.dispose(); delete pins[id]; delete hotspots['pin' + id]; }
 
     // лампы
     let fresh = false;
@@ -817,7 +829,7 @@ export function createPlotStation(ctx) {
       /** Положение ручки-диска фишки (за неё удобно тащить) в мировых координатах. */
       pinHandleWorld(id) {
         const t = targetById(id);
-        if (!t || !t.reported) return null;
+        if (!known(t)) return null;
         const o = pinOrigin(state(), t, { u: 0, v: 0, s: 1, tray: false });
         group.updateWorldMatrix(true, false);
         return boardToLocal(o.u + HANDLE.x * o.s, o.v + HANDLE.y * o.s, 0, _w.clone()).applyMatrix4(group.matrixWorld);
@@ -827,6 +839,12 @@ export function createPlotStation(ctx) {
       get loupe() { return loupe; },
       get leadVisible() { return leadMesh.visible; },
       get photos() { return photos.shown; },
+      /** Что нарисовано на слое карты: { areas:[id целей], lights, smokes, marks:{id:'rough'|'lost'|'fog'}, pairs, tint, wind }. */
+      get overlay() { return JSON.parse(JSON.stringify(overlay.info)); },
+      /** id целей, чьи квадраты ночного поиска сейчас показаны. */
+      get areas() { return overlay.info.areas.slice(); },
+      /** Видна ли фишка цели (в лотке или на карте). */
+      pinVisible(id) { return !!(pins[id] && pins[id].g.visible); },
       setLoupe(b) { setLoupe(b); },
     },
     dispose() {

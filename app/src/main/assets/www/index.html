@@ -8,15 +8,17 @@
 </head>
 <body>
 <canvas id="stage"></canvas>
+<div id="night"></div>
 <div id="flash"></div>
 
 <!-- ===== HUD ===== -->
 <div id="hud" class="hidden">
   <header id="topbar">
     <button class="tb-btn" data-act="pause" aria-label="Пауза">❚❚</button>
-    <div class="tb-cell"><span class="k">ВРЕМЯ</span><span class="v" id="hTime">00:00</span></div>
+    <div class="tb-cell"><span class="k" id="hTimeK">ВРЕМЯ</span><span class="v" id="hTime">00:00</span></div>
     <div class="tb-cell grow"><span class="k">ПРОЧНОСТЬ БАТАРЕИ</span><div class="bar"><i id="hInt"></i></div></div>
-    <div class="tb-cell"><span class="k">СНАРЯДЫ</span><span class="v"><b>ОФ</b> <span id="hHe">0</span> &nbsp;<b>ББ</b> <span id="hAp">0</span></span></div>
+    <div class="tb-cell"><span class="k">СНАРЯДЫ</span><span class="v" id="hShells"></span></div>
+    <div class="tb-cell" id="hMeteo"><span class="k" id="hWx">ВЕТЕР</span><span class="v" id="hWind">—</span></div>
     <button class="tb-cell tgt" data-act="nextTarget"><span class="k">ЦЕЛЬ ▸</span><span class="v" id="hTarget">—</span></button>
     <button class="tb-btn" id="hSpeed" data-act="speed">×1</button>
     <button class="tb-btn wide" data-act="notebook">БЛОКНОТ<i id="hUnread"></i></button>
@@ -39,9 +41,10 @@
     <div class="logo-t">АРТА</div><div class="logo-s">БАШНЯ · БЕРЕГОВАЯ БАТАРЕЯ «УТЁС»</div>
     <div class="menu-btns">
       <button class="btn primary" data-act="campaign">КАМПАНИЯ</button>
-      <button class="btn" data-act="skirmish">СВОБОДНЫЙ БОЙ</button>
+      <div class="menu-row"><button class="btn" data-act="skirmish">СВОБОДНЫЙ БОЙ</button><button class="btn" data-act="survival">ОБОРОНА<small id="survBest"></small></button></div>
       <div class="menu-row"><button class="btn" data-act="howto">КАК ИГРАТЬ</button><button class="btn" data-act="news">ЧТО НОВОГО</button></div>
     </div>
+    <div class="rank" id="rankBox"><div class="rank-l"><span id="rankName"></span><span id="rankXp"></span></div><div class="rank-bar"><i id="rankBar"></i></div></div>
     <div class="menu-opts">
       <div class="opt"><span>СЛОЖНОСТЬ</span><div class="seg" id="diffSeg"><button data-diff="0">КУРСАНТ</button><button data-diff="1">КОМАНДИР</button></div></div>
       <div class="opt"><span>ЗВУК</span><div class="seg" id="soundSeg"><button data-sound="1">ВКЛ</button><button data-sound="0">ВЫКЛ</button></div></div>
@@ -59,6 +62,13 @@
 </section>
 
 <section id="dialog" class="screen"><div class="sheet"><div id="dlgBody"></div><div id="dlgBtns" class="dlg-btns"></div></div></section>
+
+<section id="debrief" class="screen">
+  <div class="sheet wide">
+    <div class="sheet-head"><h2>РАЗБОР БОЯ</h2><div class="dbf-tools"><span id="dbfLegend"></span><button class="btn small" id="dbfZoom" data-act="debriefZoom">РАЙОН БОЯ</button><button class="btn small" data-act="closeDebrief">НАЗАД</button></div></div>
+    <div class="dbf-cols"><div class="dbf-map"><canvas id="dbfCanvas"></canvas></div><div class="dbf-side" id="dbfTable"></div></div>
+  </div>
+</section>
 
 <section id="notebook" class="screen">
   <div class="sheet wide paper">

@@ -1,7 +1,9 @@
 // Пост «ОГОНЬ» (DESIGN §7.6): табло готовности, цепь стрельбы под крышкой, спусковой рычаг,
-// репитеры наводки, секундомер полёта, телеграфный аппарат корректировщика, смотровая щель.
+// репитеры наводки, секундомер полёта, телеграфный аппарат корректировщика, смотровая щель с видом наружу
+// (fire-slit.js), тумблер «ВИЛКА» и переключатель очереди.
 // Пост ничего не решает сам: показывает game.state и вызывает game.arm()/game.fire().
 import { createTelegraph } from './fire-telegraph.js';
+import { createSlitView } from './fire-slit.js';
 
 const DEG = Math.PI / 180;
 
@@ -94,11 +96,22 @@ export function createFireStation(ctx) {
   fascia.add(ui.plate('ПЕЛЕНГ БАШНИ', { size: LABEL, screws: false }), -0.14, 0.02 + cBearing.h / 2 + 0.008 + LABEL * 1.05);
   const cElev = fascia.add(ui.drumCounter({ digits: 4, decimals: 2, unit: '°', signed: true, digitH: 0.05 }), 0.165, 0.02);
   fascia.add(ui.plate('УГОЛ СТВОЛА', { size: LABEL, screws: false }), 0.165, 0.02 + cElev.h / 2 + 0.008 + LABEL * 1.05);
-  const cCharges = fascia.add(ui.drumCounter({ digits: 1, digitH: 0.06 }), -0.17, -0.215);
-  fascia.add(ui.plate('ЗАРЯДОВ', { size: LABEL, screws: false }), -0.17, -0.215 + cCharges.h / 2 + 0.008 + LABEL * 1.05);
-  const lampHE = fascia.add(ui.lamp({ color: 'amber', radius: 0.024, label: 'ОФ', labelSize: LABEL }), 0.06, -0.2);
-  const lampAP = fascia.add(ui.lamp({ color: 'white', radius: 0.024, label: 'ББ', labelSize: LABEL }), 0.19, -0.2);
-  fascia.add(ui.plate('В СТВОЛЕ', { size: LABEL, screws: false }), 0.125, -0.215 + cCharges.h / 2 + 0.008 + LABEL * 1.05);
+  const cCharges = fascia.add(ui.drumCounter({ digits: 1, digitH: 0.06 }), -0.2, -0.215);
+  fascia.add(ui.plate('ЗАРЯДОВ', { size: LABEL, screws: false }), -0.2, -0.215 + cCharges.h / 2 + 0.008 + LABEL * 1.05);
+  // «В СТВОЛЕ»: по лампе на каждый тип снаряда (порядок и краткие имена — из game.SHELLS)
+  const SHELL_COLORS = { he: 'amber', ap: 'white', illum: '#ffe95a', smoke: '#8fc4ff', shrap: 'green' };
+  const SHELL_DEFS = game.SHELLS || { he: { name: 'ОФ' }, ap: { name: 'ББ' } };
+  const shellKeys = Object.keys(SHELL_DEFS);
+  const shellLamps = {};
+  {
+    const x0 = -0.078, x1 = 0.266, n = shellKeys.length;
+    shellKeys.forEach((k, i) => {
+      const x = n > 1 ? x0 + (x1 - x0) * i / (n - 1) : (x0 + x1) / 2;
+      shellLamps[k] = fascia.add(ui.lamp({ color: SHELL_COLORS[k] || 'amber', radius: 0.021, label: SHELL_DEFS[k].name, labelSize: 0.022 }), x, -0.2);
+    });
+    fascia.add(ui.plate('В СТВОЛЕ', { size: LABEL, screws: false }), (x0 + x1) / 2, -0.215 + cCharges.h / 2 + 0.008 + LABEL * 1.05);
+  }
+  const lampHE = shellLamps.he, lampAP = shellLamps.ap;
 
   // ------------------------------------------------------------------ цепь стрельбы и спуск
   // подложка «опасной зоны» — жёлто-чёрная окантовка вокруг органов стрельбы
@@ -128,7 +141,7 @@ export function createFireStation(ctx) {
     m.position.z += 0.0008;
   }
 
-  const ARM = { x: 0.44, y: -0.09 };
+  const ARM = { x: 0.44, y: -0.13 };
   let userArm = false;                         // true, пока выполняется game.arm() по жесту игрока
   const armToggle = fascia.add(ui.toggle({
     labels: ['', ''], value: 0,
@@ -145,12 +158,24 @@ export function createFireStation(ctx) {
   fascia.add(ui.plate('ЦЕПЬ СТРЕЛЬБЫ', { size: LABEL, style: 'red', screws: false }), ARM.x, ARM.y - 0.079 - 0.022 - LABEL * 1.05);
 
   // очередь: сколько выстрелов сделать подряд на одних установках (расчёт сам перезаряжает)
+  const ROW = 0.08, PLATE_Y = -0.016;
   const burstSel = fascia.add(ui.rotarySelector({
     labels: ['1', '2', '3'], radius: 0.022, labelSize: 0.02, value: 0,
     onChange(i) { if (game.state.phase === 'playing') game.setBurst(i + 1); },
-  }), 0.385, 0.098);
-  fascia.add(ui.plate('ОЧЕРЕДЬ', { size: 0.022, screws: false }), 0.548, 0.12);
-  const lampBurst = fascia.add(ui.lamp({ color: 'amber', radius: 0.012 }), 0.548, 0.078);
+  }), 0.408, ROW - 0.01);
+  fascia.add(ui.plate('ОЧЕРЕДЬ', { size: 0.022, screws: false }), 0.41, PLATE_Y);
+  const lampBurst = fascia.add(ui.lamp({ color: 'amber', radius: 0.011 }), 0.49, ROW);
+  // «ВИЛКА»: залп двумя стволами с разносом по дальности. Тумблер в предохранительных скобах.
+  const SALVO = { x: 0.558, y: ROW };
+  const salvoToggle = fascia.add(ui.toggle({
+    labels: ['', ''], value: 0, size: 0.72,
+    onChange(i) { if (game.setSalvo) game.setSalvo(!!i); },
+  }), SALVO.x, SALVO.y);
+  for (const sx of [-1, 1]) {
+    stat(mat.steel, G.pipeGeometry([[sx * 0.03, -0.034, 0], [sx * 0.03, -0.034, 0.05], [sx * 0.03, 0.034, 0.05], [sx * 0.03, 0.034, 0]], 0.0035), onFace(SALVO.x, SALVO.y));
+  }
+  fascia.add(ui.plate('ВИЛКА', { size: 0.022, screws: false }), SALVO.x + 0.004, PLATE_Y);
+  const lampSalvo = fascia.add(ui.lamp({ color: 'amber', radius: 0.011 }), SALVO.x + 0.06, ROW);
 
   const leverMount = new THREE.Group();
   fascia.add(leverMount, 0.7, 0.0);
@@ -165,26 +190,18 @@ export function createFireStation(ctx) {
   // ------------------------------------------------------------------ смотровая щель в броневом козырьке
   const HOOD = { y: 1.478, z: -0.075, tilt: 10 * DEG };
   const hoodM = mtx([0, HOOD.y, HOOD.z], [HOOD.tilt, 0, 0]);
-  const SLIT = { w: 0.56, h: 0.05, y: 0.127 };
+  const SLIT = { w: 0.82, h: 0.108, y: 0.107 };
   const slitHole = () => { const p = new THREE.Path(); p.setFromPoints(G.roundedRectShape(SLIT.w, SLIT.h, 0.012).getPoints(4).reverse()); return p; };
   // броневой козырёк: плита с прорезью (прорезь — в центре плиты) и накладная рамка щели
-  stat(dark, G.xf(G.slab(0.94, 0.254, 0.05, { r: 0.02, bevel: 0.008, hole: slitHole() }), { p: [0, SLIT.y, -0.05] }), hoodM);
-  stat(mat.darkSteel, G.xf(G.slab(0.64, 0.094, 0.014, { r: 0.016, bevel: 0.004, hole: slitHole() }), { p: [0, SLIT.y, 0] }), hoodM);
+  stat(dark, G.xf(G.slab(1.0, 0.3, 0.05, { r: 0.02, bevel: 0.008, hole: slitHole() }), { p: [0, SLIT.y, -0.05] }), hoodM);
+  stat(mat.darkSteel, G.xf(G.slab(SLIT.w + 0.07, SLIT.h + 0.044, 0.014, { r: 0.016, bevel: 0.004, hole: slitHole() }), { p: [0, SLIT.y, 0] }), hoodM);
   for (const sx of [-1, 1]) for (const k of [0.33, 1]) for (const sy of [-1, 1]) {
-    stat(mat.steel, G.xf(G.hexGeometry(0.008, 0.006), { p: [sx * k * 0.3, SLIT.y + sy * 0.036, 0.014] }), hoodM);
+    stat(mat.steel, G.xf(G.hexGeometry(0.006, 0.005), { p: [sx * k * (SLIT.w / 2 + 0.012), SLIT.y + sy * (SLIT.h / 2 + 0.011), 0.014] }), hoodM);
   }
   stat(frame, box(0.9, 0.3, 0.84, 0, HOOD.y + 0.14, -0.53));
-  // вид в щель: полоска «небо/море», при выстреле вспыхивает
-  const slitMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  {
-    const cv = engine.textures.makeCanvas(64, 16), c2 = cv.getContext('2d');
-    const gr = c2.createLinearGradient(0, 0, 0, 16);
-    gr.addColorStop(0, '#93a7b8'); gr.addColorStop(0.5, '#c4ccd0'); gr.addColorStop(0.56, '#4d6072'); gr.addColorStop(1, '#2f3f4e');
-    c2.fillStyle = gr; c2.fillRect(0, 0, 64, 16);
-    slitMat.map = engine.textures.canvasTexture(cv, { aniso: 1 });
-  }
-  const slit = new THREE.Mesh(new THREE.PlaneGeometry(SLIT.w + 0.02, SLIT.h + 0.02), slitMat);
-  slit.name = 'visionSlit';
+  // вид в щель: небо/море по пеленгу башни (fire-slit.js), при выстреле вспыхивает
+  const view = createSlitView(ctx, { w: SLIT.w + 0.02, h: SLIT.h + 0.02 });
+  const slitMat = view.material, slit = view.mesh;
   const hood = new THREE.Group();
   hood.position.set(0, HOOD.y, HOOD.z); hood.rotation.x = HOOD.tilt;
   group.add(hood);
@@ -195,12 +212,12 @@ export function createFireStation(ctx) {
   });
   flareMat.color.setRGB(2.6, 1.5, 0.62);       // ярче единицы: отсвет ложится и на верх пульта
   const flare = new THREE.Sprite(flareMat);
-  flare.position.set(0, SLIT.y - 0.03, 0.03); flare.scale.set(2.1, 0.86, 1); flare.visible = false; flare.renderOrder = 20;
+  flare.position.set(0, SLIT.y - 0.04, 0.03); flare.scale.set(2.3, 0.9, 1); flare.visible = false; flare.renderOrder = 20;
   hood.add(flare);
-  const title = ui.plate('ОГОНЬ', { size: 0.034 });
-  title.object3D.position.set(0, 0.04, 0);
+  const title = ui.plate('ОГОНЬ', { size: 0.022 });
+  title.object3D.position.set(0, 0.016, 0);
   hood.add(title.object3D);
-  const SLIT_BASE = new THREE.Color(0.5, 0.55, 0.62), SLIT_HOT = new THREE.Color(7, 4.6, 2.4);
+  const SLIT_BASE = new THREE.Color(1, 1, 1), SLIT_HOT = new THREE.Color(7, 4.6, 2.4);
 
   // красный плафон «цепь взведена»
   const armLamp = put(ui.cageLamp({ color: 'red', scale: 0.72, on: false }), 0.63, 1.553, -0.09);
@@ -241,12 +258,14 @@ export function createFireStation(ctx) {
   const visibleNow = () => group.visible;      // движок обновляет только видимые посты; скрытому анимация печати не нужна
   const offs = [
     game.on('phase', ph => { if (ph === 'briefing') needReset = true; }),
-    game.on('fired', () => {
-      if (visibleNow()) { flareV = 1; recoil.v -= 9; reclose = 0.45; }
+    game.on('fired', e => {
+      if (visibleNow()) { flareV = 1; recoil.v -= 9; reclose = 0.45; view.fired(e); }
       else reclose = 0.01;                     // пост скрыт: без вспышки и отката, крышку закрыть при первом обновлении
-      telegraph.print('ВЫСТРЕЛ №' + game.state.shots, { color: PAL.redZone, animate: visibleNow() });
+      const n = game.state.shots, twin = !!(e && e.salvo);
+      telegraph.print(twin ? 'ВИЛКА: ВЫСТРЕЛЫ №' + (n - 1) + '–' + n : 'ВЫСТРЕЛ №' + n, { color: PAL.redZone, animate: visibleNow() });
     }),
     game.on('impact', e => {
+      view.impact(e);
       const lines = [];
       const text = e && e.report && e.report.text;
       if (text) lines.push(text);
@@ -255,6 +274,8 @@ export function createFireStation(ctx) {
         if (h.destroyed) lines.push(name + ' УНИЧТОЖЕНА');
         else if (!text) lines.push(name + ': ПОПАДАНИЕ');
       });
+      // первый снаряд «вилки» без попаданий: доклад придёт со вторым разрывом
+      if (!lines.length && e && e.pair != null && !e.report) return;
       if (!lines.length) lines.push('РАЗРЫВ. ЦЕЛЬ НЕ НАБЛЮДАЮ');
       const animate = visibleNow();
       lines.forEach(l => telegraph.print(l, { animate }));
@@ -265,6 +286,7 @@ export function createFireStation(ctx) {
     needReset = false;
     reclose = 0; flareV = 0; recoil.x = recoil.v = 0;
     telegraph.clear();
+    view.reset();
     armCover.set(false);
     const s = game.state;
     cBearing.setValue(s.turret.bearing, { instant: true });
@@ -282,6 +304,10 @@ export function createFireStation(ctx) {
     const want = Math.max(0, ((s.fire && s.fire.burst) || 1) - 1);
     if (burstSel.value !== want) burstSel.set(want);
     lampBurst.set(s.fire && s.fire.burstLeft > 0 ? 'blink' : false);
+    // «ВИЛКА»: тумблер повторяет state.fire.salvo
+    const salvo = s.fire && s.fire.salvo ? 1 : 0;
+    if (salvoToggle.value !== salvo) salvoToggle.set(salvo);
+    lampSalvo.set(!!salvo);
 
     // табло готовности
     const rd = game.fireReadiness();
@@ -305,8 +331,7 @@ export function createFireStation(ctx) {
     cElev.setValue(s.turret.elevation);
     cCharges.setValue(s.breech.charges);
     const b = s.breech;
-    lampHE.set(b.shell === 'he' ? (b.rammed ? true : 'blink') : false);
-    lampAP.set(b.shell === 'ap' ? (b.rammed ? true : 'blink') : false);
+    for (const k of shellKeys) shellLamps[k].set(b.shell === k ? (b.rammed ? true : 'blink') : false);
 
     // секундомер: обратный отсчёт до разрыва последнего выпущенного снаряда
     const fl = s.flight, last = fl && fl.length ? fl[fl.length - 1] : null;
@@ -336,13 +361,14 @@ export function createFireStation(ctx) {
     }
 
     telegraph.update(dt, here);
+    view.update(dt, here);
   }
 
   slitMat.color.copy(SLIT_BASE);
 
   return {
     id: 'fire', title: 'ОГОНЬ', group,
-    camera: { position: [0, 1.42, 1.34], target: [0, 1.19, 0], fov: 46 },
+    camera: { position: [0, 1.42, 1.34], target: [0, 1.212, 0], fov: 48 },
     update,
     onEnter() {},
     onLeave() { telegraph.flush(); },
@@ -351,14 +377,15 @@ export function createFireStation(ctx) {
       armToggle: armToggle.object3D,         // тумблер цепи стрельбы (доступен при открытой крышке)
       fireLever: fireLever.handle,           // рукоять спуска: протянуть вниз
       burstSelector: burstSel.object3D,      // переключатель очереди 1/2/3
+      bracketToggle: salvoToggle.object3D,   // тумблер «ВИЛКА» (залп двумя стволами)
     },
     /** Для тестов и отладки (не для игровой логики). */
-    controls: { readyLamps, armToggle, armCover, fireLever, cBearing, cElev, cCharges, lampHE, lampAP, lampFlight, watch, armLamp, telegraph, slit, flare },
+    controls: { readyLamps, armToggle, armCover, fireLever, cBearing, cElev, cCharges, lampHE, lampAP, lampFlight, watch, armLamp, telegraph, slit, flare, shellLamps, salvoToggle, lampSalvo, burstSel, lampBurst, view },
     dispose() {
       offs.forEach(off => off()); offs.length = 0;
       telegraph.dispose();
-      [watch, lampFlight, cBearing, cElev, cCharges, lampHE, lampAP, armToggle, armCover, fireLever, armLamp, burstSel, lampBurst].forEach(c => { if (c.dispose) c.dispose(); });
-      slitMat.map.dispose(); slitMat.dispose(); flareMat.dispose();
+      [watch, lampFlight, cBearing, cElev, cCharges, armToggle, armCover, fireLever, armLamp, burstSel, lampBurst, salvoToggle, lampSalvo, ...shellKeys.map(k => shellLamps[k])].forEach(c => { if (c.dispose) c.dispose(); });
+      view.dispose(); flareMat.dispose();
     },
   };
 }

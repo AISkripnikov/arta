@@ -9,13 +9,15 @@ const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const seg = (p, a, b) => clamp01((p - a) / (b - a));
 const ease = (x) => x * x * (3 - 2 * x);
 const easeOut = (x) => 1 - (1 - x) * (1 - x);
-const TYPES = ['he', 'ap'];
+const FALLBACK_SHELLS = { he: { name: 'ОФ' }, ap: { name: 'ББ' }, illum: { name: 'ОСВ' }, smoke: { name: 'ДЫМ' }, shrap: { name: 'ШРП' } };
 const ROLL = K.CAR_X / K.SHELL_R;            // угол перекатывания снаряда с люльки на лоток, рад
 const RAM_TRAVEL = K.SHELL_TRAY_Z - K.SHELL_SEAT_Z;
 
 export function createLoadingStation(ctx) {
   const { engine, THREE, ui, mat, audio, game } = ctx;
   const G = engine.geom, PAL = mat.PALETTE;
+  const SHELLS = game.SHELLS || FALLBACK_SHELLS;
+  const TYPES = Object.keys(SHELLS);         // порядок ключей = порядок положений галетника
   const group = new THREE.Group();
   group.name = 'station:loading';
 
@@ -77,15 +79,33 @@ export function createLoadingStation(ctx) {
     },
   }), -0.41, -0.135);
 
-  // 2. снаряд: тумблер типа (ББ вверху, ОФ внизу), рядом с каждым положением — счётчик остатка; кнопка подачи
-  const shellToggle = fascia.add(ui.toggle({ labels: ['ОФ', 'ББ'], orient: 'v', labelSize: LABEL, value: 0 }), -0.145, 0.045);
-  const cAp = fascia.add(ui.drumCounter({ digits: 2, digitH: 0.045 }), -0.04, 0.144);
-  const cHe = fascia.add(ui.drumCounter({ digits: 2, digitH: 0.045 }), -0.04, -0.054);
-  let hoistType = 'he';                      // тип снаряда, который сейчас едет на элеваторе
+  // 2. снаряд: галетник типа на пять положений, над ним — счётчик остатка выбранного типа с шильдиком;
+  //    красная точка у положения — снарядов этого типа в погребе нет; ниже — кнопка подачи
+  const SEL = { x: -0.085, y: -0.032, r: 0.032 };
+  const stockOf = (type) => (st().shells || {})[type] | 0;
+  const stockPlate = fascia.add(ui.plate(SHELLS[TYPES[0]].name, { w: 0.105, h: 0.05, size: 0.03, screws: false, style: 'ivory' }), -0.15, 0.128);
+  const cStock = fascia.add(ui.drumCounter({ digits: 2, digitH: 0.045 }), -0.035, 0.128);
+  let instantStock = false;                  // смена типа: счётчик встаёт сразу, а не «докручивается»
+  const shellSelector = fascia.add(ui.rotarySelector({
+    positions: TYPES.length, labels: TYPES.map((t) => SHELLS[t].name), radius: SEL.r, labelSize: 0.023, value: 0,
+    onChange(i) { stockPlate.setText(SHELLS[TYPES[i]].name); instantStock = true; },
+  }), SEL.x, SEL.y);
+  const selectedType = () => TYPES[shellSelector.value] || TYPES[0];
+  const emptyMarks = TYPES.map((t, i) => {
+    const p = shellSelector.labelPoint(i), r0 = Math.hypot(p[0], p[1]) || 1;
+    let rim = 0.14;
+    shellSelector.object3D.traverse((o) => { if (o.geometry && o.geometry.type === 'CircleGeometry') rim = o.geometry.parameters.radius + 0.015; });
+    const m = new THREE.Mesh(emptyMarkG(), mat.lens('red', true));
+    m.name = 'empty:' + t; m.visible = false;
+    fascia.add(m, SEL.x + p[0] / r0 * rim, SEL.y + p[1] / r0 * rim);
+    return m;
+  });
+  function emptyMarkG() { return emptyMarkG.g || (emptyMarkG.g = new THREE.SphereGeometry(0.01, 10, 6)); }
+  let hoistType = TYPES[0];                  // тип снаряда, который сейчас едет на элеваторе
   const hoistButton = fascia.add(ui.pushButton({
     radius: 0.036, color: 'ochre', label: 'ПОДАТЬ\nСНАРЯД', labelSize: LABEL,
-    onPress() { const type = TYPES[shellToggle.value ? 1 : 0]; const r = game.hoistShell(type); if (r && r.ok) hoistType = type; },
-  }), -0.095, -0.185);
+    onPress() { const type = selectedType(); const r = game.hoistShell(type); if (r && r.ok) hoistType = type; },
+  }), -0.085, -0.215);
 
   // 3. досылатель
   const ramLever = fascia.add(ui.lever({
@@ -101,8 +121,8 @@ export function createLoadingStation(ctx) {
 
   // ------------------------------------------------------------------ события игры
   const offs = [];
-  const known = { he: 0, ap: 0 };            // остаток снарядов на момент последнего события (чтобы узнать тип поданного)
-  const syncKnown = () => { const sh = st().shells || {}; known.he = sh.he | 0; known.ap = sh.ap | 0; };
+  const known = {};                          // остаток снарядов на момент последнего события (чтобы узнать тип поданного)
+  const syncKnown = () => { const sh = st().shells || {}; for (const t of TYPES) known[t] = sh[t] | 0; };
   let needReset = true;                      // новое задание: приборы и механика — без анимации
   let now = 0, firedAt = -100;
   syncKnown();
@@ -110,7 +130,7 @@ export function createLoadingStation(ctx) {
   offs.push(game.on('phase', (ph) => { syncKnown(); if (ph === 'briefing' || ph === 'menu') needReset = true; }));
   offs.push(game.on('breech', () => {
     const b = breechOf(), sh = st().shells || {}, k = b.busy && b.busy.kind;
-    if (k === 'hoist' && b.busy.t === 0) hoistType = (sh.ap | 0) < known.ap ? 'ap' : (sh.he | 0) < known.he ? 'he' : TYPES[shellToggle.value ? 1 : 0];
+    if (k === 'hoist' && b.busy.t === 0) hoistType = TYPES.find((t) => (sh[t] | 0) < known[t]) || selectedType();
     syncKnown();
     if (!group.visible) return;              // механику слышно только с этого поста и с соседних
     if (k === 'open' || k === 'close') audio.breech();
@@ -144,7 +164,13 @@ export function createLoadingStation(ctx) {
 
     // --- приборы
     const inst = needReset ? { instant: true } : undefined;
-    cHe.setValue(shells.he | 0, inst); cAp.setValue(shells.ap | 0, inst);
+    if (needReset && s.shells && (shells[selectedType()] | 0) <= 0) {
+      // новое задание: галетник остался на типе, которого в погребе нет, — ставим на первый имеющийся
+      const i = TYPES.findIndex((t) => (shells[t] | 0) > 0);
+      if (i >= 0 && i !== shellSelector.value) { shellSelector.set(i); stockPlate.setText(SHELLS[TYPES[i]].name); }
+    }
+    cStock.setValue(shells[selectedType()] | 0, inst || (instantStock ? { instant: true } : undefined)); instantStock = false;
+    for (let i = 0; i < TYPES.length; i++) emptyMarks[i].visible = !!s.shells && (shells[TYPES[i]] | 0) <= 0;
     cCharges.setValue(b.charges | 0, inst); cComputed.setValue(comp.charge | 0, inst);
     lampAngle.set(elev <= C.LOAD_ANGLE);
     lampClosed.set(!b.open && k !== 'open' && k !== 'close');
@@ -245,8 +271,8 @@ export function createLoadingStation(ctx) {
     needReset = false;
   }
 
-  const lampsAndCounters = { lampAngle, lampClosed, lampBusy, cHe, cAp, cCharges, cComputed };
-  const controls = { breechLever, shellToggle, hoistButton, ramLever, chargePlus, chargeMinus, unloadButton };
+  const lampsAndCounters = { lampAngle, lampClosed, lampBusy, cStock, stockPlate, cCharges, cComputed };
+  const controls = { breechLever, shellSelector, hoistButton, ramLever, chargePlus, chargeMinus, unloadButton };
 
   return {
     id: 'loading', title: 'ЗАРЯЖАНИЕ', group,
@@ -256,7 +282,7 @@ export function createLoadingStation(ctx) {
     onLeave() {},
     hotspots: {
       breechLever: breechLever.handle,       // рычаг «ЗАТВОР»: вниз — открыть, вверх — закрыть (или касание)
-      shellToggle: shellToggle.object3D,     // тумблер ОФ (вниз) / ББ (вверх): касание — переключить
+      shellSelector: shellSelector.object3D, // галетник типа снаряда (ОФ, ББ, ОСВ, ДЫМ, ШРП): касание подписи — выбрать, ручки — следующий
       hoistButton: hoistButton.object3D,     // кнопка «ПОДАТЬ СНАРЯД»
       ramLever: ramLever.handle,             // рычаг «ДОСЛАТЬ»: протянуть вниз
       chargePlus: chargePlus.object3D,       // кнопка «ЗАРЯД +»
@@ -264,13 +290,19 @@ export function createLoadingStation(ctx) {
       unloadButton: unloadButton.object3D,   // кнопка «РАЗРЯДИТЬ»
       // приборы (не интерактивные — для подсветки в обучении)
       lampAngle: lampAngle.object3D, lampClosed: lampClosed.object3D, lampBusy: lampBusy.object3D,
-      counterHe: cHe.object3D, counterAp: cAp.object3D, counterCharges: cCharges.object3D, counterComputed: cComputed.object3D,
+      counterStock: cStock.object3D, counterCharges: cCharges.object3D, counterComputed: cComputed.object3D,
     },
     /** Для тестов и отладки (не для игровой логики). */
-    controls: { ...controls, ...lampsAndCounters, gun, get shellType() { return TYPES[shellToggle.value ? 1 : 0]; } },
+    controls: {
+      ...controls, ...lampsAndCounters, gun, emptyMarks, types: TYPES,
+      get shellType() { return selectedType(); },
+      /** Центр подписи положения галетника в мировых координатах (для тестов касанием). */
+      selectorLabel(type) { const p = shellSelector.labelPoint(TYPES.indexOf(type)); return shellSelector.object3D.localToWorld(new THREE.Vector3(p[0], p[1], p[2] || 0)); },
+    },
     dispose() {
       offs.forEach((off) => off()); offs.length = 0;
       Object.values(controls).concat(Object.values(lampsAndCounters)).forEach((c) => { if (c.dispose) c.dispose(); });
+      emptyMarks.forEach((m) => m.removeFromParent());
       gun.dispose();
     },
   };

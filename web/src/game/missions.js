@@ -82,7 +82,7 @@ export const CAMPAIGN = [
     brief: 'Батарея противника замаскирована на острове — разведка её не видит. Но каждый её залп слышат два наших поста звукометрии на берегу (ЗВ-1 и ЗВ-2).\n\nПосты сообщают только пеленг на звук. На ПЛАНШЕТЕ от каждого поста проведена линия пеленга — батарея там, где линии пересекаются. Поставьте фишку в точку пересечения (лупа поможет) и стреляйте как обычно.',
   },
   {
-    id: 'm10', wind: [3, 7], name: 'Огневой налёт', seed: 110, shells: { he: 14, ap: 0 },
+    id: 'm10', wind: [3, 7], name: 'Огневой налёт', seed: 110, shells: { he: 14, ap: 0, smoke: 2 },
     targets: [{ kind: 'battery', locate: 'sound', range: [8, 12] }, { kind: 'howitzer', locate: 'sound', range: [11, 16] }],
     brief: 'Две скрытые батареи ведут огонь по «Утёсу». Каждый ваш выстрел помогает противнику уточнить вашу позицию — с каждым залпом они бьют точнее.\n\nСначала подавите ту, что ближе и опаснее. Не тратьте снаряды впустую.',
   },
@@ -97,7 +97,7 @@ export const CAMPAIGN = [
     brief: 'Быстроходный минный заградитель ставит мины на подходах к порту под прикрытием эсминца. Заградитель идёт 32 км/ч — упреждение большое.\n\nЕсли он уйдёт, фарватер будет закрыт.',
   },
   {
-    id: 'm13', wind: [3, 8], name: 'Волны десанта', seed: 143, shells: { he: 18, ap: 0 },
+    id: 'm13', wind: [3, 8], name: 'Волны десанта', seed: 143, shells: { he: 18, ap: 0, shrap: 4 },
     targets: [{ kind: 'landing', range: [10, 12], bearing: [330, 355] }, { kind: 'landing', range: [10.5, 12.5], bearing: [5, 30], delay: 70 }, { kind: 'landing', range: [11, 13], bearing: [340, 20], delay: 140 }],
     brief: 'Противник высаживает десант волнами. Разведка сообщит о каждой новой группе катеров, когда та выйдет из-за островов.\n\nНе дайте ни одной группе дойти до берега.',
   },
@@ -112,7 +112,7 @@ export const CAMPAIGN = [
     brief: 'Линкор ведёт огонь главным калибром, пока заградитель ставит мины, а кочующая гаубичная батарея на острове корректирует свой огонь по вашим вспышкам.\n\nРаспределите снаряды с умом.',
   },
   {
-    id: 'm16', wind: [5, 10], name: 'Последний рубеж', seed: 176, shells: { he: 20, ap: 12 },
+    id: 'm16', wind: [5, 10], name: 'Последний рубеж', seed: 176, shells: { he: 20, ap: 12, shrap: 3 },
     targets: [{ kind: 'battleship', range: [14, 17], bearing: [345, 15], path: 6 }, { kind: 'battery', locate: 'sound', relocate: 4, range: [9, 13] }, { kind: 'landing', range: [10, 12], bearing: [330, 355], delay: 40 }, { kind: 'landing', range: [10.5, 12.5], bearing: [5, 30], delay: 120 }],
     brief: 'Решающий бой. Линкор, скрытая батарея и две волны десанта. Батарея «Утёс» — последнее, что стоит между противником и городом.\n\nУдачи, командир.',
   },
@@ -144,7 +144,7 @@ export const CAMPAIGN = [
     brief: 'Ночь. Подлодка и минный заградитель пытаются проскочить мимо батареи. Обе цели быстро уйдут из зоны огня.\n\nРаспределяйте время: на каждую цель — один-два точных залпа.',
   },
   {
-    id: 'm22', wind: [4, 9], name: 'Сеть радаров', seed: 242, shells: { he: 18, ap: 0 },
+    id: 'm22', wind: [4, 9], name: 'Сеть радаров', seed: 242, shells: { he: 18, ap: 0, smoke: 3 },
     targets: [{ kind: 'radar', range: [9, 13] }, { kind: 'radar', range: [12, 16] }, { kind: 'howitzer', locate: 'sound', relocate: 3, range: [10, 15] }],
     brief: 'Две РЛС противника наводят кочующую гаубичную батарею. Пока работает хотя бы одна станция, гаубицы бьют точно.\n\nРешайте: ослепить противника или сразу охотиться за батареей по звуку.',
   },
@@ -157,6 +157,37 @@ export const CAMPAIGN = [
     id: 'm24', wind: [5, 10], name: 'Генеральное сражение', seed: 264, shells: { he: 22, ap: 14 },
     targets: [{ kind: 'battleship', range: [14, 17], bearing: [345, 15], path: 6 }, { kind: 'fort', range: [9, 13] }, { kind: 'radar', range: [11, 15] }, { kind: 'submarine', range: [9, 11], bearing: [300, 340], path: 7, delay: 80 }, { kind: 'landing', range: [10, 12], bearing: [5, 30], delay: 150 }],
     brief: 'Всё, что есть у противника, — против одной батареи. Линкор, форт, РЛС, подлодка и десант.\n\nЭто последний бой кампании. Удачи, командир.',
+  },
+  // ---------------- ЧАСТЬ IV · НОЧЬ И ТУМАН ----------------
+  {
+    id: 'm25', name: 'Свет над водой', seed: 275, night: true, shells: { he: 10, ap: 0, illum: 6 },
+    targets: [{ kind: 'barge', range: [6, 9], bearing: [330, 30] }, { kind: 'depot', range: [9, 13] }],
+    brief: 'Ночь. Разведка целей не видит — штаб даёт только квадрат 2×2 км, где стоит цель.\n\nПовесьте над квадратом осветительный снаряд (ОСВ): целясь в центр квадрата, вы осветите круг радиусом 1,5 км на одну минуту. Освещённую цель разведка сообщит с точными координатами — дальше бейте фугасными как обычно.',
+  },
+  {
+    id: 'm26', wind: [2, 5], name: 'Конвой в тумане', seed: 286, weather: 'fog', shells: { he: 22, ap: 0 },
+    targets: [{ kind: 'transport', range: [8, 11], bearing: [315, 350], path: 12 }, { kind: 'tanker', range: [9, 12], bearing: [10, 45], path: 11, delay: 40 }, { kind: 'barge', range: [5, 8] }],
+    brief: 'Густой туман. Разведка видит цели урывками: донесения приходят вдвое реже, координаты — с точностью до ста метров, а корректировщик оценивает отклонения лишь с точностью до пятидесяти.\n\nКонвой не должен уйти. Пристреливайтесь и не жалейте снарядов — очередь или «вилка» помогут накрыть цель.',
+  },
+  {
+    id: 'm27', wind: [5, 9], name: 'Штормовая дуэль', seed: 297, weather: 'storm', shells: { he: 16, ap: 4, smoke: 3 },
+    targets: [{ kind: 'destroyer', range: [9, 12], bearing: [330, 30], path: 6 }, { kind: 'battery', range: [10, 14] }],
+    brief: 'Шторм. Ветер меняется каждые полторы-две минуты — МЕТЕО сообщит по радио. После каждой смены ветра расчёт вычислителя устаревает: пересчитайте угол и поправку пеленга.\n\nЭсминец и береговая батарея бьют по «Утёсу». Дымовой снаряд (ДЫМ), положенный в 1–4 км от батареи в сторону противника, на минуту сбивает ему прицел.',
+  },
+  {
+    id: 'm28', wind: [3, 7], name: 'Шрапнель', seed: 308, weather: 'fog', shells: { he: 8, ap: 0, shrap: 14 },
+    targets: [{ kind: 'landing', range: [10, 12], bearing: [325, 350] }, { kind: 'landing', range: [10.5, 12.5], bearing: [10, 35], delay: 50 }, { kind: 'landing', range: [11, 13], bearing: [340, 15], delay: 110 }, { kind: 'landing', range: [11, 13], bearing: [315, 340], delay: 170 }],
+    brief: 'Четыре волны десантных катеров идут к берегу в тумане. Координаты неточны — фугасным в катер не попасть.\n\nШрапнель (ШРП) рвётся в воздухе и выкашивает десант в радиусе втрое большем, чем размер цели. По кораблям и постройкам она почти бесполезна.',
+  },
+  {
+    id: 'm29', wind: [3, 8], name: 'Дуэль во тьме', seed: 319, night: true, shells: { he: 16, ap: 8, illum: 8, smoke: 4 },
+    targets: [{ kind: 'battery', range: [9, 13] }, { kind: 'bunker', range: [8, 12] }, { kind: 'howitzer', locate: 'sound', range: [11, 15] }],
+    brief: 'Ночь. На островах — батарея и ДОТ, их выдают только вспышки выстрелов: по вспышке разведка даёт координаты с точностью до полукилометра. Этого мало — подсветите цель осветительным и бейте точно.\n\nГаубицы засекают звукометристы, как и днём. Дымовая завеса прикроет «Утёс», пока вы возитесь со светом.',
+  },
+  {
+    id: 'm30', wind: [5, 9], name: 'Ночь и туман', seed: 330, night: true, weather: 'storm', shells: { he: 20, ap: 14, illum: 12, smoke: 4, shrap: 8 },
+    targets: [{ kind: 'cruiser', range: [11, 14], bearing: [340, 20], path: 7 }, { kind: 'battery', locate: 'sound', range: [9, 13] }, { kind: 'landing', range: [10.5, 12], bearing: [320, 350], delay: 80 }, { kind: 'landing', range: [11, 12.5], bearing: [10, 40], delay: 170 }],
+    brief: 'Штормовая ночь. Крейсер, скрытая батарея и две волны десанта — и всё это в темноте, при ветре, который меняется каждую минуту.\n\nСвет, дым, шрапнель, бронебойные — у вас есть всё. Это последний бой. Удачи, командир.',
   },
 ];
 
@@ -171,9 +202,41 @@ export function skirmishDef(difficulty) {
   }
   return {
     id: 'skirmish', name: 'Свободный бой', seed: Math.floor(Math.random() * 1e9), skirmish: true,
-    shells: { he: 12, ap: 8 }, targets, wind: difficulty ? [3, 9] : [0, 5],
+    shells: { he: 12, ap: 8, shrap: 2, smoke: 1 }, targets, wind: difficulty ? [3, 9] : [0, 5],
     brief: 'Случайная боевая задача. Уничтожьте все цели.',
   };
+}
+
+/** Режим «ОБОРОНА»: стартовое описание (цели приходят волнами — survivalWave). */
+export function survivalDef() {
+  return {
+    id: 'survival', name: 'Оборона', seed: Math.floor(Math.random() * 1e9), survival: true,
+    shells: { he: 14, ap: 6, illum: 1, smoke: 2, shrap: 3 }, targets: [], wind: [0, 0],
+    brief: 'Противник идёт волна за волной. Держитесь, сколько сможете.\n\nПосле каждой отбитой волны батарею подлатают (+25 прочности) и подвезут снаряды. Ушедшая или высадившаяся цель стоит 25 прочности. Бой кончится, когда батарея будет разбита.',
+  };
+}
+
+/** Состав волны n (1…): 2–4 цели, с ростом волн — опаснее; скрытые батареи с 3-й волны; ветер со 2-й. */
+export function survivalWave(n, difficulty) {
+  const tiers = [
+    ['barge', 'depot', 'transport'],
+    ['transport', 'battery', 'landing', 'radar', 'minelayer'],
+    ['destroyer', 'howitzer', 'bunker', 'submarine', 'tanker', 'landing'],
+    ['cruiser', 'fort', 'destroyer', 'howitzer', 'battleship'],
+  ];
+  const top = Math.min(tiers.length - 1, Math.floor((n - 1) / 2) + (difficulty ? 1 : 0));
+  const count = Math.min(4, 2 + Math.floor((n - 1) / 2));
+  const targets = [];
+  for (let i = 0; i < count; i++) {
+    // хотя бы одна цель — из самого трудного доступного набора
+    const tier = i === 0 ? top : Math.floor(Math.random() * (top + 1));
+    const pool = tiers[tier], kind = pool[Math.floor(Math.random() * pool.length)];
+    const r0 = kind === 'battleship' ? 14 : kind === 'landing' ? 10 : 6 + Math.random() * 7;
+    const hidden = n >= 3 && (kind === 'battery' || kind === 'howitzer') && Math.random() < 0.6;
+    targets.push({ kind, range: [r0, r0 + 2], path: kind === 'submarine' ? 6 : 9, delay: i * 12, locate: hidden ? 'sound' : undefined, relocate: hidden && n >= 5 && Math.random() < 0.5 ? 3 : 0 });
+  }
+  const ws = n < 2 ? 0 : Math.min(12, 1 + n + Math.floor(Math.random() * 3));
+  return { targets, wind: { speed: ws, from: ws ? Math.round(Math.random() * 35) * 10 : 0 } };
 }
 
 const ISLAND_NAMES = ['о. Каменный', 'о. Чаячий', 'о. Долгий', 'о. Сторожевой', 'о. Малый', 'о. Туманный'];

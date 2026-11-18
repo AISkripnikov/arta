@@ -280,18 +280,20 @@ function drawRose(ctx, cx, cy, R, label) {
   ctx.restore();
 }
 
-/** Атлас номеров фишек: 6 столбцов (цифры 1…6) × 3 строки (обычная, выбранная, поражённая). */
-export function drawPinAtlas(canvas, label) {
-  const cell = 96;
-  canvas.width = cell * 6; canvas.height = cell * 3;
-  const ctx = canvas.getContext('2d');
+/** Столбцов в атласе фишек: столбец цели = (id − 1) % PIN_COLS, подпись столбца перерисовывается под нужный номер. */
+export const PIN_COLS = 8;
+const PIN_CELL = 96;
+/** Перерисовать один столбец атласа (3 строки: обычная, выбранная, поражённая) с номером text. */
+export function drawPinColumn(canvas, label, c, text) {
+  const cell = PIN_CELL, ctx = canvas.getContext('2d');
   const rows = [['#ece4cc', '#16171a'], ['#f4b63a', '#16171a'], ['#7f858a', '#3a3d40']];
-  for (let r = 0; r < 3; r++) for (let c = 0; c < 6; c++) {
+  const size = cell * (text.length > 2 ? 0.3 : text.length > 1 ? 0.4 : 0.5);
+  for (let r = 0; r < 3; r++) {
     const x = c * cell, y = r * cell;
     ctx.fillStyle = rows[r][0]; ctx.fillRect(x, y, cell, cell);
     ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = 4;
     ctx.beginPath(); ctx.arc(x + cell / 2, y + cell / 2, cell * 0.43, 0, Math.PI * 2); ctx.stroke();
-    label(ctx, String(c + 1), x + cell / 2, y + cell / 2, cell * 0.5, { color: rows[r][1], weight: 700, spacing: 0 });
+    label(ctx, text, x + cell / 2, y + cell / 2, size, { color: rows[r][1], weight: 700, spacing: 0 });
     if (r === 2) {
       ctx.strokeStyle = '#b3261a'; ctx.lineWidth = 9; ctx.lineCap = 'round';
       ctx.beginPath();
@@ -300,6 +302,11 @@ export function drawPinAtlas(canvas, label) {
       ctx.stroke();
     }
   }
+}
+/** Атлас номеров фишек: PIN_COLS столбцов (изначально 1…PIN_COLS) × 3 строки. */
+export function drawPinAtlas(canvas, label) {
+  canvas.width = PIN_CELL * PIN_COLS; canvas.height = PIN_CELL * 3;
+  for (let c = 0; c < PIN_COLS; c++) drawPinColumn(canvas, label, c, String(c + 1));
 }
 
 /** Атлас подписей отметок упреждения: цифры 1…5 (минуты) в ряд. */

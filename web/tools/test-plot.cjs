@@ -339,6 +339,50 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol + 1e-9;
       ok(s.active === o2.id, 'касание пальцем фишки в лотке выбирает цель ' + o2.id, s.active);
     }
   }
+  // ---- 7. ночь: квадрат поиска, фишка — только после света осветительного ----
+  console.log('ночное задание');
+  {
+    const n = await page.evaluate(() => {
+      const g = window.__dev.game; g.startMission(24); g.begin();
+      for (let i = 0; i < 600 && !g.state.mission.areas.length; i++) g.update(0.05);
+      window.T.step(4);
+      const st = window.T.st, a = g.state.mission.areas[0], t = a && g.state.targets.find((q) => q.id === a.targetId);
+      return { night: g.state.mission.night, area: a, areas: st.api.areas, tint: st.api.overlay.tint, reported: t && t.reported, pin: a && st.api.pinVisible(a.targetId) };
+    });
+    ok(n.night && n.area && n.areas.includes(n.area.targetId) && n.tint === 'night', 'ночь: квадрат поиска цели показан на карте', n);
+    ok(n.reported === null && n.pin === true, 'ночь: донесения нет, но фишка цели есть — её ставят в квадрат под осветительный', [n.reported, n.pin]);
+    const m = await page.evaluate((id) => {
+      const g = window.__dev.game, t = g.state.targets.find((q) => q.id === id);
+      g.state.lights.push({ x: t.x, y: t.y, until: g.state.time + 60, n: 0 });          // свет осветительного над целью
+      for (let i = 0; i < 400 && !t.reported; i++) g.update(0.05);
+      window.T.step(4);
+      const st = window.T.st, r = { reported: t.reported, pin: st.api.pinVisible(id), areas: st.api.areas, lights: st.api.overlay.lights };
+      // фишку — на донесение; свет гаснет → пометка «?»
+      g.setPin(id, t.reported.x, t.reported.y);
+      g.state.lights.forEach((l) => { l.until = g.state.time + 0.1; });
+      for (let i = 0; i < 20; i++) g.update(0.05);
+      window.T.step(4);
+      r.after = { lit: t.lit, pin: st.api.pinVisible(id), mark: st.api.overlay.marks[id], lights: st.api.overlay.lights };
+      return r;
+    }, n.area.targetId);
+    ok(m.reported && m.pin === true && m.lights === 1, 'цель в свете осветительного → донесение и фишка', m);
+    ok(!m.areas.includes(n.area.targetId), 'после точного донесения квадрат снят', m.areas);
+    ok(m.after.lit === false && m.after.pin === true && m.after.mark === 'lost' && m.after.lights === 0, 'свет погас: фишка остаётся с пометкой «?»', m.after);
+  }
+  // оборона: номера целей растут без конца — фишка должна быть и у цели с номером больше шести
+  {
+    const v = await page.evaluate(() => {
+      const g = window.__dev.game; g.quit(); g.startSurvival(); g.begin();
+      for (let i = 0; i < 600 && !g.state.targets.some((q) => q.reported); i++) g.update(0.05);
+      const t = g.state.targets.find((q) => q.reported);
+      if (!t) return null;
+      const old = t.id; t.id = 17; t.label = 'ЦЕЛЬ 17'; if (g.state.activeTarget === old) g.state.activeTarget = 17;
+      window.T.step(4);
+      const st = window.T.st;
+      return { pin: st.api.pinVisible(17), hot: !!st.hotspots.pin17, oldGone: !st.hotspots['pin' + old], handle: !!st.api.pinHandleWorld(17) };
+    });
+    ok(v && v.pin && v.hot && v.oldGone && v.handle, 'оборона: у цели № 17 есть фишка, фишка ушедшего номера убрана', v);
+  }
   await page.evaluate(() => { const g = window.__dev.game; g.quit(); });
   s = await page.evaluate(() => { window.T.step(3); return { phase: window.__dev.game.state.phase, mission: !!window.__dev.game.state.mission }; });
   ok(true, 'выход в меню без ошибок (' + s.phase + ')');

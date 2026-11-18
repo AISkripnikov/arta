@@ -27,6 +27,14 @@ const PAGE_HELPERS = `(() => {
       game.closeBreech(); T.idle();
     },
     aim(b, e) { game.setBrake(false); game.rotateTurret(b - game.state.turret.bearing); game.setBrake(true); game.elevate(e - game.state.turret.elevation); },
+    // средняя яркость неба в центре вида из щели (0…255)
+    lum() {
+      const tmp = document.createElement('canvas'); tmp.width = 40; tmp.height = 10;
+      const x2 = tmp.getContext('2d', { willReadFrequently: true }); x2.drawImage(c.view.canvas, 200, 34, 40, 10, 0, 0, 40, 10);
+      const d = x2.getImageData(0, 0, 40, 10).data; let a = 0;
+      for (let i = 0; i < d.length; i += 4) a += d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11;
+      return a / (d.length / 4);
+    },
     untilImpact() { let n = 0; while (game.state.flight.length && n++ < 6000) engine.debug.step(0.05, false); },
     // экранные координаты объекта-ориентира (CSS px)
     scr(name, x = 0, y = 0, z = 0) {
@@ -46,6 +54,9 @@ const PAGE_HELPERS = `(() => {
         lines: c.telegraph.lines, busy: c.telegraph.busy, flare: c.flare.visible, leverTravel: c.fireLever.travel,
         denied: denied.length, lastDenied: denied[denied.length - 1] || null,
         calls: engine.debug.stats().calls,
+        salvo: !!s.fire.salvo, salvoToggle: c.salvoToggle.value, salvoLamp: c.lampSalvo.state,
+        shellLamps: Object.fromEntries(Object.keys(c.shellLamps).map((k) => [k, c.shellLamps[k].state])),
+        view: Object.assign({}, c.view.info), lights: s.lights.length,
       };
     },
   };
@@ -91,7 +102,7 @@ const PAGE_HELPERS = `(() => {
     lights: (() => { let n = 0; st.group.traverse(o => { if (o.isLight) n++; }); return n; })(),
     box: (() => { const b = new window.__dev.engine.THREE.Box3().setFromObject(st.group); st.group.worldToLocal(b.min); return 0; })() }`);
   check('id/title/group', meta.id === 'fire' && meta.title === 'ОГОНЬ' && meta.isGroup, meta);
-  check('hotspots: armCover, armToggle, burstSelector, fireLever', meta.keys.join() === 'armCover,armToggle,burstSelector,fireLever', meta.keys);
+  check('hotspots: armCover, armToggle, bracketToggle, burstSelector, fireLever', meta.keys.join() === 'armCover,armToggle,bracketToggle,burstSelector,fireLever', meta.keys);
   check('пост не добавляет источников света', meta.lights === 0, meta.lights);
   let s = await snap();
   check('фаза playing', s.phase === 'playing', s.phase);
@@ -101,9 +112,25 @@ const PAGE_HELPERS = `(() => {
   check('секундомер на нуле, лампа полёта погашена', s.watch === 0 && s.flightLamp === false, s);
   check('вызовов отрисовки ≤ 120', s.calls > 0 && s.calls <= 120, s.calls);
   // органы в зоне управления и не слипаются
-  const P = { cover: await scr('armCover'), toggle: await scr('armToggle'), lever: await scr('fireLever') };
+  const P = { cover: await scr('armCover'), toggle: await scr('armToggle'), lever: await scr('fireLever'), bracket: await scr('bracketToggle'), burst: await scr('burstSelector') };
   const inSafe = ([x, y]) => x > 24 && x < W - 24 && y > 40 + 8 && y < H - 56 - 8;
-  check('органы внутри зоны управления', inSafe(P.cover) && inSafe(P.toggle) && inSafe(P.lever), P);
+  check('органы внутри зоны управления', inSafe(P.cover) && inSafe(P.toggle) && inSafe(P.lever) && inSafe(P.bracket) && inSafe(P.burst), P);
+  check('«ВИЛКА» не слипается с очередью, крышкой и рычагом (≥ 36 px)', [P.burst, P.cover, P.lever].every((q) => Math.hypot(q[0] - P.bracket[0], q[1] - P.bracket[1]) >= 36), P);
+  check('«В СТВОЛЕ»: пять ламп по game.SHELLS, все погашены', Object.keys(s.shellLamps).join() === 'he,ap,illum,smoke,shrap' && Object.values(s.shellLamps).every((v) => v === false), s.shellLamps);
+  // смотровая щель: вид наружу нарисован, виден целиком в зоне управления, перерисовывается редко
+  const slitBox = await ev(`const { engine, stations } = window.__dev, sl = stations[0].controls.slit, V3 = engine.THREE.Vector3; sl.updateWorldMatrix(true, false);
+    const g = sl.geometry.parameters, pts = [[-1, -1], [1, 1]].map(([a, b]) => engine.input.toScreen(new V3(a * g.width / 2, b * g.height / 2, 0).applyMatrix4(sl.matrixWorld)));
+    return { x0: pts[0].x, y0: pts[1].y, x1: pts[1].x, y1: pts[0].y }`);
+  check('щель видна на экране: ≥ 200×30 px, ниже верхней панели', slitBox.x1 - slitBox.x0 >= 200 && slitBox.y1 - slitBox.y0 >= 30 && slitBox.y0 >= 40 && slitBox.x0 > 24 && slitBox.x1 < W - 24, slitBox);
+  const lumDay = await ev('return T.lum()');
+  check('вид из щели: день, небо светлое', s.view.mode === 'day' && s.view.redraws > 0 && lumDay > 110, [s.view, lumDay]);
+  await adv(2);
+  const r1 = (await snap()).view.redraws;
+  check('вид перерисовывается не чаще ~6 раз/с в покое', r1 - s.view.redraws >= 6 && r1 - s.view.redraws <= 14, [s.view.redraws, r1]);
+  await ev('T.aim(30, 0); T.adv(0.1)');
+  const pan = await snap();
+  check('вид следует за пеленгом башни', Math.abs(pan.view.bearing - 30) < 1e-6 && pan.view.redraws > r1, pan.view);
+  await ev('T.aim(0, 0); T.adv(0.1)');
   check('рычаг и крышка разнесены (≥ 60 px)', Math.hypot(P.cover[0] - P.lever[0], P.cover[1] - P.lever[1]) >= 60, P);
   const leverEnd = await scr('fireLever');
   check('ход рычага вниз остаётся над нижней панелью', leverEnd[1] + 110 < H - 56 + 30, leverEnd);
@@ -167,7 +194,7 @@ const PAGE_HELPERS = `(() => {
   check('снаряд на лотке: лампа «ОФ» мигает', onTray.he === 'blink' && onTray.ap === false && onTray.ready.shell === false, onTray);
   await ev(`const g = window.__dev.game; g.ramShell(); T.idle(); for (let i = 0; i < 3; i++) { g.addCharge(); T.idle(); } g.closeBreech(); T.idle(); T.aim(127.35, 21.4); T.adv(3);`);
   s = await snap();
-  check('лампа «ОФ» горит, «ББ» нет', s.he === true && s.ap === false, s);
+  check('лампа «ОФ» горит, остальные четыре нет', s.he === true && s.ap === false && Object.values(s.shellLamps).filter(Boolean).length === 1, s.shellLamps);
   check('счётчик «ЗАРЯДОВ» = 3', s.charges === 3, s.charges);
   check('репитеры: пеленг 127.35, угол 21.40', Math.abs(s.bearing - 127.35) < 1e-6 && Math.abs(s.elev - 21.4) < 1e-6, s);
   check('табло: всё зелёное, кроме цепи', s.ready.shell && s.ready.charge && s.ready.breech && s.ready.brake && !s.ready.armed, s.ready);
@@ -193,7 +220,7 @@ const PAGE_HELPERS = `(() => {
   s = await snap();
   check('game.fire() прошёл: выстрел №1, снаряд в полёте, отказов нет', s.shots === 1 && s.flight === 1 && s.denied === d0, s);
   check('цепь снята игрой — тумблер отщёлкнулся', s.armed === false && s.toggle === 0 && s.ready.armed === false, s);
-  check('вспышка в смотровой щели', s.flare === true, s.flare);
+  check('вспышка в смотровой щели, дульный дым в виде из щели', s.flare === true && s.view.muzzle === true, [s.flare, s.view]);
   check('лампа «СНАРЯД В ПОЛЁТЕ», секундомер пошёл', s.flightLamp !== false && s.watch > 5, s);
   check('лента: «ВЫСТРЕЛ №1»', s.lines.length === 1 && s.lines[0] === 'ВЫСТРЕЛ №1', s.lines);
   check('табло: снаряд и заряд красные', !s.ready.shell && !s.ready.charge, s.ready);
@@ -265,7 +292,72 @@ const PAGE_HELPERS = `(() => {
   s = await snap();
   check('свободный бой: playing, табло = fireReadiness()', s.phase === 'playing' && JSON.stringify(s.ready) === JSON.stringify(s.truth), s);
 
-  console.log('13. настоящий цикл кадров');
+  console.log('13. «ВИЛКА», новые снаряды, ночь (задание 25)');
+  await ev('const g = window.__dev.game; g.quit(); g.startMission(24); g.begin(); T.adv(0.6)');
+  s = await snap();
+  const lumNight = await ev('return T.lum()');
+  check('ночь: вид тёмный', s.phase === 'playing' && s.view.mode === 'night' && lumNight < 45 && lumNight < lumDay / 3, [s.view, lumNight, lumDay]);
+  check('«ВИЛКА» выключена: тумблер вниз, лампа погашена', s.salvo === false && s.salvoToggle === 0 && s.salvoLamp === false, s);
+  await tap('bracketToggle');
+  s = await snap();
+  check('тумблер «ВИЛКА» включает залп (game.setSalvo), лампа горит', s.salvo === true && s.salvoToggle === 1 && s.salvoLamp === true && s.armed === false, s);
+  { const [x, y] = await scr('bracketToggle'); await page.touchscreen.tap(x, y); await adv(0.6); }
+  s = await snap();
+  check('касание пальцем: «ВИЛКА» выключена', s.salvo === false && s.salvoToggle === 0 && s.salvoLamp === false, s);
+  await ev('window.__dev.game.setSalvo(true); T.adv(0.6)');
+  s = await snap();
+  check('setSalvo извне: тумблер и лампа повторяют state.fire.salvo', s.salvoToggle === 1 && s.salvoLamp === true, s);
+  // осветительные «вилкой» по центру ночного квадрата
+  const il = await ev(`const g = window.__dev.game, s = g.state, t = s.targets.find(x => x.alive), b = s.mission.battery, p = g.predict(t.id) || t;
+    const dx = p.x - b.x, dy = p.y - b.y, range = Math.hypot(dx, dy), brg = (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360;
+    let sol = null, n = 0; for (n = 1; n <= 6; n++) { sol = g.solve(range, n); if (sol.ok) break; }
+    g.elevate(2 - s.turret.elevation); g.openBreech(); T.idle(); g.hoistShell('illum'); T.idle(); T.adv(0.3);
+    const tray = window.__dev.stations[0].controls.shellLamps.illum.state;
+    g.ramShell(); T.idle(); for (let i = 0; i < n; i++) { g.addCharge(); T.idle(); } g.closeBreech(); T.idle();
+    T.aim(brg, sol.elevation); g.arm(true); T.adv(0.6);
+    return { range, brg, n, tray, armed: s.fire.armed, stock: s.shells.illum };`);
+  s = await snap();
+  check('«ОСВ»: на лотке мигает, досланный — горит один', il.tray === 'blink' && s.shellLamps.illum === true && Object.values(s.shellLamps).filter(Boolean).length === 1, [il, s.shellLamps]);
+  check('подготовка залпа', il.armed === true, il);
+  await pull();
+  s = await snap();
+  check('залп: два снаряда в полёте, счёт выстрелов 2', s.shots === 2 && s.flight === 2, s);
+  check('лента: «ВИЛКА: ВЫСТРЕЛЫ №1–2»', s.lines.length === 1 && s.lines[0] === 'ВИЛКА: ВЫСТРЕЛЫ №1–2', s.lines);
+  check('дульная вспышка из обоих стволов', s.view.muzzle === true && s.flare === true, s.view);
+  await shot('salvo');
+  await ev('T.untilImpact(); T.adv(0.4)');
+  s = await snap();
+  check('осветительные горят: «люстры» видны в щели', s.lights >= 1 && s.view.flares >= 1, [s.lights, s.view]);
+  check('осветительный разрыв всплеска не даёт', s.view.splashes === 0, s.view);
+  await shot('flares');
+  await ev('T.adv(6)');
+  s = await snap();
+  check('лента: один доклад на пару, без «ЦЕЛЬ НЕ НАБЛЮДАЮ»', s.lines.length >= 2 && !s.lines.some((l) => /НЕ НАБЛЮДАЮ/.test(l)), s.lines);
+  // фугасные «вилкой» на 5 км по тому же пеленгу — всплески в щели
+  const sp = await ev(`const g = window.__dev.game, s = g.state;
+    let sol = null, n = 0; for (n = 1; n <= 6; n++) { sol = g.solve(5, n); if (sol.ok) break; }
+    T.load('he', n); T.aim(${il.brg}, sol.elevation); g.arm(true); T.adv(0.6); const r = g.fire();
+    T.untilImpact(); T.adv(0.3);
+    return { fire: r, shots: s.shots, impacts: s.impacts.slice(-2).map(i => [i.n, i.pair]) };`);
+  s = await snap();
+  check('второй залп: выстрелы №3–4 связаны как пара', sp.fire.ok && sp.fire.salvo === true && sp.shots === 4 && sp.impacts.length === 2 && sp.impacts[0][1] === sp.impacts[1][0], sp);
+  check('разрывы в пределах ±20° видны в щели', s.view.splashes === 2, s.view);
+  await shot('splash');
+  await ev('T.adv(8)');
+  s = await snap();
+  check('всплески опали, лента: «ВИЛКА: ВЫСТРЕЛЫ №3–4» и один доклад', s.view.splashes === 0 && s.lines.includes('ВИЛКА: ВЫСТРЕЛЫ №3–4') && s.lines.filter((l) => /НЕ НАБЛЮДАЮ/.test(l)).length <= 1, [s.view, s.lines]);
+  // разрыв в стороне от пеленга башни не показывается
+  const off = await ev(`const g = window.__dev.game, s = g.state, b = s.mission.battery, a = (s.turret.bearing + 60) * Math.PI / 180, v = window.__dev.stations[0].controls.view;
+    return [v.impact({ x: b.x + Math.sin(a) * 4, y: b.y + Math.cos(a) * 4, shell: 'he', hits: [] }), v.impact({ x: b.x + Math.sin(a - Math.PI / 3) * 14, y: b.y + Math.cos(a - Math.PI / 3) * 14, shell: 'he', hits: [] })]`);
+  check('разрыв вне ±20° и ночной неосвещённый дальше 12 км — не видны', off[0] === false && off[1] === false, off);
+  await ev('const g = window.__dev.game; g.quit(); g.startMission(25); g.begin(); T.adv(0.6)');
+  s = await snap();
+  const lumFog = await ev('return T.lum()');
+  check('туман: серая дымка, «ВИЛКА» сброшена новым заданием', s.view.weather === 'fog' && s.view.mode === 'day' && lumFog > 110 && s.salvo === false && s.salvoToggle === 0, [s.view, lumFog, s.salvo]);
+  await shot('fog');
+  check('вызовов отрисовки ≤ 120 (с новыми органами)', s.calls > 0 && s.calls <= 120, s.calls);
+
+  console.log('14. настоящий цикл кадров');
   await ev('window.__dev.engine.start()');
   await page.waitForTimeout(1500);
   check('нет ошибок и предупреждений в консоли', problems.length === 0, problems);

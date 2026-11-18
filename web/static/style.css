@@ -33,6 +33,10 @@ h2, h3 { margin: 0; font-weight: 600; letter-spacing: .1em; }
 
 #radio { position: absolute; left: 50%; top: 44px; transform: translate(-50%, -6px); max-width: min(620px, 78%); background: rgba(17,19,22,.92); border: 1px solid #000; border-left: 3px solid var(--ochre); padding: 4px 10px; font-size: 13px; line-height: 1.25; opacity: 0; transition: opacity .25s, transform .25s; pointer-events: none !important; text-transform: none; letter-spacing: .02em; }
 #radio.show { opacity: 1; transform: translate(-50%, 0); } #radio b { color: var(--ochre); letter-spacing: .1em; font-weight: 600; margin-right: 6px; }
+/* пост ОГОНЬ: по центру под верхней панелью — смотровая щель; радио прижимаем к левому краю, слева от щели */
+#hud[data-st="fire"] #radio { left: max(8px, env(safe-area-inset-left)); transform: translate(0, -6px); max-width: calc(50% - 37vh - 14px); }
+#hud[data-st="fire"] #radio.show { transform: none; }
+#hud[data-st="fire"] #faults { top: auto; bottom: 62px; }
 #radio.bad { border-left-color: var(--red); } #radio.good { border-left-color: var(--green); }
 #toast { position: absolute; left: 50%; bottom: 66px; transform: translateX(-50%); background: rgba(143,29,20,.95); border: 1px solid #000; padding: 5px 14px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none !important; white-space: nowrap; }
 #toast.show { opacity: 1; }
@@ -106,3 +110,40 @@ table.stats { width: 100%; border-collapse: collapse; font-size: 14px; } table.s
 .m-card .st em { font-style: normal; font-size: 10px; color: var(--dim); letter-spacing: .08em; margin-left: 8px; }
 #dlgBody .rec { color: var(--ochre); font-weight: 600; letter-spacing: .06em; }
 .menu-row { display: flex; gap: 8px; } .menu-row .btn { flex: 1; }
+
+/* ---------- снаряды, погода, ночь ---------- */
+#hShells { font-size: 14px; } #hShells span { margin-right: 6px; } #hShells span:last-child { margin-right: 0; } #hShells .zero { opacity: .4; }
+#hWx i { font-style: normal; font-weight: 600; padding: 0 3px; margin-right: 3px; border-radius: 2px; color: #14171a; background: var(--dim); }
+#hWx i.night { background: #c0392b; color: #fff3d6; } #hWx i.fog { background: #b9c0c4; } #hWx i.storm { background: var(--amber); }
+#hWind { font-size: 14px; } #hWind.chg { color: var(--amber); }
+#night { position: fixed; inset: 0; pointer-events: none; z-index: 4; background: radial-gradient(ellipse at 50% 45%, #ffd0c4 0%, #f0907c 65%, #c85a48 100%); mix-blend-mode: multiply; opacity: 0; transition: opacity .8s; }
+#night.on { opacity: 1; }
+@media (max-width: 780px) { .tb-cell { padding: 0 7px; } .tb-btn.wide { padding: 0 9px; } #hShells { font-size: 13px; } #hShells span { margin-right: 4px; } .tb-cell.tgt { min-width: 72px; } }
+
+/* ---------- меню: звание, оборона ---------- */
+.menu-row .btn small { display: block; font-size: 9px; letter-spacing: .1em; color: var(--dim); font-weight: 500; line-height: 1.2; } .menu-row .btn small:empty { display: none; }
+.menu-row .btn { display: flex; flex-direction: column; justify-content: center; padding-left: 6px; padding-right: 6px; }
+.rank { margin: 0 0 10px; } .rank-l { display: flex; justify-content: space-between; font-size: 11px; letter-spacing: .14em; color: var(--dim); } .rank-l span:first-child { color: var(--ivory); }
+.rank-bar { height: 3px; margin-top: 3px; background: #0b0d0f; box-shadow: 0 0 0 1px #000; } .rank-bar i { display: block; height: 100%; width: 0; background: var(--ochre); transition: width .5s; }
+@media (max-height: 440px) { #menu .logo-t { font-size: 44px; } #menu .menu-btns { margin: 10px 0 8px; gap: 6px; } #menu .btn { padding: 7px 12px; } #menu .rank { margin-bottom: 7px; } #menu .menu-hint { margin-top: 6px; min-height: 30px; font-size: 11px; } .seg button { padding: 5px 12px; } }
+.menu-box { max-height: 100%; }
+
+/* ---------- итоги ---------- */
+#dlgBody .rankup { margin: 8px 0; padding: 6px 10px; text-align: center; font-weight: 600; letter-spacing: .14em; color: #14171a; background: linear-gradient(#e0a92c, #b9820f); border: 1px solid #000; border-radius: 3px; }
+#dlgBody .xp { margin: 8px 0 0; } #dlgBody .xp .rank-l { font-size: 12px; }
+
+/* ---------- разбор боя ---------- */
+.dbf-tools { display: flex; align-items: center; gap: 8px; min-width: 0; }
+#dbfLegend { font-size: 10px; letter-spacing: .08em; color: var(--dim); white-space: nowrap; overflow: hidden; } #dbfLegend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin: 0 3px 0 8px; vertical-align: -1px; }
+.dbf-cols { flex: 1; display: flex; gap: 12px; min-height: 0; }
+.dbf-map { flex: none; height: 100%; display: flex; align-items: flex-start; } #dbfCanvas { display: block; border: 1px solid #000; box-shadow: 0 0 0 1px rgba(255,255,255,.07); touch-action: none; }
+.dbf-side { flex: 1; min-width: 0; overflow-y: auto; touch-action: pan-y; text-transform: none; letter-spacing: .01em; }
+table.dbf { width: 100%; border-collapse: collapse; font-size: 11.5px; line-height: 1.25; }
+table.dbf th { position: sticky; top: 0; background: #1d2329; color: var(--dim); font-weight: 500; font-size: 9px; letter-spacing: .1em; text-align: left; padding: 3px 4px; white-space: nowrap; z-index: 1; }
+table.dbf td { padding: 4px; border-bottom: 1px solid rgba(0,0,0,.45); vertical-align: top; white-space: nowrap; font-family: var(--mono); font-size: 11px; }
+table.dbf td:last-child { white-space: normal; font-family: var(--font); font-size: 11.5px; } table.dbf td:first-child { font-weight: 600; color: var(--ochre); }
+table.dbf tr.hit td:last-child { color: var(--green); } table.dbf tr.sp td:last-child { color: var(--dim); }
+table.dbf tr.on td { background: rgba(211,154,30,.22); } table.dbf tbody tr { cursor: pointer; }
+.dbf-empty { color: var(--dim); padding: 10px 0; }
+.nb-t .ar { display: block; font: 600 13px var(--mono); color: #8f1d14; } .nb-t .tag { font-size: 10px; letter-spacing: .1em; font-weight: 600; margin-left: 6px; padding: 0 4px; border: 1px solid currentColor; border-radius: 2px; }
+#flash.wave { background: radial-gradient(circle, transparent 40%, rgba(75,227,106,.35)); animation: fl 1.2s ease-out; }

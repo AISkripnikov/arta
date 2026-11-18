@@ -26,7 +26,7 @@ export const GUN = {
 export function bagSeatZ(n) { return -(0.26 - 0.04 * n) - GUN.BAG_LEN / 2; }
 
 export function buildLoadingGun(ctx, root) {
-  const { engine, THREE, ui, mat } = ctx;
+  const { engine, THREE, ui, mat, game } = ctx;
   const G = engine.geom, T = engine.textures, PAL = mat.PALETTE, K = GUN;
   const RR = K.RING_R, RL = K.RING_LEN, JR = K.JACKET_R, CH = K.CHAMBER_R;
 
@@ -180,9 +180,13 @@ export function buildLoadingGun(ctx, root) {
     g.rotateY(Math.PI);                                       // носом в −Z, донце в начале координат
     return g;
   }
+  // Маркировка: ОФ — охряный пояс; ББ — чёрная голова и светлый пояс; ОСВ — белый пояс и звезда;
+  // ДЫМ — серый пояс; ШРП — красный пояс. На корпусе трафаретом — краткое имя типа.
+  const SHELLS = (game && game.SHELLS) || { he: { name: 'ОФ' }, ap: { name: 'ББ' }, illum: { name: 'ОСВ' }, smoke: { name: 'ДЫМ' }, shrap: { name: 'ШРП' } };
+  const SHELL_TYPES = Object.keys(SHELLS);
   function shellMaterial(type) {
     return mat.memo('loading:shell:' + type, () => {
-      const S = 256, cv = T.makeCanvas(S, S), c = cv.getContext('2d'), rnd = T.mulberry32(type === 'he' ? 11 : 23);
+      const S = 256, cv = T.makeCanvas(S, S), c = cv.getContext('2d'), rnd = T.mulberry32(11 + 12 * Math.max(0, SHELL_TYPES.indexOf(type)));
       const Y = (v) => S * (1 - v);                           // v — доля длины от донца
       const band = (v0, v1, col) => { c.fillStyle = col; c.fillRect(0, Y(v1), S, Y(v0) - Y(v1)); };
       c.fillStyle = '#6f777e'; c.fillRect(0, 0, S, S);
@@ -190,17 +194,29 @@ export function buildLoadingGun(ctx, root) {
       band(0, 0.03, '#4f565c');                               // донце
       band(0.07, 0.115, '#a8653a');                           // ведущий поясок
       band(0.118, 0.124, 'rgba(0,0,0,0.35)');
-      if (type === 'he') { band(0.63, 0.715, PAL.ochre); band(0.93, 1, '#c5c9cc'); }
-      else { band(0.7, 1, '#141517'); band(0.6, 0.66, '#e9e4d2'); }
+      if (type === 'ap') { band(0.7, 1, '#141517'); band(0.6, 0.66, '#e9e4d2'); }
+      else {
+        const col = { he: PAL.ochre, illum: '#f1eee4', smoke: '#aab0b4', shrap: PAL.red || '#b3372c' }[type] || PAL.ochre;
+        band(0.63, 0.715, col); band(0.93, 1, '#c5c9cc');
+        if (type === 'smoke') { band(0.625, 0.635, '#23272a'); band(0.71, 0.72, '#23272a'); band(0.74, 0.765, '#aab0b4'); }   // серый пояс с окантовкой + узкий второй
+        if (type === 'shrap') band(0.86, 0.93, '#a8653a');                                                               // латунная дистанционная трубка
+      }
       for (let k = 0; k < 3; k++) {                           // трафарет вдоль оси снаряда, трижды по окружности
-        c.save(); c.translate(S * (k + 0.5) / 3, Y(0.36)); c.rotate(-Math.PI / 2);
-        T.drawLabel(c, type === 'he' ? 'ОФ' : 'ББ', 0, 0, 30, { color: '#e9e4d2', weight: 700 });
+        const x = S * (k + 0.5) / 3;
+        c.save(); c.translate(x, Y(0.36)); c.rotate(-Math.PI / 2);
+        T.drawLabel(c, (SHELLS[type] && SHELLS[type].name) || '', 0, 0, 30, { color: '#e9e4d2', weight: 700 });
         c.restore();
+        if (type === 'illum') {                               // звезда под поясом
+          c.fillStyle = '#f1eee4'; c.beginPath();
+          for (let i = 0; i < 10; i++) { const a = Math.PI * i / 5, r = i % 2 ? 6 : 14; c.lineTo(x + Math.sin(a) * r, Y(0.555) - Math.cos(a) * r); }
+          c.closePath(); c.fill();
+        }
       }
       return new THREE.MeshStandardMaterial({ map: T.canvasTexture(cv), roughness: 0.5, metalness: 0.35 });
     });
   }
-  const shellMats = { he: shellMaterial('he'), ap: shellMaterial('ap') };
+  const shellMats = {};
+  for (const t of SHELL_TYPES) shellMats[t] = shellMaterial(t);
   const shell = new THREE.Mesh(shellGeometry(), shellMats.he);
   shell.name = 'shell'; shell.visible = false;
   loader.add(shell);

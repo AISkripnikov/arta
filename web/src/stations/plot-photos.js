@@ -58,11 +58,13 @@ export function createPhotos({ THREE, TX, K, kmU, kmV, game }) {
   const group = new THREE.Group();
   group.name = 'aerialPhotos';
   const photos = new Map();      // n выстрела → { mesh, mat, tex, born }
+  const skipped = new Set();     // ночные разрывы вне света: снимать было нечего
   let missionRef = null;
 
   function clear() {
     for (const p of photos.values()) { group.remove(p.mesh); p.tex.dispose(); p.mat.dispose(); p.mesh.geometry.dispose(); }
     photos.clear();
+    skipped.clear();
   }
 
   /** Нарисовать снимок разрыва im (из state.impacts). */
@@ -150,6 +152,23 @@ export function createPhotos({ THREE, TX, K, kmU, kmV, game }) {
     // --- свежий разрыв ---
     if (im.land) crater(ctx, px(im.x), py(im.y), big, true);
     else splash(ctx, px(im.x), py(im.y), big);
+
+    // --- туман: снимок сквозь дымку — блёклый, малоконтрастный ---
+    if (mission.weather === 'fog') {
+      ctx.fillStyle = 'rgba(190,192,190,0.5)'; ctx.fillRect(0, 0, PX, PX);
+      for (let k = 0; k < 9; k++) {
+        const fx = hash(k, 3, seed + im.n) * PX, fy = hash(k, 7, seed + im.n) * PX, fr = PX * (0.18 + hash(k, 11, seed) * 0.2);
+        const g = ctx.createRadialGradient(fx, fy, 0, fx, fy, fr);
+        g.addColorStop(0, 'rgba(215,216,214,0.42)'); g.addColorStop(1, 'rgba(215,216,214,0)');
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(fx, fy, fr, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    // --- ночь: снимок при свете осветительного — темнее к краям ---
+    if (mission.night) {
+      const ng = ctx.createRadialGradient(PX / 2, PX / 2, PX * 0.1, PX / 2, PX / 2, PX * 0.72);
+      ng.addColorStop(0, 'rgba(0,0,10,0.08)'); ng.addColorStop(1, 'rgba(0,0,10,0.7)');
+      ctx.fillStyle = ng; ctx.fillRect(0, 0, PX, PX);
+    }
 
     // --- плёнка: виньетка ---
     const vg = ctx.createRadialGradient(PX / 2, PX / 2, PX * 0.25, PX / 2, PX / 2, PX * 0.75);
@@ -330,8 +349,10 @@ export function createPhotos({ THREE, TX, K, kmU, kmV, game }) {
       const imps = s.impacts || [];
       let made = 0;
       for (const im of imps) {
-        if (photos.has(im.n) || s.time - im.time < DELAY) continue;
+        if (photos.has(im.n) || skipped.has(im.n) || s.time - im.time < DELAY) continue;
         if (imps.length - imps.indexOf(im) > KEEP) continue;
+        // ночью самолёт снимает только то, что освещено
+        if (s.mission.night && !(game.lit ? game.lit(im.x, im.y) : false)) { skipped.add(im.n); continue; }
         if (made++ >= 1) break;                      // не больше одного снимка за кадр
         add(im, s.mission);
       }

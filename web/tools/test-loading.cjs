@@ -40,7 +40,9 @@ const check = (ok, msg, extra) => { if (ok) { passed++; console.log('  ok   ' + 
     shells: { ...s.shells }, denied: window.__denied.length, lastDenied: window.__denied[window.__denied.length - 1] || null,
     lever: c.breechLever.on, type: c.shellType,
     lamps: { angle: c.lampAngle.state, closed: c.lampClosed.state, busy: c.lampBusy.state },
-    counters: { he: c.cHe.value, ap: c.cAp.value, charges: c.cCharges.value, computed: c.cComputed.value },
+    counters: { stock: c.cStock.value, name: c.stockPlate.text, charges: c.cCharges.value, computed: c.cComputed.value },
+    empty: c.types.filter((t, i) => c.emptyMarks[i].visible), types: c.types,
+    shellMat: c.types.find((t) => c.gun.shellMats[t] === c.gun.shell.material) || null,
     shellVisible: c.gun.shell.visible, recoilZ: c.gun.recoil.position.z, tilt: c.gun.gunPivot.rotation.x, trayY: c.gun.tray.position.y,
   }; });
   const frames = (n, dt) => ev(([k, d]) => window.__frames(k, d || 1 / 30), [n, dt]);
@@ -52,8 +54,13 @@ const check = (ok, msg, extra) => { if (ok) { passed++; console.log('  ok   ' + 
     for (let i = 1; i <= 10; i++) { await page.mouse.move(p.x, p.y + dy * i / 10); await page.waitForTimeout(15); }
     await page.mouse.up(); await page.waitForTimeout(60); await frames(3, 0.01);
   };
+  const tapLabel = async (type) => {              // касание подписи положения галетника
+    const p = await ev((t) => { const s = window.__dev.engine.input.toScreen(window.__st.controls.selectorLabel(t)); return { x: s.x, y: s.y }; }, type);
+    await page.mouse.move(p.x, p.y); await page.mouse.down(); await page.waitForTimeout(40); await page.mouse.up(); await page.waitForTimeout(60); await frames(3, 0.01);
+    return p;
+  };
   const safe = async () => {                       // все органы управления — в зоне между панелями HUD
-    const names = ['breechLever', 'shellToggle', 'hoistButton', 'ramLever', 'chargePlus', 'chargeMinus', 'unloadButton'];
+    const names = ['breechLever', 'shellSelector', 'hoistButton', 'ramLever', 'chargePlus', 'chargeMinus', 'unloadButton'];
     for (const n of names) { const p = await pos(n); check(p.x > 20 && p.x < W - 20 && p.y > 40 + 12 && p.y < H - 56 - 12, `«${n}» в зоне управления (${Math.round(p.x)}, ${Math.round(p.y)})`); }
   };
 
@@ -61,7 +68,8 @@ const check = (ok, msg, extra) => { if (ok) { passed++; console.log('  ok   ' + 
   await frames(5);
   let s = await state();
   check(!s.breech.open && s.lamps.closed === true && s.lamps.angle === true && s.lamps.busy === false, 'исходное состояние: затвор закрыт, лампы «УГОЛ», «ЗАТВОР ЗАКРЫТ» горят', s);
-  check(s.counters.he === s.shells.he && s.counters.ap === s.shells.ap && s.counters.charges === 0, 'счётчики снарядов и зарядов соответствуют состоянию', s.counters);
+  check(s.type === 'he' && s.counters.stock === s.shells.he && s.counters.name === 'ОФ' && s.counters.charges === 0, 'галетник на ОФ, счётчик остатка и зарядов соответствуют состоянию', s.counters);
+  check(s.types.join() === 'he,ap,illum,smoke,shrap' && s.types.every((t) => (s.shells[t] > 0) !== s.empty.includes(t)), 'пять типов; красные метки — у типов, которых нет в погребе', { shells: s.shells, empty: s.empty });
   check(s.trayY < -0.3 && !s.shellVisible, 'лоток опущен, снаряда нет');
   await safe();
   const comp = await ev(() => { window.__dev.game.setComputerCharge(4); window.__frames(3); return window.__st.controls.cComputed.value; });
@@ -93,16 +101,18 @@ const check = (ok, msg, extra) => { if (ok) { passed++; console.log('  ok   ' + 
   check(s.breech.open && !s.breech.busy && s.lever === true && s.trayY > -0.01 && s.lamps.busy === false, 'затвор открыт, лоток поднят', s.breech);
 
   // --- тип снаряда и подача
-  await tap('shellToggle'); s = await state();
-  check(s.type === 'ap', 'тумблер: касание — ББ', s.type);
-  await tap('shellToggle'); s = await state();
-  check(s.type === 'he', 'тумблер: касание — снова ОФ', s.type);
-  await tap('shellToggle');
+  await tap('shellSelector'); s = await state();
+  check(s.type === 'ap' && s.counters.name === 'ББ' && s.counters.stock === s.shells.ap, 'галетник: касание ручки — ББ, счётчик показывает остаток ББ', s.counters);
+  for (const t of ['illum', 'smoke', 'shrap', 'he']) {
+    const p = await tapLabel(t); s = await state();
+    check(s.type === t && s.counters.stock === s.shells[t] && p.x > 20 && p.x < W - 20 && p.y > 52 && p.y < H - 68, `галетник: касание подписи — ${t}, счётчик = ${s.shells[t]}`, { type: s.type, counters: s.counters, p });
+  }
+  await tap('shellSelector');
   const ap0 = (await state()).shells.ap;
   await tap('hoistButton'); s = await state();
   check(s.breech.busy === 'hoist' && s.shells.ap === ap0 - 1 && s.shellVisible, 'кнопка «ПОДАТЬ СНАРЯД» — ББ едет на элеваторе', s.breech);
   await ff(2.6); s = await state();
-  check(s.breech.shell === 'ap' && !s.breech.rammed && s.shellVisible && s.counters.ap === ap0 - 1, 'снаряд ББ на лотке, счётчик ББ уменьшился', s.breech);
+  check(s.breech.shell === 'ap' && !s.breech.rammed && s.shellVisible && s.shellMat === 'ap' && s.counters.stock === ap0 - 1, 'снаряд ББ на лотке, счётчик ББ уменьшился', s.breech);
   d0 = s.denied; await tap('breechLever'); s = await state();
   check(s.denied === d0 + 1 && s.breech.open && s.lever === true, 'закрыть затвор со снарядом на лотке — отказ, рычаг остался «ОТКРЫТ»', s.lastDenied);
   d0 = s.denied; await tap('chargePlus'); s = await state();
@@ -141,19 +151,52 @@ const check = (ok, msg, extra) => { if (ok) { passed++; console.log('  ok   ' + 
 
   // --- разряжание
   await tap('breechLever'); await ff(1.3);
-  await tap('shellToggle'); await tap('hoistButton'); await ff(2.6);
+  await tapLabel('he'); await tap('hoistButton'); await ff(2.6);
   await drag('ramLever', 120); await ff(1.9); await tap('chargePlus'); await ff(1.0);
   s = await state(); const he1 = s.shells.he;
   check(s.breech.shell === 'he' && s.breech.rammed && s.breech.charges === 1, 'заряжено ОФ + 1 заряд (затвор открыт касанием рычага)', s.breech);
   await tap('unloadButton'); s = await state();
   check(s.breech.busy === 'unload', '«РАЗРЯДИТЬ» — идёт разряжание', s.breech);
   await ff(2.1); s = await state();
-  check(!s.breech.shell && s.breech.charges === 0 && s.shells.he === he1 + 1 && !s.shellVisible && s.counters.he === he1 + 1, 'разряжено: снаряд вернулся в погреб', s.breech);
+  check(!s.breech.shell && s.breech.charges === 0 && s.shells.he === he1 + 1 && !s.shellVisible && s.counters.stock === he1 + 1, 'разряжено: снаряд вернулся в погреб', s.breech);
+
+  // --- новые типы: пустой тип — отказ; затем подать, дослать/разрядить каждый
+  await ev(() => { const sh = window.__dev.game.state.shells; sh.illum = 0; sh.smoke = 2; sh.shrap = 3; window.__frames(3); });
+  await tapLabel('illum'); s = await state(); d0 = s.denied;
+  check(s.empty.includes('illum') && !s.empty.includes('smoke') && !s.empty.includes('shrap') && s.counters.stock === 0 && s.counters.name === 'ОСВ', 'ОСВ: в погребе пусто — метка горит, счётчик 0', { empty: s.empty, counters: s.counters });
+  await tap('hoistButton'); s = await state();
+  check(s.denied === d0 + 1 && !s.breech.busy && !s.breech.shell, 'подача отсутствующего типа — отказ', s.lastDenied);
+  await ev(() => { window.__dev.game.state.shells.illum = 2; window.__frames(3); });
+  for (const t of ['illum', 'smoke', 'shrap']) {
+    await tapLabel(t); const n0 = (await state()).shells[t];
+    await tap('hoistButton'); s = await state();
+    check(s.breech.busy === 'hoist' && s.shells[t] === n0 - 1 && s.shellVisible && s.shellMat === t, `«ПОДАТЬ СНАРЯД» — ${t} на элеваторе, своя маркировка`, { breech: s.breech, mat: s.shellMat });
+    await ff(2.6); s = await state();
+    check(s.breech.shell === t && s.counters.stock === n0 - 1 && s.shellMat === t && !s.empty.includes(t), `${t} на лотке, счётчик ${n0 - 1}`, s.breech);
+    await tap('unloadButton'); await ff(2.1); s = await state();
+    check(!s.breech.shell && s.shells[t] === n0 && s.counters.stock === n0, `${t} разряжен — вернулся в погреб`, { breech: s.breech, shells: s.shells });
+  }
+  // переключение типа, пока другой снаряд едет: модель на элеваторе не меняется
+  await tapLabel('shrap'); await tap('hoistButton'); await tapLabel('he'); await frames(3); s = await state();
+  check(s.breech.busy === 'hoist' && s.shellMat === 'shrap' && s.type === 'he' && s.counters.name === 'ОФ', 'смена положения галетника во время подачи не меняет снаряд на элеваторе', { mat: s.shellMat, type: s.type });
+  await ff(2.6); await tap('unloadButton'); await ff(2.1);
+
+  // --- звание: операции короче — анимация идёт по t/dur, механизм доходит до конца
+  const fast = await ev(() => {
+    const g = window.__dev.game, b = g.state.breech, c = window.__st.controls;
+    g.closeBreech(); b.busy.dur *= 0.75; const dur = b.busy.dur;
+    for (let t = 0; t < dur / 2; t += 0.05) g.update(0.05);
+    window.__frames(2, 0.001); const mid = c.gun.hinge.rotation.y;
+    for (let t = 0; t < dur; t += 0.05) g.update(0.05);
+    window.__frames(2, 0.001);
+    return { mid, end: c.gun.hinge.rotation.y, open: b.open, busy: !!b.busy, trayY: c.gun.tray.position.y };
+  });
+  check(!fast.open && !fast.busy && Math.abs(fast.end) < 1e-6 && fast.mid < -0.2 && fast.trayY < -0.3, 'укороченная операция (звание): анимация затвора следует t/dur и завершается', fast);
 
   // --- перезапуск задания: пост читает новое состояние, без ошибок
   await ev(() => { const g = window.__dev.game; g.startMission(1); window.__frames(3); g.begin(); window.__frames(10); });
   s = await state();
-  check(!s.breech.open && s.lever === false && s.lamps.closed === true && s.counters.he === s.shells.he && s.trayY < -0.3, 'новое задание: рычаг и приборы сброшены', { lever: s.lever, counters: s.counters, shells: s.shells });
+  check(!s.breech.open && s.lever === false && s.lamps.closed === true && s.counters.stock === s.shells[s.type] && s.trayY < -0.3, 'новое задание: рычаг и приборы сброшены', { lever: s.lever, counters: s.counters, shells: s.shells });
   await drag('breechLever', 120); s = await state();
   check(s.breech.busy === 'open', 'после перезапуска рычаг работает с новым состоянием', s.breech);
   await ev(() => { const g = window.__dev.game; g.quit(); window.__frames(5); });
