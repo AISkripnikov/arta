@@ -25,6 +25,10 @@ export const KINDS = {
   cruiser:    { name: 'Крейсер',           site: 'sea',    armored: true,  hp: 3, radius: 0.09, speed: 18, end: 'patrol', gun: { range: 17, period: 34, dmg: 6, p: 0.4 } },
   minelayer:  { name: 'Минный заградитель', site: 'sea',  armored: false, hp: 1, radius: 0.07, speed: 32, end: 'escape' },
   howitzer:   { name: 'Гаубичная батарея', site: 'island', armored: false, hp: 2, radius: 0.06, speed: 0, gun: { range: 99, period: 28, dmg: 5, p: 0.35 } },
+  radar:      { name: 'Радиолокационная станция', site: 'island', armored: false, hp: 1, radius: 0.05, speed: 0, spotter: true },
+  fort:       { name: 'Береговой форт', site: 'island', armored: true, hp: 3, radius: 0.07, speed: 0, gun: { range: 99, period: 30, dmg: 7, p: 0.4 } },
+  submarine:  { name: 'Подводная лодка', site: 'sea', armored: false, hp: 1, radius: 0.05, speed: 16, end: 'dive' },
+  tanker:     { name: 'Танкер', site: 'sea', armored: false, hp: 3, radius: 0.1, speed: 11, end: 'escape' },
   battleship: { name: 'Линкор',            site: 'sea',    armored: true,  hp: 4, radius: 0.11, speed: 12, end: 'patrol', gun: { range: 21, period: 40, dmg: 7, p: 0.4 } },
 };
 
@@ -112,10 +116,52 @@ export const CAMPAIGN = [
     targets: [{ kind: 'battleship', range: [14, 17], bearing: [345, 15], path: 6 }, { kind: 'battery', locate: 'sound', relocate: 4, range: [9, 13] }, { kind: 'landing', range: [10, 12], bearing: [330, 355], delay: 40 }, { kind: 'landing', range: [10.5, 12.5], bearing: [5, 30], delay: 120 }],
     brief: 'Решающий бой. Линкор, скрытая батарея и две волны десанта. Батарея «Утёс» — последнее, что стоит между противником и городом.\n\nУдачи, командир.',
   },
+
+  // ---------------- ЧАСТЬ III · ОСТРОВА В ОГНЕ ----------------
+  {
+    id: 'm17', wind: [3, 7], name: 'Глаза противника', seed: 187, shells: { he: 14, ap: 0 },
+    targets: [{ kind: 'radar', range: [10, 14] }, { kind: 'battery', range: [8, 12] }],
+    brief: 'На острове работает радиолокационная станция противника. Пока она цела, батареи противника стреляют по «Утёсу» заметно точнее.\n\nСначала ослепите противника — уничтожьте РЛС.',
+  },
+  {
+    id: 'm18', wind: [3, 8], name: 'Подлодка', seed: 198, shells: { he: 14, ap: 0 },
+    targets: [{ kind: 'submarine', range: [8, 11], bearing: [320, 40], path: 6 }, { kind: 'barge', range: [5, 8] }],
+    brief: 'Подводная лодка всплыла для зарядки батарей. Пройдя около 6 км, она погрузится и уйдёт — у вас несколько минут.\n\nЦель маленькая: точное упреждение и, если нужно, очередь.',
+  },
+  {
+    id: 'm19', wind: [4, 8], name: 'Форт', seed: 209, shells: { he: 10, ap: 12 },
+    targets: [{ kind: 'fort', range: [9, 13] }, { kind: 'radar', range: [11, 15] }],
+    brief: 'Береговой форт с толстыми бетонными стенами: только бронебойные, нужно три прямых попадания. РЛС на соседнем острове наводит его огонь.\n\nВыбирайте порядок сами.',
+  },
+  {
+    id: 'm20', wind: [3, 8], name: 'Танкеры', seed: 220, shells: { he: 18, ap: 4 },
+    targets: [{ kind: 'tanker', range: [9, 12], bearing: [310, 350], path: 11 }, { kind: 'tanker', range: [10, 13], bearing: [10, 50], path: 11, delay: 50 }, { kind: 'destroyer', range: [10, 13], bearing: [330, 30], path: 6 }],
+    brief: 'Два танкера везут топливо для флота противника. Каждый выдерживает три попадания. Эсминец прикрывает конвой.\n\nНе дайте уйти ни одному танкеру.',
+  },
+  {
+    id: 'm21', wind: [4, 9], name: 'Ночная охота', seed: 231, shells: { he: 18, ap: 0 },
+    targets: [{ kind: 'submarine', range: [9, 12], bearing: [300, 345], path: 7 }, { kind: 'minelayer', range: [10, 12], bearing: [15, 45], path: 10, delay: 60 }, { kind: 'barge', range: [6, 9] }],
+    brief: 'Ночь. Подлодка и минный заградитель пытаются проскочить мимо батареи. Обе цели быстро уйдут из зоны огня.\n\nРаспределяйте время: на каждую цель — один-два точных залпа.',
+  },
+  {
+    id: 'm22', wind: [4, 9], name: 'Сеть радаров', seed: 242, shells: { he: 18, ap: 0 },
+    targets: [{ kind: 'radar', range: [9, 13] }, { kind: 'radar', range: [12, 16] }, { kind: 'howitzer', locate: 'sound', relocate: 3, range: [10, 15] }],
+    brief: 'Две РЛС противника наводят кочующую гаубичную батарею. Пока работает хотя бы одна станция, гаубицы бьют точно.\n\nРешайте: ослепить противника или сразу охотиться за батареей по звуку.',
+  },
+  {
+    id: 'm23', wind: [5, 10], name: 'Штурм форта', seed: 253, shells: { he: 16, ap: 12 },
+    targets: [{ kind: 'fort', range: [9, 12] }, { kind: 'battery', locate: 'sound', range: [11, 15] }, { kind: 'landing', range: [10, 12], bearing: [330, 355], delay: 90 }],
+    brief: 'Форт прикрывает высадку десанта, а скрытая батарея поддерживает его огнём. Катера выйдут через полторы минуты.\n\nСильный ветер — следите за поправками.',
+  },
+  {
+    id: 'm24', wind: [5, 10], name: 'Генеральное сражение', seed: 264, shells: { he: 22, ap: 14 },
+    targets: [{ kind: 'battleship', range: [14, 17], bearing: [345, 15], path: 6 }, { kind: 'fort', range: [9, 13] }, { kind: 'radar', range: [11, 15] }, { kind: 'submarine', range: [9, 11], bearing: [300, 340], path: 7, delay: 80 }, { kind: 'landing', range: [10, 12], bearing: [5, 30], delay: 150 }],
+    brief: 'Всё, что есть у противника, — против одной батареи. Линкор, форт, РЛС, подлодка и десант.\n\nЭто последний бой кампании. Удачи, командир.',
+  },
 ];
 
 export function skirmishDef(difficulty) {
-  const pool = ['barge', 'depot', 'transport', 'battery', 'howitzer', 'destroyer', 'bunker', 'landing', 'minelayer', 'cruiser'];
+  const pool = ['barge', 'depot', 'transport', 'battery', 'howitzer', 'radar', 'destroyer', 'bunker', 'landing', 'minelayer', 'submarine', 'tanker', 'cruiser', 'fort'];
   const n = 2 + Math.floor(Math.random() * 2), targets = [];
   for (let i = 0; i < n; i++) {
     const kind = pool[Math.floor(Math.random() * (difficulty ? pool.length : 5))];

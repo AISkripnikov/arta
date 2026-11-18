@@ -142,7 +142,7 @@ for (let diff = 0; diff <= 1; diff++) {
         let guard = 0;
         while (s.phase === 'playing' && guard++ < 60) {
           // сначала те, кто стреляет и убегает
-          const t = s.targets.filter((x) => x.alive && x.reported && !x.moved).sort((a, b) => (b.end === 'land' || b.end === 'escape' ? 2 : b.gun ? 1 : 0) - (a.end === 'land' || a.end === 'escape' ? 2 : a.gun ? 1 : 0))[0];
+          const t = s.targets.filter((x) => x.alive && x.reported && !x.moved).sort((a, b) => (b.end === 'land' || b.end === 'escape' || b.end === 'dive' ? 3 : b.spotter ? 2 : b.gun ? 1 : 0) - (a.end === 'land' || a.end === 'escape' || a.end === 'dive' ? 3 : a.spotter ? 2 : a.gun ? 1 : 0))[0];
           if (!t) { tick(game, 3); guard--; if (s.time > 1500) break; continue; }
           const c = corr[t.id] || (corr[t.id] = { dx: 0, dy: 0, key: null });
           const key = JSON.stringify(t.reported.sound || [t.reported.x, t.reported.y]);

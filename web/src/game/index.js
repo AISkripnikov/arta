@@ -126,7 +126,7 @@ export function createGame(opts = {}) {
       }
       const t = {
         id: i + 1, label: 'ЦЕЛЬ ' + (i + 1), name: k.name, kind: td.kind, armored: k.armored, hp: k.hp, maxHp: k.hp, radius: k.radius,
-        alive: true, escaped: false, reported: null, moving: k.speed > 0,
+        alive: true, escaped: false, reported: null, moving: k.speed > 0, spotter: !!k.spotter,
         x: r2(x), y: r2(y), course: 0, speed: k.speed, end: k.end || null, pathLeft: td.path || 0, pathLen: td.path || 0,
         gun: k.gun ? { ...k.gun, next: 0 } : null, nextRecon: 0,
         locate: td.locate === 'sound' ? 'sound' : 'recon', relocateEvery: td.relocate || 0, salvos: 0, silentUntil: 0,
@@ -563,7 +563,11 @@ export function createGame(opts = {}) {
     });
     const cur = active();
     if (!cur || !cur.alive) { const nx = state.targets.find((t) => t.alive && t.reported); if (nx) state.activeTarget = nx.id; }
-    state.impacts.push({ n: sh.n, x: sh.x, y: sh.y, time: state.time, shell: sh.shell, hit: hits.length > 0, targetId: ref ? ref.id : null });
+    // «снимок» окрестностей разрыва для аэрофото на планшете: что было рядом в этот момент
+    const snap = state.targets.filter((q) => Math.hypot(q.x - sh.x, q.y - sh.y) < 1.2 && (q.reported || q.locate === 'sound'))
+      .map((q) => ({ id: q.id, kind: q.kind, x: q.x, y: q.y, course: q.course, moving: q.moving, alive: q.alive, damaged: q.hp < q.maxHp, armored: q.armored }));
+    const craters = state.impacts.filter((q) => Math.hypot(q.x - sh.x, q.y - sh.y) < 1).map((q) => ({ x: q.x, y: q.y, n: q.n }));
+    state.impacts.push({ n: sh.n, x: sh.x, y: sh.y, time: state.time, shell: sh.shell, hit: hits.length > 0, targetId: ref ? ref.id : null, snap, craters, land: isLand(state.mission.map, sh.x, sh.y) });
     if (state.impacts.length > 40) state.impacts.shift();
     emit('impact', { report, hits, x: sh.x, y: sh.y, shell: sh.shell, n: sh.n });
     touch();
@@ -648,6 +652,7 @@ export function createGame(opts = {}) {
           if (t.pathLeft <= 0 || out) { t.course = norm360(t.course + 180); t.pathLeft = t.pathLen; recon(t, false); }
         } else if (t.pathLeft <= 0 || out) {
           t.alive = false; t.escaped = true;
+          if (t.end === 'dive') { radio('РАЗВЕДКА', t.label + ': подводная лодка погрузилась!', 'bad'); finish(false, 'Подводная лодка противника погрузилась и ушла.'); return; }
           radio('РАЗВЕДКА', t.label + ' ушла из зоны огня.', 'bad');
           finish(false, t.name + ' противника ушёл из-под огня.'); return;
         }
@@ -660,7 +665,9 @@ export function createGame(opts = {}) {
           t.salvos++;
           if (t.locate === 'sound') soundReport(t);
           const ranging = t.firstSalvo; t.firstSalvo = false;
-          const hit = !ranging && Math.random() < t.gun.p;
+          // РЛС противника наводит его огонь
+          const spot = state.targets.some((q) => q.alive && q.spotter) ? 0.18 : 0;
+          const hit = !ranging && Math.random() < Math.min(0.9, t.gun.p + spot);
           emit('incoming', { by: t.id, eta: 2.4 });
           at(2.4, () => {
             if (!playing()) return;

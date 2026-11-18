@@ -4,6 +4,7 @@
 // со счётчиками над ними. Пост ничего не решает сам: каждый кадр перечитывает game.state и вызывает
 // game.setPin / selectTarget / setAlidade / recordMeasurement.
 import { createOverlay } from './plot-overlay.js';
+import { createPhotos } from './plot-photos.js';
 import { CHART, drawChart, drawPinAtlas, drawLeadAtlas, drawRulerScale, drawTag } from './plot-chart.js';
 
 const DEG = Math.PI / 180;
@@ -237,6 +238,12 @@ export function createPlotStation(ctx) {
   const kmV = (y) => (y - CHART.Y0) * K - SHEET / 2;
   const uKm = (u) => (u + SHEET / 2) / K + CHART.X0;
   const vKm = (v) => (v + SHEET / 2) / K + CHART.Y0;
+
+  // аэрофотоснимки районов разрывов — под слоем трасс и кругов
+  const photos = createPhotos({ THREE, TX, K, kmU, kmV, game });
+  photos.group.position.z = 0;
+  plane.add(photos.group);
+  disposers.push(() => photos.dispose());
 
   // --- алидада ---
   const alidade = new THREE.Group();
@@ -729,6 +736,7 @@ export function createPlotStation(ctx) {
     const rec = active ? plot.recorded[activeId] : null;
     lampRecorded.set(!!rec && rec.bearing === a.bearing && rec.range === a.range);
 
+    photos.update(s);
     overlay.update(s, game, performance.now() / 1000, zoom);
 
     // отметки упреждения
@@ -815,6 +823,7 @@ export function createPlotStation(ctx) {
       get handleOffsetKm() { const k = tokenScale() / K; return { x: HANDLE.x * k, y: HANDLE.y * k }; },
       get loupe() { return loupe; },
       get leadVisible() { return leadMesh.visible; },
+      get photos() { return photos.shown; },
       setLoupe(b) { setLoupe(b); },
     },
     dispose() {
