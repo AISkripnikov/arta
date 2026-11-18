@@ -405,6 +405,7 @@ export function createPlotStation(ctx) {
 
   let loupe = false, zoom = 0;                             // zoom: 0 — основной вид … 1 — лупа
   const loupeC = { u: 0, v: 0 };
+  let tagHold = 0;
   let pinMoved = {};                                       // id → { time, x, y } — донесение, по которому ставили фишку
   let plotRef = null;
   let drag = null, lastTap = null;
@@ -769,7 +770,9 @@ export function createPlotStation(ctx) {
     leadMesh.visible = leadLabels.visible = lead;
 
     // бирки под лупой
-    const tags = zoom > 0.5;
+    // под лупой над аэрофотоснимком бирки не показываем (мешают смотреть); во время перетаскивания и 2 с после — показываем
+    if (drag && drag.moved && !drag.done) tagHold = 2; else tagHold = Math.max(0, tagHold - dt);
+    const tags = zoom > 0.5 && (tagHold > 0 || !photos.covers(loupeC.u, loupeC.v));
     backPlate.object3D.visible = loupe && zoom > 0.5;
     tagPin.mesh.visible = tags && !!activePin;
     if (tagPin.mesh.visible) {

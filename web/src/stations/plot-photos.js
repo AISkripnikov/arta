@@ -342,6 +342,12 @@ export function createPhotos({ THREE, TX, K, kmU, kmV, game }) {
     },
     /** Для тестов: номера выстрелов, по которым есть снимок. */
     get shown() { return [...photos.keys()]; },
+    /** Есть ли проявившийся снимок, накрывающий точку листа (u, v)? */
+    covers(u, v) {
+      const h = (SIZE / 2 + BORDER) * K;
+      for (const p of photos.values()) if (p.mat.opacity > 0.3 && Math.abs(p.mesh.position.x - u) < h && Math.abs(p.mesh.position.y - v) < h) return true;
+      return false;
+    },
     dispose() { clear(); },
   };
 }
