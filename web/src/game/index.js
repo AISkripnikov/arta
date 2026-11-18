@@ -76,7 +76,8 @@ export function createGame(opts = {}) {
     c.measured = !!rec;
     c.computed = cp.elevation != null && !cp.stale;
     c.loaded = !b.open && !!b.shell && b.rammed && b.charges > 0;
-    c.traversed = t.brake && !!rec && Math.abs(angDiff(t.bearing, rec.bearing)) <= 2;
+    const wind = cp.elevation != null && !cp.stale ? cp.windBearing || 0 : 0;
+    c.traversed = t.brake && !!rec && Math.abs(angDiff(t.bearing, rec.bearing + wind)) <= 0.5;
     c.elevated = c.computed && Math.abs(t.elevation - cp.elevation) <= 0.05;
     c.armed = state.fire.armed;
   }

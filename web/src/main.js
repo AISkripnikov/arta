@@ -20,11 +20,12 @@ const storage = {
     const game = createGame({ storage });
     const engine = await createEngine(document.getElementById('stage'), {});
     const ctx = { engine, THREE: engine.THREE, ui: engine.ui, mat: engine.mat, audio: engine.audio, game };
-    [createPlotStation, createComputerStation, createLoadingStation, createTraverseStation, createElevationStation, createFireStation]
-      .forEach((make) => engine.addStation(make(ctx)));
+    const stations = [createPlotStation, createComputerStation, createLoadingStation, createTraverseStation, createElevationStation, createFireStation]
+      .map((make) => make(ctx));
+    stations.forEach((st) => engine.addStation(st));
     engine.onFrame((dt) => game.update(dt));
     engine.gotoStation('fire', { instant: true });
-    createShell({ engine, game });
+    createShell({ engine, game, stations });
     engine.start();
     window.__arta = { engine, game };
     // Сообщаем приложению, что эта версия игры запустилась: иначе после двух неудач оно вернёт прежнюю.

@@ -23,6 +23,10 @@ const HOWTO = `
 <h3>КОРРЕКТИРОВКА</h3><p>После разрыва корректировщик доложит отклонение. Перелёт — уменьшите дальность на вычислителе и пересчитайте угол; ушло вправо — доверните башню влево. Один градус на 10 км — это около 175 м в сторону.</p>
 <h3>КАРТА ПЛАНШЕТА</h3><p>После выстрела на карте видна трасса летящего снаряда, а после разрыва — круг с номером выстрела. Так видно, куда легли снаряды и как вносить поправку.</p>
 <h3>КОНТРБАТАРЕЙНАЯ БОРЬБА</h3><p>Скрытые батареи противника не видит разведка. Их засекают по звуку залпа два поста звукометрии на берегу (ЗВ-1, ЗВ-2): каждый сообщает только пеленг. На планшете от постов проведены линии — батарея там, где они пересекаются. Кочующие батареи после нескольких залпов меняют позицию — ждите новой засечки. Каждый ваш выстрел помогает противнику точнее засечь «Утёс».</p>
+<h3>ВЕТЕР</h3><p>Метеопост сообщает ветер в начале боя. Вычислитель сам учитывает его в угле возвышения и выдаёт поправку пеленга: на посту ПОВОРОТ счётчик «ЗАДАНО» показывает пеленг уже с поправкой, а строка внизу экрана — как он получен.</p>
+<h3>ЗАСЕЧКА НА «КОМАНДИРЕ»</h3><p>Линии пеленгов звукометрии вы прокладываете сами: коснитесь знака поста (ЗВ-1) на карте — на него переедет ось алидады, — поверните алидаду на сообщённый пеленг и нажмите «ЛИНИЯ». То же для второго поста. Коснитесь «УТЁС», чтобы вернуть ось на батарею перед замером.</p>
+<h3>ОЧЕРЕДЬ</h3><p>Переключатель «ОЧЕРЕДЬ» на посту ОГОНЬ: 2 или 3 выстрела подряд на одних установках — расчёт сам перезаряжает. Выгодно после пристрелки, когда снаряды ложатся у цели.</p>
+<h3>ПОВРЕЖДЕНИЯ</h3><p>Попадания противника могут вывести из строя привод поворота, элеватор снарядов или освещение. Слева вверху появится сообщение — нажмите «ЧИНИТЬ», ремонтная команда справится за 25 секунд.</p>
 <h3>ДВИЖУЩИЕСЯ ЦЕЛИ</h3><p>Стреляйте с упреждением — в точку, где цель окажется через время подготовки плюс время полёта снаряда.</p>`;
 
 const DIFF_HINT = [
@@ -30,7 +34,7 @@ const DIFF_HINT = [
   'Командир: всё вручную. Корректировщик сообщает только отклонение в метрах.',
 ];
 
-export function createShell({ engine, game }) {
+export function createShell({ engine, game, stations = [] }) {
   const s = game.state;
   const sfx = (name, ...a) => { try { const f = engine.audio && engine.audio[name]; if (f) f.apply(engine.audio, a); } catch (e) { /* звук не критичен */ } };
   let pendingUpdate = 0;
@@ -72,7 +76,8 @@ export function createShell({ engine, game }) {
       const locked = i >= game.save.unlocked, st = game.save.stars[i] || 0;
       const el = document.createElement('button');
       el.className = 'm-card' + (locked ? ' locked' : '');
-      el.innerHTML = `<span class="num">ЗАДАНИЕ ${i + 1}${locked ? ' · ЗАКРЫТО' : ''}</span><span class="nm">${esc(m.name.toUpperCase())}</span><span class="st">${'★'.repeat(st)}<i>${'★'.repeat(3 - st)}</i></span>`;
+      const rc = game.save.records && game.save.records[i];
+      el.innerHTML = `<span class="num">ЗАДАНИЕ ${i + 1}${locked ? ' · ЗАКРЫТО' : ''}</span><span class="nm">${esc(m.name.toUpperCase())}</span><span class="st">${'★'.repeat(st)}<i>${'★'.repeat(3 - st)}</i>${rc ? `<em>${rc.shots} ВЫСТР. · ${game.fmt.time(rc.time)}</em>` : ''}</span>`;
       if (!locked) el.onclick = () => { sfx('tick'); game.startMission(i); };
       grid.appendChild(el);
     });
@@ -109,7 +114,9 @@ export function createShell({ engine, game }) {
       (e.won ? `<div class="stars">${'★'.repeat(e.stars)}<i>${'★'.repeat(3 - e.stars)}</i></div>` : `<p class="bad">${esc(e.reason || '')}</p>`) +
       `<table class="stats"><tr><td>Выстрелов</td><td>${st.shots}</td></tr><tr><td>Норматив на «отлично»</td><td>${st.par}</td></tr>` +
       `<tr><td>Уничтожено целей</td><td>${st.destroyed} / ${st.total}</td></tr><tr><td>Прочность батареи</td><td>${st.integrity}%</td></tr>` +
-      `<tr><td>Время</td><td>${game.fmt.time(st.time)}</td></tr></table>`;
+      `<tr><td>Время</td><td>${game.fmt.time(st.time)}</td></tr></table>` +
+      (e.record ? (e.record.isNew ? `<p class="rec">★ НОВЫЙ РЕКОРД ЗАДАНИЯ${e.record.previous ? ` (был: ${e.record.previous.shots} выстр., ${game.fmt.time(e.record.previous.time)})` : ''}</p>`
+        : `<p class="dim">Рекорд задания: ${e.record.best.shots} выстр., ${game.fmt.time(e.record.best.time)}, ★${e.record.best.stars}</p>`) : '');
     const idx = s.mission.index, btns = [];
     if (e.won && idx != null && idx + 1 < game.campaign.length) btns.push({ text: 'СЛЕДУЮЩЕЕ', primary: true, fn: () => game.startMission(idx + 1) });
     if (s.mission.skirmish) btns.push({ text: 'НОВЫЙ БОЙ', primary: !btns.length, fn: () => game.startSkirmish() });
@@ -132,28 +139,73 @@ export function createShell({ engine, game }) {
     goto(STATIONS[(i + dir + STATIONS.length) % STATIONS.length].id);
   }
 
+  const ang = (a, b) => { let d = ((a - b) % 360 + 360) % 360; if (d > 180) d -= 360; return d; };
+  /** Следующий шаг процедуры: пост, текст подсказки и орган управления для подсветки. */
   function nextStep() {
-    const c = s.checklist, b = s.breech;
-    if (s.flight.length && !b.shell && !b.open) return { st: null, text: 'Снаряд в полёте — ждите доклада корректировщика' };
-    if (!s.activeTarget) return { st: null, text: 'Ждите донесения разведки' };
+    const c = s.checklist, b = s.breech, cp = s.computer;
+    if (s.flight.length && !b.shell && !b.open && !(b.busy && b.busy.kind === 'auto')) return { st: null, text: 'Снаряд в полёте — следите за картой на ПЛАНШЕТЕ и ждите доклада' };
+    if (b.busy && b.busy.kind === 'auto') return { st: null, text: 'Очередь: расчёт перезаряжает орудие' };
+    if (!s.activeTarget) return { st: null, text: 'Ждите донесения разведки или звукометрии' };
     const at = s.targets.find((t) => t.id === s.activeTarget);
-    if (!c.measured && at && at.reported && at.reported.sound) return { st: 'plot', text: 'ПЛАНШЕТ: поставьте фишку на пересечение пеленгов звукометрии, наведите алидаду, «ЗАПИСАТЬ»' };
-    if (!c.measured) return { st: 'plot', text: 'ПЛАНШЕТ: поставьте фишку по координатам, наведите алидаду, «ЗАПИСАТЬ»' };
-    if (!c.computed) return { st: 'computer', text: 'ВЫЧИСЛИТЕЛЬ: наберите дальность, выберите заряд, потяните рычаг' };
-    if (!c.loaded) {
-      if (!b.open && !b.shell && s.turret.elevation > game.C.LOAD_ANGLE) return { st: 'elevation', text: 'ПОДЪЁМ: опустите ствол до ' + game.C.LOAD_ANGLE + '° — иначе затвор не открыть' };
-      if (!b.open && !b.shell) return { st: 'loading', text: 'ЗАРЯЖАНИЕ: откройте затвор' };
-      if (!b.shell) return { st: 'loading', text: 'ЗАРЯЖАНИЕ: подайте снаряд' };
-      if (!b.rammed) return { st: 'loading', text: 'ЗАРЯЖАНИЕ: дошлите снаряд' };
-      if (b.charges < s.computer.charge) return { st: 'loading', text: 'ЗАРЯЖАНИЕ: подайте заряды — нужно ' + s.computer.charge + ', подано ' + b.charges };
-      if (b.charges > s.computer.charge) return { st: 'loading', text: 'ЗАРЯЖАНИЕ: лишний заряд! Нужно ' + s.computer.charge };
-      return { st: 'loading', text: 'ЗАРЯЖАНИЕ: закройте затвор' };
+    const rec = s.plot.recorded[s.activeTarget];
+    if (!c.measured) {
+      const pin = s.plot.pins[s.activeTarget];
+      const sound = at && at.reported && at.reported.sound;
+      if (!pin) return { st: 'plot', hot: 'pin' + s.activeTarget, text: sound ? 'ПЛАНШЕТ: перетащите фишку на пересечение пеленгов звукометрии' : 'ПЛАНШЕТ: перетащите фишку на карту по координатам X и Y из донесения' };
+      if (s.plot.pivot) return { st: 'plot', text: 'ПЛАНШЕТ: коснитесь знака «УТЁС», чтобы вернуть ось алидады на батарею' };
+      const bat = s.mission.battery, A = s.plot.alidade, R = Math.PI / 180;
+      const sx = bat.x + A.range * Math.sin(A.bearing * R), sy = bat.y + A.range * Math.cos(A.bearing * R);
+      if (Math.hypot(sx - pin.x, sy - pin.y) > 0.03) return { st: 'plot', hot: 'sight', text: 'ПЛАНШЕТ: наведите визир алидады на фишку (тяните визир или крутите маховики)' };
+      return { st: 'plot', hot: 'btnRecord', text: 'ПЛАНШЕТ: нажмите «ЗАПИСАТЬ»' };
     }
-    if (b.charges !== s.computer.charge) return { st: 'loading', text: 'Заряжено ' + b.charges + ', а расчёт на заряд ' + s.computer.charge + ' — пересчитайте или перезарядите' };
-    if (!c.traversed) return { st: 'traverse', text: s.turret.brake && Math.abs(s.turret.bearing - (s.plot.recorded[s.activeTarget] || {}).bearing) > 2 ? 'ПОВОРОТ: снимите стопор и разверните башню на записанный пеленг' : 'ПОВОРОТ: выставьте пеленг и поставьте стопор' };
-    if (!c.elevated) return { st: 'elevation', text: 'ПОДЪЁМ: поднимите ствол на ' + s.computer.elevation.toFixed(2) + '°' };
-    if (!c.armed) return { st: 'fire', text: 'ОГОНЬ: откройте крышку и взведите цепь стрельбы' };
-    return { st: 'fire', text: 'ОГОНЬ: дёргайте спуск!' };
+    if (!c.computed) {
+      if (Math.abs(cp.range - rec.range) > 0.005) return { st: 'computer', hot: 'rangeWheel', text: 'ВЫЧИСЛИТЕЛЬ: маховиком наберите дальность ' + game.fmt.km(rec.range) + ' км' };
+      if (game.chargeStates()[cp.charge - 1] !== 'ok') return { st: 'computer', hot: 'chargeSelector', text: 'ВЫЧИСЛИТЕЛЬ: выберите заряд с зелёной лампой' };
+      return { st: 'computer', hot: 'computeLever', text: 'ВЫЧИСЛИТЕЛЬ: потяните рычаг «ВЫЧИСЛИТЬ» вниз' };
+    }
+    if (!c.loaded) {
+      if (!b.open && !b.shell && s.turret.elevation > game.C.LOAD_ANGLE) return { st: 'elevation', hot: 'loadAngleButton', text: 'ПОДЪЁМ: держите «НА УГОЛ ЗАРЯЖАНИЯ» — ствол должен опуститься до ' + game.C.LOAD_ANGLE + '°' };
+      if (!b.open && !b.shell) return { st: 'loading', hot: 'breechLever', text: 'ЗАРЯЖАНИЕ: откройте затвор рычагом' };
+      if (!b.shell) return { st: 'loading', hot: 'hoistButton', text: 'ЗАРЯЖАНИЕ: выберите ОФ или ББ и нажмите «ПОДАТЬ СНАРЯД»' + (at && at.armored ? ' (цель бронирована — нужен ББ)' : '') };
+      if (!b.rammed) return { st: 'loading', hot: 'ramLever', text: 'ЗАРЯЖАНИЕ: дошлите снаряд рычагом «ДОСЛАТЬ»' };
+      if (b.charges < cp.charge) return { st: 'loading', hot: 'chargePlus', text: 'ЗАРЯЖАНИЕ: подайте заряды — нужно ' + cp.charge + ', подано ' + b.charges };
+      if (b.charges > cp.charge) return { st: 'loading', hot: 'chargeMinus', text: 'ЗАРЯЖАНИЕ: лишний заряд! Нужно ' + cp.charge };
+      return { st: 'loading', hot: 'breechLever', text: 'ЗАРЯЖАНИЕ: закройте затвор' };
+    }
+    if (b.charges !== cp.charge) return { st: 'loading', text: 'Заряжено ' + b.charges + ', а расчёт на заряд ' + cp.charge + ' — пересчитайте или перезарядите' };
+    if (!c.traversed) {
+      const want = ((rec.bearing + (cp.windBearing || 0)) % 360 + 360) % 360, err = ang(s.turret.bearing, want);
+      const wtxt = cp.windBearing ? ' (' + rec.bearing.toFixed(1) + '° ' + (cp.windBearing > 0 ? '+' : '−') + Math.abs(cp.windBearing).toFixed(1) + '° на ветер)' : '';
+      if (Math.abs(err) > 0.5) {
+        if (s.turret.brake) return { st: 'traverse', hot: 'brakeLever', text: 'ПОВОРОТ: снимите стопор' };
+        return { st: 'traverse', hot: Math.abs(err) > 3 && !s.faults.drive ? 'slewLever' : 'fineWheel', text: 'ПОВОРОТ: разверните башню на ' + want.toFixed(1) + '°' + wtxt };
+      }
+      return { st: 'traverse', hot: 'brakeLever', text: 'ПОВОРОТ: поставьте стопор' };
+    }
+    if (!c.elevated) return { st: 'elevation', hot: 'elevWheel', text: 'ПОДЪЁМ: поднимите ствол маховиком на ' + cp.elevation.toFixed(2) + '°' };
+    if (!c.armed) return { st: 'fire', hot: 'armCover', text: 'ОГОНЬ: откройте красную крышку и взведите цепь стрельбы' };
+    return { st: 'fire', hot: 'fireLever', text: 'ОГОНЬ: потяните спуск вниз!' };
+  }
+
+  // ---------- подсветка органа управления ----------
+  const hl = document.createElement('div');
+  hl.id = 'highlight';
+  document.getElementById('hud').appendChild(hl);
+  const _hv = new engine.THREE.Vector3(), _hs = {};
+  let hlStep = null;
+  function placeHighlight() {
+    const st = hlStep;
+    const station = st && st.hot && stations.find((x) => x.id === st.st);
+    const obj = station && station.hotspots && station.hotspots[st.hot];
+    if (!obj || engine.current !== st.st || engine.flying || s.phase !== 'playing' || s.paused) { hl.style.display = 'none'; return; }
+    // фишку берут за ручку-диск — подсвечиваем её
+    const handle = /^pin\d+$/.test(st.hot) && station.api && station.api.pinHandleWorld ? station.api.pinHandleWorld(+st.hot.slice(3)) : null;
+    if (handle) _hv.copy(handle); else obj.getWorldPosition(_hv);
+    const sc = engine.input.toScreen(_hv, _hs);
+    const W = window.innerWidth, H = window.innerHeight;
+    if (sc.behind || sc.x < -20 || sc.y < -20 || sc.x > W + 20 || sc.y > H + 20) { hl.style.display = 'none'; return; }
+    hl.style.display = 'block';
+    hl.style.left = (sc.x - 32) + 'px'; hl.style.top = (sc.y - 32) + 'px';
   }
 
   function renderHud() {
@@ -166,12 +218,17 @@ export function createShell({ engine, game }) {
     $('hUnread').style.display = unread ? 'block' : 'none'; $('hUnread').textContent = unread;
 
     const rec = a ? s.plot.recorded[a.id] : null, cp = s.computer, parts = [];
-    if (rec) parts.push(`<b>ПЕЛЕНГ</b> ${rec.bearing.toFixed(1)}° <b>ДАЛЬН.</b> ${game.fmt.km(rec.range)}`);
+    if (rec) {
+      const wb = cp.elevation != null && !cp.stale ? cp.windBearing || 0 : 0;
+      parts.push(`<b>ПЕЛЕНГ</b> ${rec.bearing.toFixed(1)}°` + (wb ? ` ${wb > 0 ? '+' : '−'} ${Math.abs(wb).toFixed(1)}° <b>ВЕТЕР</b> = ${(((rec.bearing + wb) % 360 + 360) % 360).toFixed(1)}°` : '') + ` <b>ДАЛЬН.</b> ${game.fmt.km(rec.range)}`);
+    }
     if (cp.elevation != null) parts.push(`<b>ЗАРЯД</b> ${cp.charge} <b>УГОЛ</b> ${cp.elevation.toFixed(2)}° <b>ПОЛЁТ</b> ${cp.tof.toFixed(1)} с${cp.stale ? ' <b>(УСТАРЕЛО)</b>' : ''}`);
     $('memo').innerHTML = parts.join(' &nbsp;·&nbsp; ') || '<b>ЗАМЕРОВ НЕТ</b>';
 
     const step = nextStep(), hints = s.mission && (s.mission.tutorial || s.difficulty === 0);
     $('hint').textContent = hints ? step.text : '';
+    hlStep = hints ? step : null;
+    renderFaults();
     nav.querySelectorAll('button').forEach((b, i) => {
       const st = STATIONS[i];
       b.classList.toggle('on', engine.current === st.id);
@@ -181,6 +238,24 @@ export function createShell({ engine, game }) {
     const fc = $('flightChip');
     if (s.flight.length) { const rem = Math.min(...s.flight.map((f) => f.tof - f.t)); fc.innerHTML = 'СНАРЯД В ПОЛЁТЕ <b>' + Math.max(0, rem).toFixed(0) + ' с</b>' + (engine.current !== 'plot' ? ' · НА КАРТЕ ▸' : ''); fc.classList.remove('hidden'); }
     else fc.classList.add('hidden');
+  }
+
+  const FAULT_NAMES = { drive: 'ПРИВОД ПОВОРОТА', hoist: 'ЭЛЕВАТОР СНАРЯДОВ', lights: 'ОСВЕЩЕНИЕ' };
+  let faultsKey = '';
+  function renderFaults() {
+    const f = s.faults || {}, r = s.repair;
+    const key = JSON.stringify(f) + (r ? r.kind + Math.floor((r.t / r.dur) * 20) : '');
+    if (key === faultsKey) return;
+    faultsKey = key;
+    const box = $('faults');
+    box.innerHTML = '';
+    Object.keys(FAULT_NAMES).filter((k) => f[k]).forEach((k) => {
+      const el = document.createElement('button');
+      el.className = 'fault' + (r && r.kind === k ? ' fixing' : '');
+      el.innerHTML = '⚠ ' + FAULT_NAMES[k] + (r && r.kind === k ? ` <i>РЕМОНТ ${Math.round((r.t / r.dur) * 100)}%</i>` : r ? ' <i>ОЖИДАЕТ</i>' : ' <b>ЧИНИТЬ</b>');
+      el.onclick = () => { sfx('tick'); game.repair(k); };
+      box.appendChild(el);
+    });
   }
 
   function renderNotebook() {
@@ -230,12 +305,30 @@ export function createShell({ engine, game }) {
   });
   game.on('denied', (d) => { sfx('buzz'); toast(d.reason); });
   game.on('fired', () => { sfx('fire'); try { engine.shake(0.06, 0.7); } catch (e) { /* нет тряски */ } flash('fire'); if (navigator.vibrate) try { navigator.vibrate(150); } catch (e) { /* нет вибро */ } });
-  game.on('impact', () => sfx('impactFar'));
+  // гром нашего разрыва доходит с задержкой и тем тише, чем дальше
+  game.on('impact', (e) => {
+    const bat = s.mission && s.mission.battery;
+    const d = bat ? Math.hypot(e.x - bat.x, e.y - bat.y) : 8;
+    setTimeout(() => sfx('thunder', 1.3 - d / 20), Math.min(3500, d * 260) / (s.speed || 1));
+  });
+  game.on('incoming', (e) => { sfx('whistle', e.eta * 0.92 / (s.speed || 1)); });
+  game.on('fault', (e) => { if (!e.fixed) { sfx('alarm', true); setTimeout(() => sfx('alarm', false), 1600); } faultsKey = ''; });
   $('flightChip').addEventListener('click', () => { if (s.phase === 'playing') goto('plot'); });
-  game.on('batteryHit', (h) => { sfx('impactFar'); if (h.damage > 0) { flash('hit'); try { engine.shake(0.04, 0.5); } catch (e) { /* нет тряски */ } if (navigator.vibrate) try { navigator.vibrate(300); } catch (e) { /* нет вибро */ } toast('ПОПАДАНИЕ ПО БАТАРЕЕ: −' + h.damage + '%'); } });
+  game.on('batteryHit', (h) => { sfx(h.damage > 0 ? 'impactNear' : 'impactFar'); if (h.damage > 0) { flash('hit'); try { engine.shake(0.04, 0.5); } catch (e) { /* нет тряски */ } if (navigator.vibrate) try { navigator.vibrate(300); } catch (e) { /* нет вибро */ } toast('ПОПАДАНИЕ ПО БАТАРЕЕ: −' + h.damage + '%'); } });
   engine.on('station', () => { dirty = true; });
   engine.on('swipe', (dir) => { if (s.phase === 'playing' && !s.paused) neighbor(dir > 0 ? 1 : -1); });
 
+  const baseExposure = engine.renderer.toneMappingExposure || 1;
+  let flick = 0;
+  engine.onFrame((dt) => {
+    if (s.phase === 'playing') placeHighlight(); else hl.style.display = 'none';
+    // отказ освещения: в башне темно, аварийный свет мигает
+    const dark = s.phase === 'playing' && s.faults && s.faults.lights;
+    flick = Math.max(0, flick - dt);
+    if (dark && Math.random() < dt * 0.8) flick = 0.12 + Math.random() * 0.2;
+    const target = dark ? (flick > 0 ? 0.12 : 0.27) : 1;
+    engine.renderer.toneMappingExposure += (baseExposure * target - engine.renderer.toneMappingExposure) * Math.min(1, dt * (flick > 0 ? 30 : 4));
+  });
   engine.onFrame((dt, time) => {
     if (!dirty && !s.flight.length) return;
     const now = time != null ? time * 1000 : performance.now();

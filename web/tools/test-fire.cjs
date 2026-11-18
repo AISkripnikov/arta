@@ -91,7 +91,7 @@ const PAGE_HELPERS = `(() => {
     lights: (() => { let n = 0; st.group.traverse(o => { if (o.isLight) n++; }); return n; })(),
     box: (() => { const b = new window.__dev.engine.THREE.Box3().setFromObject(st.group); st.group.worldToLocal(b.min); return 0; })() }`);
   check('id/title/group', meta.id === 'fire' && meta.title === 'ОГОНЬ' && meta.isGroup, meta);
-  check('hotspots: armCover, armToggle, fireLever', meta.keys.join() === 'armCover,armToggle,fireLever', meta.keys);
+  check('hotspots: armCover, armToggle, burstSelector, fireLever', meta.keys.join() === 'armCover,armToggle,burstSelector,fireLever', meta.keys);
   check('пост не добавляет источников света', meta.lights === 0, meta.lights);
   let s = await snap();
   check('фаза playing', s.phase === 'playing', s.phase);

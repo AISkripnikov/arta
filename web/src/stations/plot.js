@@ -176,6 +176,15 @@ export function createPlotStation(ctx) {
     radius: 0.032, color: 'black', label: 'ЛУПА',
     onPress() { setLoupe(!loupe); },
   })), 0.455, 0.1);
+  // карандаш: провести линию вдоль алидады (засечка по пеленгам) и стереть все линии
+  const btnLine = deck.add(keep(ui.pushButton({
+    radius: 0.03, color: 'ochre', label: 'ЛИНИЯ',
+    onPress() { if (state().mission) { const r = game.drawLine(); if (r && r.ok) audio.tick(); } },
+  })), 0.455, -0.075);
+  const btnErase = deck.add(keep(ui.pushButton({
+    radius: 0.024, color: 'black', label: 'СТЕРЕТЬ',
+    onPress() { if (state().mission) { game.clearLines(); audio.tick(); } },
+  })), 0.455, -0.215);
 
   // лоток фишек
   let trayObj;
@@ -378,7 +387,13 @@ export function createPlotStation(ctx) {
   // ------------------------------------------------------------------ вспомогательное
   const hotspots = {};
   const targetById = (id) => { const ts = state().targets || []; for (let i = 0; i < ts.length; i++) if (ts[i].id === id) return ts[i]; return null; };
-  const battery = () => { const m = state().mission; return m ? (m.battery || (m.map && m.map.battery) || null) : null; };
+  /** Ось алидады: батарея или пост звукометрии (переставляется касанием знака на карте). */
+  const battery = () => {
+    const s = state(), m = s.mission;
+    if (!m) return null;
+    const P = game.pivots ? game.pivots() : [];
+    return P[(s.plot && s.plot.pivot) || 0] || m.battery || (m.map && m.map.battery) || null;
+  };
   const isDead = (t) => !t.alive || t.escaped;
 
   let loupe = false, zoom = 0;                             // zoom: 0 — основной вид … 1 — лупа
@@ -510,6 +525,13 @@ export function createPlotStation(ctx) {
         const d = Math.min(Math.hypot(p.u - su, p.v - sv), Math.hypot(p.u - ku, p.v - kv)) + 1e-4;   // при равенстве — фишка
         if (d < bd) { bd = d; best = { kind: 'sight', su, sv }; }
       }
+      if (!best && game.pivots) {
+        // знак батареи или поста звукометрии: касание переставляет ось алидады
+        game.pivots().forEach((q, i) => {
+          const d = Math.hypot(p.u - kmU(q.x), p.v - kmV(q.y));
+          if (d < grab * 0.75 && (!best || d < best.d)) best = { kind: 'pivot', i, d };
+        });
+      }
       if (!best) {
         // линейка: расстояние до оси в пределах её длины
         const pu = kmU(bat.x), pv = kmV(bat.y), rx = p.u - pu, ry = p.v - pv;
@@ -532,7 +554,7 @@ export function createPlotStation(ctx) {
       drag.p0 = p; drag.moved = false;
     },
     onDrag(e) {
-      if (!drag || drag.kind === 'none' || !e.dragging) return;
+      if (!drag || drag.kind === 'none' || drag.kind === 'pivot' || !e.dragging) return;
       const p = boardPoint(e);
       if (!p) return;
       const s = state();
@@ -594,6 +616,12 @@ export function createPlotStation(ctx) {
       if (d.kind === 'pin') {
         lastTap = null;
         if (!d.dead && state().activeTarget !== d.id) { game.selectTarget(d.id); audio.tick(); }
+        return;
+      }
+      if (d.kind === 'pivot') {
+        lastTap = null;
+        const s = state();
+        if ((s.plot && s.plot.pivot) !== d.i) { game.setPivot(d.i); audio.clunk(); }
         return;
       }
       if (lastTap && now - lastTap.t < 450 && Math.hypot(e.x - lastTap.x, e.y - lastTap.y) < 34) {
@@ -751,7 +779,7 @@ export function createPlotStation(ctx) {
   Object.assign(hotspots, {
     bearingWheel: wheelB.object3D, rangeWheel: wheelR.object3D,
     btnXMinus: btnXm.object3D, btnXPlus: btnXp.object3D, btnYMinus: btnYm.object3D, btnYPlus: btnYp.object3D,
-    btnRecord: btnRecord.object3D, btnLoupe: btnLoupe.object3D, btnOverview: backPlate.object3D,
+    btnRecord: btnRecord.object3D, btnLoupe: btnLoupe.object3D, btnLine: btnLine.object3D, btnErase: btnErase.object3D, btnOverview: backPlate.object3D,
     chart: sheet, sight, ruler, tray: trayObj,
     counterBearing: cBearing.object3D, counterRange: cRange.object3D, counterX: cX.object3D, counterY: cY.object3D,
     lampAligned: lampAligned.object3D, lampRecorded: lampRecorded.object3D, lampNew: lampNew.object3D,

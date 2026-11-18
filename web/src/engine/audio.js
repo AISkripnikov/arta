@@ -176,6 +176,27 @@ export function createAudio() {
       noise(t + 0.25, 2.6, { type: 'lowpass', f: 220, f2: 60, gain: 0.35, attack: 0.3 });   // раскат
       for (let i = 0; i < 5; i++) noise(t + 0.5 + i * rv(0.12, 0.22), 0.03, { type: 'bandpass', f: rv(2000, 4200), q: 5, gain: 0.05 }); // дребезг
     }),
+    /** Свист подлетающего снаряда противника (dur, с). */
+    whistle: safe((dur = 2.2) => {
+      const t = now();
+      tone(t, dur, { type: 'sine', f: 1500, f2: 420, gain: 0.07, attack: 0.4 });
+      tone(t, dur, { type: 'sine', f: 1530, f2: 430, gain: 0.04, attack: 0.5 });
+      noise(t, dur, { type: 'bandpass', f: 2600, f2: 700, q: 3, gain: 0.05, attack: 0.6 });
+    }),
+    /** Близкий разрыв у батареи: удар, дребезг, осыпающаяся пыль. */
+    impactNear: safe(() => {
+      const t = now();
+      noise(t, 0.6, { type: 'lowpass', f: 900, f2: 70, gain: 0.9, attack: 0.002 });
+      tone(t, 0.7, { f: 70, f2: 24, gain: 0.8, attack: 0.003 });
+      for (let i = 0; i < 8; i++) noise(t + 0.15 + i * rv(0.06, 0.16), 0.04, { type: 'bandpass', f: rv(1800, 5000), q: 6, gain: 0.06 });
+      noise(t + 0.4, 2.2, { type: 'highpass', f: 3000, gain: 0.03, attack: 0.3 });
+    }),
+    /** Далёкий раскат (vol 0…1) — гром разрыва нашего снаряда. */
+    thunder: safe((vol = 1) => {
+      const t = now(), g = Math.max(0.15, Math.min(1, vol));
+      noise(t, 2.4, { type: 'lowpass', f: 180, f2: 45, gain: 0.45 * g, attack: 0.15 });
+      tone(t, 1.2, { f: 46, f2: 24, gain: 0.35 * g, attack: 0.1 });
+    }),
     /** Далёкий разрыв. */
     impactFar: safe(() => {
       const t = now();

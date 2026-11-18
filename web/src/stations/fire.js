@@ -144,6 +144,14 @@ export function createFireStation(ctx) {
   armCover.lid.add(coverAnchor);
   fascia.add(ui.plate('ЦЕПЬ СТРЕЛЬБЫ', { size: LABEL, style: 'red', screws: false }), ARM.x, ARM.y - 0.079 - 0.022 - LABEL * 1.05);
 
+  // очередь: сколько выстрелов сделать подряд на одних установках (расчёт сам перезаряжает)
+  const burstSel = fascia.add(ui.rotarySelector({
+    labels: ['1', '2', '3'], radius: 0.022, labelSize: 0.02, value: 0,
+    onChange(i) { if (game.state.phase === 'playing') game.setBurst(i + 1); },
+  }), 0.385, 0.098);
+  fascia.add(ui.plate('ОЧЕРЕДЬ', { size: 0.022, screws: false }), 0.548, 0.12);
+  const lampBurst = fascia.add(ui.lamp({ color: 'amber', radius: 0.012 }), 0.548, 0.078);
+
   const leverMount = new THREE.Group();
   fascia.add(leverMount, 0.7, 0.0);
   const leverBaseZ = leverMount.position.z;
@@ -270,6 +278,11 @@ export function createFireStation(ctx) {
     if (needReset) reset();
     const here = engine.current === 'fire';
 
+    // очередь
+    const want = Math.max(0, ((s.fire && s.fire.burst) || 1) - 1);
+    if (burstSel.value !== want) burstSel.set(want);
+    lampBurst.set(s.fire && s.fire.burstLeft > 0 ? 'blink' : false);
+
     // табло готовности
     const rd = game.fireReadiness();
     for (const l of readyLamps) l.set(rd[l.key]);
@@ -337,13 +350,14 @@ export function createFireStation(ctx) {
       armCover: coverAnchor,                 // откидная крышка: касание — открыть/закрыть
       armToggle: armToggle.object3D,         // тумблер цепи стрельбы (доступен при открытой крышке)
       fireLever: fireLever.handle,           // рукоять спуска: протянуть вниз
+      burstSelector: burstSel.object3D,      // переключатель очереди 1/2/3
     },
     /** Для тестов и отладки (не для игровой логики). */
     controls: { readyLamps, armToggle, armCover, fireLever, cBearing, cElev, cCharges, lampHE, lampAP, lampFlight, watch, armLamp, telegraph, slit, flare },
     dispose() {
       offs.forEach(off => off()); offs.length = 0;
       telegraph.dispose();
-      [watch, lampFlight, cBearing, cElev, cCharges, lampHE, lampAP, armToggle, armCover, fireLever, armLamp].forEach(c => { if (c.dispose) c.dispose(); });
+      [watch, lampFlight, cBearing, cElev, cCharges, lampHE, lampAP, armToggle, armCover, fireLever, armLamp, burstSel, lampBurst].forEach(c => { if (c.dispose) c.dispose(); });
       slitMat.map.dispose(); slitMat.dispose(); flareMat.dispose();
     },
   };

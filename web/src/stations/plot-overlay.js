@@ -50,7 +50,7 @@ export function createOverlay({ THREE, TX, size }) {
     // ---- пеленги звукометрии
     for (const t of s.targets) {
       const r = t.reported;
-      if (!r || !r.sound || !t.alive) continue;
+      if (!r || !r.sound || !t.alive || s.difficulty !== 0) continue;
       const active = t.id === s.activeTarget;
       ctx.save();
       ctx.strokeStyle = active ? 'rgba(170,24,14,0.95)' : 'rgba(170,24,14,0.45)';
@@ -73,6 +73,28 @@ export function createOverlay({ THREE, TX, size }) {
           text('Ц' + t.id, cx(p.x) + 24 * Z, cy(p.y) - 24 * Z, '#8f1d14');
         }
       }
+    }
+    // ---- линии, проложенные карандашом вдоль алидады
+    const lines = (s.plot && s.plot.lines) || [];
+    ctx.save();
+    ctx.strokeStyle = 'rgba(40,36,30,0.85)'; ctx.lineWidth = 3.5 * Z;
+    for (const ln of lines) {
+      const [x0, y0, x1, y1] = ray(ln.x, ln.y, ln.bearing);
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+      const b = ln.bearing * RAD;
+      text(game.fmt.brg(ln.bearing), cx(ln.x + Math.sin(b) * 3.4) + 8 * Z, cy(ln.y + Math.cos(b) * 3.4), 'rgba(40,36,30,0.95)');
+    }
+    ctx.restore();
+    // ось алидады: подсветить, где она стоит (если не на батарее)
+    const pv = (s.plot && s.plot.pivot) || 0;
+    if (posts.length) {
+      const P = [{ x: bat.x, y: bat.y }].concat(posts);
+      P.forEach((q, i) => {
+        ctx.strokeStyle = i === pv ? 'rgba(214,100,16,0.95)' : 'rgba(26,79,156,0.5)';
+        ctx.lineWidth = (i === pv ? 5 : 3) * Z; ctx.setLineDash(i === pv ? [] : [8 * Z, 6 * Z]);
+        ctx.beginPath(); ctx.arc(cx(q.x), cy(q.y), 34 * Z, 0, Math.PI * 2); ctx.stroke();
+      });
+      ctx.setLineDash([]);
     }
     // ---- посты звукометрии
     for (const q of posts) {
@@ -129,7 +151,8 @@ export function createOverlay({ THREE, TX, size }) {
       const imps = s.impacts || [];
       const lastImp = imps.length ? imps[imps.length - 1] : null;
       const animating = (s.flight && s.flight.length) || (lastImp && s.time - lastImp.time < 1.7);
-      let k = (m ? m.id + m.mapSeed : '') + '|' + imps.length + '|' + s.activeTarget + '|' + s.difficulty;
+      const pl = s.plot || {};
+      let k = (m ? m.id + m.mapSeed : '') + '|' + imps.length + '|' + s.activeTarget + '|' + s.difficulty + '|' + (pl.pivot || 0) + '|' + JSON.stringify(pl.lines || []);
       for (const t of s.targets || []) if (t.reported && t.reported.sound) k += '|' + t.id + ':' + t.reported.time + (t.alive ? '' : 'x') + (t.moved ? 'm' : '');
       k += '|' + z;
       if (k === key && !animating) return;

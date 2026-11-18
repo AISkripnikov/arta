@@ -252,11 +252,12 @@ export function createTraverseStation(ctx) {
 
   let acc = 0;                 // накопленный, ещё не переданный игре поворот (°) — чтобы не терять доли 0.01°
   let wheelDenied = false, wheelCut = false, slewDenied = false, blinkT = 0;
-  function flush() {
+  function flush(power) {
     const q = Math.round(acc * 100) / 100;
-    if (q === 0) return;
-    const r = game.rotateTurret(q);
-    if (r && r.ok) acc -= q; else acc = 0;
+    if (q === 0) return true;
+    const r = game.rotateTurret(q, power ? { power: true } : undefined);
+    if (r && r.ok) { acc -= q; return true; }
+    acc = 0; return false;
   }
   /** Одна попытка провернуть башню на стопоре за жест: игра сама сообщит «Башня на стопоре». */
   function denyOnce(dir) {
@@ -334,9 +335,11 @@ export function createTraverseStation(ctx) {
     if (v !== 0) {
       if (brake) {
         if (!slewDenied) { slewDenied = true; denyOnce(v); }           // один отказ за жест
+      } else if (game.state.faults && game.state.faults.drive) {
+        if (!slewDenied) { slewDenied = true; acc = Math.sign(v) * 0.01; flush(true); blinkT = BLINK_TIME; }   // один отказ за жест
       } else {
         acc += Math.sign(v) * v * v * SLEW_RATE * dt;
-        flush();
+        flush(true);
         drive = Math.abs(v);
       }
     }
@@ -347,7 +350,9 @@ export function createTraverseStation(ctx) {
     const bearing = isFinite(t.bearing) ? +t.bearing : 0;
     const recAll = s.plot && s.plot.recorded;
     const rec = recAll && s.activeTarget != null ? recAll[s.activeTarget] : null;
-    const set = rec && isFinite(rec.bearing) ? +rec.bearing : null;
+    const cp = s.computer;
+    const wind = cp && cp.elevation != null && !cp.stale && cp.windBearing ? cp.windBearing : 0;
+    const set = rec && isFinite(rec.bearing) ? ((+rec.bearing + wind) % 360 + 360) % 360 : null;
 
     // --- стопор ---
     if (brakeLever.on === brake) brakeLever.set(!brake);
