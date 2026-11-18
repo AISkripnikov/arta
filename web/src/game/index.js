@@ -68,6 +68,33 @@ const PLANE_SPEED = 0.22, PLANE_START = 7, PLANE_DROP = 0.4, BOMB_DMG = 12, BOMB
 const AA_HEAT = 0.16, AA_COOL = 0.12, AA_UNJAM = 0.4, AA_RATE = 8;
 const AUTOSAVE = 15, SNAP_V = 1;
 const TEXT_SIZES = [1, 1.15, 1.3];
+const FRIEND_ZONE = 0.4;      // км: свои ближе этого к точке прицеливания — «в зоне поражения»
+/** Настройки: значение по умолчанию и область допустимых значений. Логика их хранит и проверяет; применяет — интерфейс
+ *  (кроме autosave и speed — их учитывает сама логика). */
+const bool = (def) => ({ def, ok: (v) => typeof v === 'boolean' });
+const oneOf = (def, list) => ({ def, ok: (v) => list.includes(v), list });
+const vol = (def) => ({ def, ok: (v) => typeof v === 'number' && v >= 0 && v <= 100, fix: (v) => Math.round(v) });
+const SETTINGS = {
+  // управление
+  sens: { def: 1, ok: (v) => typeof v === 'number' && v >= 0.6 && v <= 1.6, fix: (v) => Math.round(v * 20) / 20 },
+  invert: bool(false), lefty: bool(false), vibro: bool(true), vibroPower: oneOf('high', ['low', 'high']),
+  // игра
+  hints: bool(true), autosave: bool(true), speed: oneOf(1, [1, 2]), confirmFriendly: bool(true), crewPanel: oneOf('full', ['full', 'compact', 'off']),
+  // звук
+  volFx: vol(100), volAmb: vol(70), volRadio: vol(100),
+  // экран
+  text: oneOf(1, TEXT_SIZES), quality: oneOf('high', ['high', 'mid', 'low']), fps: oneOf(60, [60, 30]), nightTint: oneOf('normal', ['normal', 'soft']), showFps: bool(false),
+};
+const SETTING_KEYS = Object.keys(SETTINGS);
+const settingDefaults = () => { const o = {}; for (const k of SETTING_KEYS) o[k] = SETTINGS[k].def; return o; };
+/** Настройки из сохранения: чего нет или что не проходит проверку — по умолчанию. */
+function loadSettings(st) {
+  const o = settingDefaults();
+  if (st && typeof st === 'object') for (const k of SETTING_KEYS) { const d = SETTINGS[k], v = st[k]; if (d.ok(v)) o[k] = d.fix ? d.fix(v) : v; }
+  return o;
+}
+const freshSave = () => ({ unlocked: 1, stars: [], records: [], difficulty: 0, muted: false, xp: 0, survivalBest: null,
+  upgrades: {}, points: 0, settings: {}, daily: null, resume: null });
 
 const r2 = (v) => Math.round(v * 100) / 100;
 const r1 = (v) => Math.round(v * 10) / 10;
@@ -99,8 +126,7 @@ export function createGame(opts = {}) {
 
   const RADIO_KEEP = 150;
   // ---------- сохранение ----------
-  const save = { unlocked: 1, stars: [], records: [], difficulty: 0, muted: false, xp: 0, survivalBest: null,
-    upgrades: {}, points: 0, settings: {}, daily: null, resume: null };
+  const save = freshSave();
   try { const raw = storage && storage.get('arta2.save'); if (raw) Object.assign(save, JSON.parse(raw)); } catch (e) { /* нет сохранения */ }
   if (!(save.xp >= 0)) save.xp = 0;
   if (!Array.isArray(save.stars)) save.stars = [];
@@ -112,13 +138,11 @@ export function createGame(opts = {}) {
     const u = save.upgrades && typeof save.upgrades === 'object' ? save.upgrades : {};
     save.upgrades = {};
     for (const id of UPG_IDS) save.upgrades[id] = clamp(Math.round(u[id]) || 0, 0, UPG_MAX);
-    const st = save.settings && typeof save.settings === 'object' ? save.settings : {};
-    save.settings = {
-      sens: st.sens >= 0.6 && st.sens <= 1.6 ? st.sens : 1,
-      text: TEXT_SIZES.includes(st.text) ? st.text : 1,
-      lefty: !!st.lefty,
-      vibro: st.vibro !== false,
-    };
+    // прежние версии хранили lefty/vibro как «что-то истинное/ложное» — приводим к булевым до проверки
+    const st = save.settings && typeof save.settings === 'object' ? { ...save.settings } : {};
+    if ('lefty' in st) st.lefty = !!st.lefty;
+    if ('vibro' in st) st.vibro = st.vibro !== false;
+    save.settings = loadSettings(st);
     if (!save.daily || typeof save.daily !== 'object' || !save.daily.date) save.daily = null;
     if (!save.resume || typeof save.resume !== 'object' || !save.resume.snap) save.resume = null;
   }
@@ -346,6 +370,7 @@ export function createGame(opts = {}) {
   function begin() {
     if (state.phase !== 'briefing') return deny('begin', 'Задание не выбрано');
     state.phase = 'playing';
+    state.speed = save.settings.speed;       // скорость боя по умолчанию — из настроек
     if (save.resume) { save.resume = null; persist(); }
     const wd = state.mission.wind;
     if (wd.speed) say(1.8, 'МЕТЕО', 'Ветер ' + String(wd.from).padStart(3, '0') + '° (откуда дует), ' + wd.speed + ' м/с. Вычислитель учитывает его автоматически — поправку пеленга вносите на посту ПОВОРОТ.');
@@ -516,7 +541,7 @@ export function createGame(opts = {}) {
     return ok();
   }
   function pause(b) { state.paused = !!b; changed(); return ok(); }
-  function setSpeed(n) { state.speed = n === 3 ? 3 : 1; changed(); return ok(); }
+  function setSpeed(n) { state.speed = n === 3 ? 3 : n === 2 ? 2 : 1; changed(); return ok(); }
   function setDifficulty(d) { state.difficulty = save.difficulty = d ? 1 : 0; persist(); changed(); return ok(); }
   function setMuted(b) { save.muted = !!b; persist(); return ok(); }
 
@@ -1531,7 +1556,7 @@ export function createGame(opts = {}) {
       }
     }
     // автосохранение боя
-    if (playing() && state.time >= sys.nextAuto) { sys.nextAuto = state.time + AUTOSAVE; writeResume(); }
+    if (playing() && save.settings.autosave && state.time >= sys.nextAuto) { sys.nextAuto = state.time + AUTOSAVE; writeResume(); }
     if (dirty) touch();
   }
 
@@ -1550,7 +1575,7 @@ export function createGame(opts = {}) {
     Object.assign(state, { phase: 'menu', difficulty: save.difficulty, mission: null, ...freshBattle() }, c.state);
     sys = Object.assign(freshSys(), c.sys);
     sys.nextAuto = state.time + AUTOSAVE;
-    state.paused = false; state.speed = 1; state.aa.firing = false;
+    state.paused = false; state.speed = save.settings.speed; state.aa.firing = false;
     drove = false;
     updateChecklist();
     emit('phase', state.phase); emit('restored', resumeInfo());
@@ -1609,15 +1634,60 @@ export function createGame(opts = {}) {
 
   // ---------- настройки ----------
   const settings = () => ({ ...save.settings });
+  /** Изменить одну настройку. Неизвестный ключ или значение вне области — отказ, ничего не меняется.
+   *  Исключение: sens вне 0.6…1.6 обрезается до границы (маховик настройки может «перелететь»). */
   function setSetting(key, value) {
-    const st = save.settings;
-    if (key === 'sens') { if (!isFinite(value)) return deny('setSetting', 'Неверное значение'); st.sens = Math.round(clamp(+value, 0.6, 1.6) * 20) / 20; }
-    else if (key === 'text') { if (!TEXT_SIZES.includes(+value)) return deny('setSetting', 'Неверное значение'); st.text = +value; }
-    else if (key === 'lefty') st.lefty = !!value;
-    else if (key === 'vibro') st.vibro = !!value;
-    else return deny('setSetting', 'Нет такой настройки');
+    const d = Object.prototype.hasOwnProperty.call(SETTINGS, key) ? SETTINGS[key] : null;
+    if (!d) return deny('setSetting', 'Нет такой настройки');
+    let v = value;
+    if (key === 'sens') { if (typeof v !== 'number' || !isFinite(v)) return deny('setSetting', 'Неверное значение'); v = clamp(v, 0.6, 1.6); }
+    if (!d.ok(v)) return deny('setSetting', 'Неверное значение');
+    save.settings[key] = d.fix ? d.fix(v) : v;
     persist(); emit('settings', settings());
     return ok();
+  }
+  /** Все настройки — по умолчанию (и звук включён). Сложность и прогресс не трогает. */
+  function resetSettings() {
+    save.settings = settingDefaults(); save.muted = false;
+    persist(); emit('settings', settings()); changed();
+    return ok();
+  }
+  /** Стереть весь прогресс (звёзды, рекорды, открытые задания, опыт, улучшения, оборону, задание дня, сохранённый бой).
+   *  Настройки, звук и сложность остаются, если не передано { settings: true }. Идущий бой сначала бросается. */
+  function resetProgress(o) {
+    const all = !!(o && o.settings);
+    if (state.phase !== 'menu') quit();
+    const keep = { settings: save.settings, muted: save.muted, difficulty: save.difficulty };
+    for (const k of Object.keys(save)) delete save[k];
+    Object.assign(save, freshSave(), all ? { settings: settingDefaults() } : keep);
+    for (const id of UPG_IDS) save.upgrades[id] = 0;
+    state.difficulty = save.difficulty;
+    persist();
+    emit('save', save); emit('upgrades', upgrades());
+    if (all) emit('settings', settings());
+    changed();
+    return ok();
+  }
+
+  // ---------- свои в зоне поражения ----------
+  /** Свои ближе FRIEND_ZONE км к точке прицеливания (замер выбранной цели, решение вычислителя, фактическая наводка
+   *  заряженного орудия) → массив своих из state.friends. Вид снаряда не учитывает. */
+  function friendsInDanger() {
+    if (!state.mission || state.activeTarget == null) return [];
+    const fr = state.friends.filter((f) => f.alive && !f.arrived && !f.sunk);
+    if (!fr.length) return [];
+    const rec = state.plot.recorded[state.activeTarget], cp = state.computer, bat = state.mission.battery, pts = [];
+    const pt = (brg, rng) => pts.push({ x: bat.x + rng * Math.sin(brg * RAD), y: bat.y + rng * Math.cos(brg * RAD) });
+    if (rec) { pt(rec.bearing, rec.range); if (cp.elevation != null && !cp.stale) pt(rec.bearing, cp.range); }
+    if (cp.elevation != null && state.checklist.loaded) pt(state.turret.bearing - (cp.windBearing || 0), cp.range);
+    return fr.filter((f) => pts.some((p) => Math.hypot(p.x - f.x, p.y - f.y) < FRIEND_ZONE));
+  }
+  /** Кого заденет выстрел: id ближайшего к прицелу своего или null. Осветительный и дымовой снаряд своим не вредят → null. */
+  function friendInDanger() {
+    const sh = state.breech.shell;
+    if (sh === 'illum' || sh === 'smoke') return null;
+    const z = friendsInDanger();
+    return z.length ? z[0].id : null;
   }
 
   /** Где сейчас снаряд (вид сверху): доля пути и точка. Горизонтальная скорость падает из-за сопротивления. */
@@ -1652,7 +1722,9 @@ export function createGame(opts = {}) {
     // задание дня
     dailyInfo, startDaily,
     // настройки и сохранение боя
-    settings, setSetting, snapshot, restore, suspend, discardResume, resumeInfo,
+    settings, setSetting, resetSettings, resetProgress, SETTINGS: clone(Object.fromEntries(SETTING_KEYS.map((k) => [k, { def: SETTINGS[k].def, list: SETTINGS[k].list || null }]))),
+    snapshot, restore, suspend, discardResume, resumeInfo,
+    friendsInDanger, friendInDanger, FRIEND_ZONE,
   };
   return game;
 }
