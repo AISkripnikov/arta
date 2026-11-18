@@ -87,7 +87,8 @@ export function createTraverseStation(ctx) {
   const midUpper = keep(ui.panel({ w: PW, h: UP_H, d: UP_D, rivets: false }));
   group.add(place(midUpper, 0, (YD1 + YU1) / 2, (ZD1 + ZU1) / 2, -UP_TILT).object3D);
 
-  midUpper.add(keep(ui.plate('ПОВОРОТ', { size: 0.034, style: 'black' })), 0, 0.183);
+  const named = (c, name) => { c.object3D.name = 'p:' + name; return c; };   // имена шильдиков — для проверки компоновки
+  midUpper.add(named(keep(ui.plate('ПОВОРОТ', { size: 0.034, style: 'black' })), 'title'), 0, 0.183);
 
   // ------------------------------------------------------------------ картушка-репитер курса
   const head = new THREE.Group();
@@ -162,7 +163,16 @@ export function createTraverseStation(ctx) {
     // метка записанного пеленга: охристая «вилка» на дорожке
     const b0 = Rc + 0.003, b1 = Rin - 0.003, bw = 0.017, gap = 0.0065;
     const blk = (sx) => G.xf(new THREE.PlaneGeometry(bw, b1 - b0), { p: [sx * (gap + bw / 2), (b0 + b1) / 2, 0] });
-    const bug = new THREE.Mesh(G.merge([blk(-1), blk(1)]), mat.emissive(C.ochre, 1.15));
+    const tip = (sx) => {                                   // «усы» метки заходят на шкалу картушки
+      const g = new THREE.BufferGeometry();
+      const x0 = sx * gap, x1 = sx * (gap + bw);
+      const v = sx > 0 ? [x0, b0, 0, x1, b0, 0, x0, b0 - 0.02, 0] : [x1, b0, 0, x0, b0, 0, x0, b0 - 0.02, 0];
+      g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+      g.setAttribute('normal', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 0, 0, 1], 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1], 2));
+      return g;
+    };
+    const bug = new THREE.Mesh(G.merge([blk(-1), blk(1), tip(-1), tip(1)]), mat.emissive(C.ochre, 1.15));
     bugPivot.add(bug);
     bugPivot.position.z = -0.0105;
     bugPivot.visible = false;
@@ -184,13 +194,13 @@ export function createTraverseStation(ctx) {
   }
 
   // ------------------------------------------------------------------ счётчики на колонке
-  const cBearing = keep(ui.drumCounter({ digits: 5, decimals: 2, unit: '°', digitH: 0.05, wrap: 360 }));
-  pedFace.add(cBearing, -0.094, -0.034);
-  pedFace.add(keep(ui.plate('ПЕЛЕНГ БАШНИ', { size: 0.026, screws: false })), -0.094, 0.04);
+  const cBearing = keep(ui.drumCounter({ digits: 5, decimals: 2, unit: '°', digitH: 0.06, wrap: 360 }));
+  pedFace.add(cBearing, -0.108, -0.042);
+  pedFace.add(named(keep(ui.plate('ПЕЛЕНГ БАШНИ', { size: 0.026, screws: false })), 'bearing'), -0.108, 0.05);
   const SET_H = 0.044;
   const cSet = keep(ui.drumCounter({ digits: 4, decimals: 1, unit: '°', digitH: SET_H, wrap: 360 }));
-  pedFace.add(cSet, 0.146, -0.034);
-  pedFace.add(keep(ui.plate('ЗАДАНО', { size: 0.026, screws: false })), 0.146, 0.04);
+  pedFace.add(cSet, 0.158, -0.042);
+  pedFace.add(named(keep(ui.plate('ЗАДАНО', { size: 0.026, screws: false })), 'set'), 0.158, 0.05);
   // шторка «нет задания» поверх окна репитера
   let blankTex = null, blankMat = null;
   const blank = (() => {
@@ -209,39 +219,39 @@ export function createTraverseStation(ctx) {
   })();
 
   // ------------------------------------------------------------------ левое крыло: привод и стопор
-  const gPressure = keep(ui.gauge({ radius: 0.09, min: 0, max: 160, majorStep: 40, minorStep: 10, unit: 'АТМ', caption: 'ДАВЛЕНИЕ', captionSize: 0.024, zones: [{ from: 130, to: 160 }], speed: 12, damping: 0.75 }));
-  left.upper.add(gPressure, -0.185, 0.07);
+  const gPressure = keep(ui.gauge({ radius: 0.09, min: 0, max: 160, majorStep: 40, minorStep: 10, unit: 'АТМ', caption: 'ДАВЛЕНИЕ', captionSize: 0.027, zones: [{ from: 130, to: 160 }], speed: 12, damping: 0.75 }));
+  left.upper.add(gPressure, -0.195, 0.07);
 
   const brakeLever = keep(ui.lever({
     mode: 'toggle', length: 0.16, labels: [], on: !(game.state.turret && game.state.turret.brake),
     onChange(on) { game.setBrake(!on); },             // верх — «СТОПОР», низ — «СВОБОДНО»
   }));
-  left.upper.add(brakeLever, 0.012, 0.03);
-  const lampBrake = keep(ui.lamp({ color: 'green', label: 'СТОПОР', labelSize: 0.024 }));
-  left.upper.add(lampBrake, 0.192, 0.125);
-  const lampFree = keep(ui.lamp({ color: 'amber', label: 'СВОБОДНО', labelSize: 0.024 }));
-  left.upper.add(lampFree, 0.192, -0.035);
+  left.upper.add(brakeLever, -0.02, 0.03);
+  const lampBrake = keep(ui.lamp({ color: 'green', label: 'СТОПОР', labelSize: 0.027 }));
+  left.upper.add(lampBrake, 0.16, 0.125);
+  const lampFree = keep(ui.lamp({ color: 'amber', label: 'СВОБОДНО', labelSize: 0.027 }));
+  left.upper.add(lampFree, 0.16, -0.035);
 
-  let slewV = 0, slewHeld = false;
+  let slewV = 0, slewCut = false;      // slewCut — жест оборван уходом с поста: до отпускания рычаг не действует
   const slew = keep(ui.slewLever({
     length: 0.2,
-    onInput(v) { slewV = +v || 0; slewHeld = slew.held === undefined ? slewV !== 0 : !!slew.held; },
+    onInput(v) { slewV = +v || 0; },
   }));
   left.desk.add(slew, -0.03, -0.155);
-  left.desk.add(keep(ui.plate('ПРИВОД', { size: 0.026, screws: false })), -0.03, 0.155);
+  left.desk.add(named(keep(ui.plate('ПРИВОД', { size: 0.031, screws: false })), 'drive'), -0.03, 0.155);
 
   // ------------------------------------------------------------------ правое крыло: точная наводка
   const gError = keep(ui.gauge({
-    radius: 0.1, min: -ERR_SPAN, max: ERR_SPAN, majorStep: 5, minorStep: 1, sweep: 180, unit: 'ГРАД',
-    caption: 'РАССОГЛАСОВАНИЕ', captionSize: 0.024, zones: [{ from: -0.5, to: 0.5, color: '#3d8f4f' }], speed: 14, damping: 0.8,
+    radius: 0.115, min: -ERR_SPAN, max: ERR_SPAN, majorStep: 5, minorStep: 1, sweep: 180, unit: 'ГРАД',
+    caption: 'РАССОГЛАСОВАНИЕ', captionSize: 0.027, zones: [{ from: -0.5, to: 0.5, color: '#3d8f4f' }], speed: 14, damping: 0.8,
   }));
-  right.upper.add(gError, -0.13, 0.075);
-  const lampAligned = keep(ui.lamp({ color: 'green', label: 'СОВМЕЩЕНО', labelSize: 0.024 }));
-  right.upper.add(lampAligned, 0.185, 0.095);
-  right.upper.add(keep(ui.plate('ТОЧНАЯ НАВОДКА', { size: 0.026, screws: false })), 0.03, -0.195);
+  right.upper.add(gError, -0.128, 0.085);
+  const lampAligned = keep(ui.lamp({ color: 'green', label: 'СОВМЕЩЕНО', labelSize: 0.027 }));
+  right.upper.add(lampAligned, 0.18, 0.1);
+  right.upper.add(named(keep(ui.plate('ТОЧНАЯ НАВОДКА', { size: 0.028, screws: false })), 'fine'), 0.03, -0.195);
 
   let acc = 0;                 // накопленный, ещё не переданный игре поворот (°) — чтобы не терять доли 0.01°
-  let wheelDenied = false, slewDenied = false, blinkT = 0;
+  let wheelDenied = false, wheelCut = false, slewDenied = false, blinkT = 0;
   function flush() {
     const q = Math.round(acc * 100) / 100;
     if (q === 0) return;
@@ -254,15 +264,16 @@ export function createTraverseStation(ctx) {
     blinkT = BLINK_TIME;
     game.rotateTurret(dir < 0 ? -0.01 : 0.01);
   }
-  const isCurrent = () => engine.current === 'traverse';
+  // органы действуют только на своём посту и только в бою (в меню/на паузе/после итогов — молчат, без отказов)
+  const isCurrent = () => engine.current === 'traverse' && game.state.phase === 'playing' && !game.state.paused;
   const brakeOn = () => { const t = game.state.turret; return !t || t.brake !== false; };
 
   const WHEEL_R = 0.165;
   const wheel = keep(ui.handwheel({
     radius: WHEEL_R, spokes: 4,
-    onStart() { wheelDenied = false; },
+    onStart() { wheelDenied = false; wheelCut = false; },
     onTurn(d) {
-      if (!isCurrent()) return;
+      if (wheelCut || !isCurrent()) return;
       if (brakeOn()) {
         wheel.spin(-d);                               // на стопоре маховик не проворачивается
         if (!wheelDenied) { wheelDenied = true; denyOnce(d); }
@@ -313,29 +324,30 @@ export function createTraverseStation(ctx) {
 
   function update(dt) {
     const s = game.state || {};
-    const t = s.turret || {};
-    const bearing = isFinite(t.bearing) ? +t.bearing : 0;
-    const brake = t.brake !== false;
-    const recAll = s.plot && s.plot.recorded;
-    const rec = recAll && s.activeTarget != null ? recAll[s.activeTarget] : null;
-    const set = rec && isFinite(rec.bearing) ? +rec.bearing : null;
-    const current = isCurrent();
+    const brake = brakeOn();
 
     // --- привод: рычаг удерживается → вращаем башню ---
     let drive = 0;
-    if (!slewHeld) slewDenied = false;
-    if (!current) { slewV = 0; slewHeld = false; }
-    if (slewV !== 0) {
+    const held = !!slew.held;
+    if (!held) { slewV = 0; slewCut = false; slewDenied = false; }     // жест окончен — снять блокировки
+    const v = held && !slewCut && isCurrent() ? slewV : 0;
+    if (v !== 0) {
       if (brake) {
-        if (!slewDenied) { slewDenied = true; denyOnce(slewV); }
+        if (!slewDenied) { slewDenied = true; denyOnce(v); }           // один отказ за жест
       } else {
-        slewDenied = false;
-        acc += Math.sign(slewV) * slewV * slewV * SLEW_RATE * dt;
+        acc += Math.sign(v) * v * v * SLEW_RATE * dt;
         flush();
-        drive = Math.abs(slewV);
+        drive = Math.abs(v);
       }
     }
     if (brake) acc = 0;
+
+    // показания читаем ПОСЛЕ вращения, чтобы приборы не отставали на кадр
+    const t = s.turret || {};
+    const bearing = isFinite(t.bearing) ? +t.bearing : 0;
+    const recAll = s.plot && s.plot.recorded;
+    const rec = recAll && s.activeTarget != null ? recAll[s.activeTarget] : null;
+    const set = rec && isFinite(rec.bearing) ? +rec.bearing : null;
 
     // --- стопор ---
     if (brakeLever.on === brake) brakeLever.set(!brake);
@@ -367,7 +379,7 @@ export function createTraverseStation(ctx) {
   }
 
   function stopDrive() {
-    slewV = 0; slewHeld = false; slewDenied = false; wheelDenied = false; acc = 0;
+    slewV = 0; slewCut = true; slewDenied = false; wheelCut = true; acc = 0;
     if (servoLevel !== 0) { servoLevel = 0; audio.servo(0); }
   }
 
@@ -390,10 +402,10 @@ export function createTraverseStation(ctx) {
     id: 'traverse',
     title: 'ПОВОРОТ',
     group,
-    camera: { position: [0, 1.36, 1.2], target: [0, 1.06, 0], fov: 46 },
+    camera: { position: [0, 1.38, 1.25], target: [0, 1.085, 0], fov: 46 },
     hotspots,
     update,
-    onEnter() { stopDrive(); },
+    onEnter() { stopDrive(); slewCut = false; wheelCut = false; },
     onLeave() { stopDrive(); },
     /** Снимок показаний приборов (для тестов и отладки). */
     inspect() {

@@ -12,7 +12,7 @@ export function createTelegraph(ctx, h) {
   const PAL = mat.PALETTE;
 
   // --- геометрия стола: лента идёт от A (низ, ближе к игроку) к B (верх, у панели); координаты (z, y) поста
-  const X = -0.59, W = 0.54, PAPER_W = 0.47;
+  const X = -0.565, W = 0.54, PAPER_W = 0.47;
   const A = [0.285, 0.905], B = [0.095, 1.105];
   const LEN = Math.hypot(B[0] - A[0], B[1] - A[1]);
   const tilt = -Math.atan2(A[0] - B[0], B[1] - A[1]);                 // поворот вокруг X (верх отклонён назад)
@@ -37,9 +37,9 @@ export function createTelegraph(ctx, h) {
   h.stat(mat.darkSteel, h.box(W - 0.04, LEN + 0.03, 0.02, 0, 0, -0.012), M.clone());
   h.stat(mat.ivory, h.cylX(0.016, PAPER_W, 0, LEN / 2 + 0.008, -0.012), M.clone());          // лента уходит через верхний валик
   h.stat(mat.steel, h.box(PAPER_W + 0.02, 0.01, 0.004, 0, LEN / 2 - 0.012, 0.006), M.clone());   // планка отрыва
-  const RAIL_S = 0.022;                                                                   // направляющая каретки (от низа ленты)
+  const RAIL_S = 0.017;                                                                   // направляющая каретки (от низа ленты)
   h.stat(mat.nickel, h.cylX(0.005, W - 0.05, 0, -LEN / 2 + RAIL_S, 0.017, 8), M.clone());
-  h.stat(mat.nickel, h.cylX(0.004, W - 0.05, 0, -LEN / 2 + RAIL_S - 0.014, 0.012, 8), M.clone());
+  h.stat(mat.nickel, h.cylX(0.004, W - 0.05, 0, -LEN / 2 + RAIL_S - 0.011, 0.012, 8), M.clone());
 
   // ручка подачи бумаги (крутится при подаче)
   const knobG = G.lathe([[0.03, 0], [0.03, 0.016], [0.026, 0.022], [0.012, 0.024], [0, 0.024]], 18);
@@ -50,15 +50,15 @@ export function createTelegraph(ctx, h) {
 
   // каретка
   const carriage = new THREE.Mesh(G.merge([
-    G.xf(G.slab(0.044, 0.034, 0.02, { r: 0.006, bevel: 0.003 }), { p: [0, 0, 0] }),
-    h.box(0.008, 0.016, 0.006, 0, 0.022, 0.006),
+    G.xf(G.slab(0.044, 0.026, 0.02, { r: 0.006, bevel: 0.003 }), { p: [0, 0, 0] }),
+    h.box(0.008, 0.014, 0.006, 0, 0.018, 0.006),
   ]), mat.darkSteel);
   carriage.position.set(0, -LEN / 2 + RAIL_S, 0.008);
   object3D.add(carriage);
 
   // --- лента
   const PX = 512, PPM = PX / PAPER_W, PY = Math.round(LEN * PPM);
-  const CAP = 0.026, PITCH = 0.0445, S0 = 0.062, MARGIN = 0.028;       // м: высота прописной, шаг строк, строка печати от низа, поле
+  const CAP = 0.026, PITCH = 0.0445, S0 = 0.067, MARGIN = 0.028;       // м: высота прописной, шаг строк, строка печати от низа, поле
   const VISIBLE = 5, MAX_W = PAPER_W - MARGIN * 2;
   const canvas = T.makeCanvas(PX, PY), c2 = canvas.getContext('2d');
   const bg = T.makeCanvas(PX, PY);

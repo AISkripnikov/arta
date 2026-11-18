@@ -6,7 +6,7 @@
 //   в центре — сектор −2…45° с моделью качающейся части (ствол на цапфах, зубчатая дуга, шестерня),
 //              под ним лампа «УГОЛ ЗАРЯЖАНИЯ» и кнопка привода «НА УГОЛ ЗАРЯЖАНИЯ»;
 //   справа  — приборная доска: счётчик «УГОЛ СТВОЛА», репитер «ЗАДАНО», «РАСЧЁТ УСТАРЕЛ»,
-//              прибор «РАССОГЛАСОВАНИЕ», лампа «СОВМЕЩЕНО».
+//              нуль-индикатор «РАССОГЛАСОВАНИЕ» (своя постройка, шкала растянута у нуля), лампа «СОВМЕЩЕНО».
 
 const DEG = Math.PI / 180, TAU = Math.PI * 2;
 const COARSE = 10, FINE = 0.5;          // градусов ствола на оборот маховика
@@ -41,15 +41,15 @@ export function createElevationStation(ctx) {
   for (const y of [-0.376, 0.376]) for (let i = 0; i <= 16; i++) steelParts.push(G.xf(G.rivetGeometry(0.007, 6), { p: [-0.8 + i * 0.1, y, 0] }));
 
   // ------------------------------------------------------------------ редуктор и маховик (слева)
-  const WX = -0.55, WY = -0.09, WR = 0.19, HOUSING_H = 0.078;
+  const WX = -0.55, WY = -0.09, WR = 0.18, HOUSING_H = 0.05;
   {
     const housing = painted(G.lathe([
-      [0.257, 0], [0.257, 0.011], [0.25, 0.0165], [0.2, 0.0165], [0.2, 0.0165], [0.188, 0.03], [0.108, 0.07], [0.094, HOUSING_H], [0, HOUSING_H],
+      [0.257, 0], [0.257, 0.011], [0.25, 0.0165], [0.2, 0.0165], [0.2, 0.0165], [0.188, 0.026], [0.108, 0.045], [0.094, HOUSING_H], [0, HOUSING_H],
     ], 56), PAL.panelDark, 0.5);
     on(housing, WX, WY);
     for (let i = 0; i < 6; i++) {                    // болты крышки редуктора
       const a = (i + 0.5) / 6 * TAU;
-      steelParts.push(G.xf(G.hexGeometry(0.012, 0.012), { p: [WX + Math.cos(a) * 0.135, WY + Math.sin(a) * 0.135, 0.05] }));
+      steelParts.push(G.xf(G.hexGeometry(0.012, 0.012), { p: [WX + Math.cos(a) * 0.135, WY + Math.sin(a) * 0.135, 0.036] }));
     }
     // кольцевой шильдик вокруг маховика
     const S = 512, k = S / 0.5, cv = T.makeCanvas(S, S), c2 = cv.getContext('2d'), cx = S / 2, cy = S / 2;
@@ -60,10 +60,11 @@ export function createElevationStation(ctx) {
     c2.fillStyle = sh; c2.fillRect(0, 0, S, S);
     c2.strokeStyle = 'rgba(232,224,200,0.55)'; c2.lineWidth = 1.6;
     for (const r of [r0 + 3.5, r1 - 3.5]) { c2.beginPath(); c2.arc(cx, cy, r, 0, TAU); c2.stroke(); }
-    arcText(c2, 'ПОДЪЁМ СТВОЛА', cx, cy, rm, 0, 0.025 * k, false);
-    arcText(c2, 'ПО ЧАСОВОЙ — ВВЕРХ', cx, cy, rm, Math.PI, 0.021 * k, true);
+    // маховик вынесен к игроку и из-за перспективы закрывает левую и нижнюю части кольца — надписи стоят справа
+    arcText(c2, 'ПОДЪЁМ СТВОЛА', cx, cy, rm, 34 * DEG, 0.025 * k, false);
+    arcText(c2, 'ПО ЧАСОВОЙ — ВВЕРХ', cx, cy, rm, 139 * DEG, 0.021 * k, true);
     c2.strokeStyle = PAL.ochre; c2.fillStyle = PAL.ochre; c2.lineWidth = 4; c2.lineCap = 'butt';
-    for (const [a0, a1] of [[62, 112], [242, 292]]) {   // стрелки «по часовой» (углы — по часовой от «12 часов»)
+    for (const [a0, a1] of [[76, 98], [250, 300]]) {   // стрелки «по часовой» (углы — по часовой от «12 часов»)
       c2.beginPath(); c2.arc(cx, cy, rm, (a0 - 90) * DEG, (a1 - 6 - 90) * DEG); c2.stroke();
       const e = a1 * DEG, px = cx + Math.sin(e) * rm, py = cy - Math.cos(e) * rm, tx = Math.cos(e), ty = Math.sin(e);
       c2.beginPath();
@@ -84,21 +85,23 @@ export function createElevationStation(ctx) {
   const live = () => { const s = game.state; return !!s && s.phase === 'playing' && !s.paused && !!s.turret && !!s.breech; };
 
   const wheel = ui.handwheel({
-    radius: WR, spokes: 5, standoff: 0.052, tickAngle: 0,
+    radius: WR, spokes: 5, standoff: 0.04, tickAngle: 0,
     onStart() { acc = 0; upBlocked = false; pushAcc = 0; thud = false; },
     onEnd() { acc = 0; },
     onTurn(d) {
       if (!live()) return;
       const s = game.state, C = game.C, el = s.turret.elevation, up = d > 0;
       const atHard = up ? el >= C.EL_MAX - 0.004 : el <= C.EL_MIN + 0.004;            // механический упор
-      const atLock = up && s.breech.open && el >= C.LOAD_ANGLE - 0.004;               // затвор открыт — блокировка
+      // затвор открыт — блокировка подъёма выше угла заряжания (если ствол успели поднять, пока затвор открывался,
+      // игра отказывает и в спуске малыми шагами — тогда заперты оба направления, пока затвор не закроют)
+      const atLock = s.breech.open && (up ? el >= C.LOAD_ANGLE - 0.004 : el > C.LOAD_ANGLE + 0.004);
       if (atHard || atLock) {
         wheel.spin(-d);                                // маховик упёрся и не идёт за пальцем
         acc = 0;
         if (!thud) { thud = true; audio.clunk(); }
         if (atLock && !upBlocked) {
-          pushAcc += d;
-          if (pushAcc > 0.06) { upBlocked = true; game.elevate(0.01); }               // один отказ за жест (плашку покажет оболочка)
+          pushAcc += Math.abs(d);
+          if (pushAcc > 0.06) { upBlocked = true; game.elevate(up ? 0.01 : -0.01); }               // один отказ за жест (плашку покажет оболочка)
         }
         return;
       }
@@ -295,26 +298,73 @@ export function createElevationStation(ctx) {
   on(ui.plate('ПРИ ОТКРЫТОМ ЗАТВОРЕ\nВЫШЕ 3° НЕ ПОДНИМАТЬ', { style: 'red', size: 0.0165, screws: false }), 0.108, -0.098);
 
   const lampLoad = on(ui.lamp({ color: 'green', label: 'УГОЛ\nЗАРЯЖАНИЯ' }), -0.17, -0.212);
-  const bDrive = on(ui.pushButton({ radius: 0.034, color: 'ochre', label: 'НА УГОЛ\nЗАРЯЖАНИЯ' }), 0.1, -0.212);
+  const bDrive = on(ui.pushButton({ radius: 0.04, color: 'ochre', label: 'НА УГОЛ\nЗАРЯЖАНИЯ' }), 0.1, -0.212);
 
   // ------------------------------------------------------------------ приборная доска (справа)
   const BX = 0.535;
   on(painted(G.slab(0.55, 0.7, 0.014, { r: 0.022, bevel: 0.004, segs: 2 }), PAL.panelDark, 0.5), BX, -0.005);
   for (const sx of [-1, 1]) for (const sy of [-1, 1]) nickelParts.push(G.xf(G.hexGeometry(0.0085, 0.005), { p: [BX + sx * 0.25, -0.005 + sy * 0.325, 0.014] }));
   const ZI = 0.014;
-  const cElev = on(ui.drumCounter({ digits: 4, decimals: 2, unit: '°', signed: true, digitH: 0.06, label: 'УГОЛ СТВОЛА', labelSize: 0.026 }), BX, 0.2, ZI);
-  const cTarget = on(ui.drumCounter({ digits: 4, decimals: 2, unit: '°', digitH: 0.044, label: 'ЗАДАНО' }), 0.415, 0.028, ZI);
+  const cElev = on(ui.drumCounter({ digits: 4, decimals: 2, unit: '°', signed: true, digitH: 0.07, label: 'УГОЛ СТВОЛА', labelSize: 0.026 }), BX, 0.2, ZI);
+  const cTarget = on(ui.drumCounter({ digits: 4, decimals: 2, unit: '°', digitH: 0.05, label: 'ЗАДАНО' }), 0.415, 0.028, ZI);
   // шторка репитера: закрывает окно, пока расчёта нет
-  const shutter = ui.plate('— —', { w: cTarget.w - 0.0176, h: 0.044, size: 0.016, screws: false });
-  shutter.object3D.position.set(0, 0, 0.0085);
+  const shutter = ui.plate('— —', { w: cTarget.w - 0.02, h: 0.05, size: 0.018, screws: false });
+  shutter.object3D.position.set(0, 0, 0.0097);
   cTarget.object3D.add(shutter.object3D);
   const lampStale = on(ui.lamp({ color: 'amber', label: 'РАСЧЁТ\nУСТАРЕЛ' }), 0.69, 0.075, ZI);
-  const gError = on(ui.gauge({
-    radius: 0.1, min: -ERR_SPAN, max: ERR_SPAN, majorStep: 1, minorStep: 0.2, sweep: 240, unit: 'ГРАД',
-    caption: 'РАССОГЛАСОВАНИЕ', captionSize: 0.022, value: -ERR_SPAN,
-    zones: [{ from: -ERR_SPAN, to: -1.6 }, { from: 1.6, to: ERR_SPAN }, { from: -0.1, to: 0.1, color: GREEN_ZONE }],
-  }), 0.415, -0.185, ZI);
-  const lampAligned = on(ui.lamp({ color: 'green', radius: 0.026, label: 'СОВМЕЩЕНО' }), 0.69, -0.16, ZI);
+  // «РАССОГЛАСОВАНИЕ» — нуль-индикатор собственной постройки: веерная шкала ±2° с растянутой серединой
+  // (отклонение стрелки ∝ √|Δ|), чтобы допуск ±0,02° был виден глазом; жирная стрелка читается на телефоне.
+  const MX = 0.432, MY = -0.178, M_W = 0.27, M_H = 0.15, M_PIV = -0.055, M_SWEEP = 55, M_PARK = -59;
+  const errAngle = e => Math.sign(e) * Math.sqrt(Math.min(Math.abs(e), ERR_SPAN) / ERR_SPAN) * M_SWEEP;
+  const meter = new THREE.Group();
+  meter.name = 'errorMeter';
+  const errNeedle = new THREE.Group();
+  {
+    nickelParts.push(G.xf(G.slab(M_W + 0.026, M_H + 0.026, 0.016, { r: 0.014, bevel: 0.004, segs: 2, hole: G.roundedRectShape(M_W, M_H, 0.007) }), { p: [MX, MY, ZI] }));
+    const S = 512, k = S / M_W, HPX = Math.round(M_H * k), cv = T.makeCanvas(S, HPX), c2 = cv.getContext('2d');
+    const cx = S / 2, cy = HPX / 2 - M_PIV * k;                 // ось стрелки на холсте
+    const pt = (r, deg) => [cx + r * k * Math.sin(deg * DEG), cy - r * k * Math.cos(deg * DEG)];
+    const arc = (r, a0, a1, w, color) => { c2.strokeStyle = color; c2.lineWidth = w; c2.beginPath(); c2.arc(cx, cy, r * k, (a0 - 90) * DEG, (a1 - 90) * DEG); c2.stroke(); };
+    c2.fillStyle = PAL.ivory; c2.fillRect(0, 0, S, HPX);
+    const sh = c2.createLinearGradient(0, 0, 0, HPX);
+    sh.addColorStop(0, 'rgba(90,70,30,0.30)'); sh.addColorStop(0.16, 'rgba(120,100,60,0)'); sh.addColorStop(0.9, 'rgba(120,100,60,0)'); sh.addColorStop(1, 'rgba(90,70,30,0.2)');
+    c2.fillStyle = sh; c2.fillRect(0, 0, S, HPX);
+    c2.lineCap = 'butt';
+    arc(0.0945, -errAngle(ALIGN_TOL / 100), errAngle(ALIGN_TOL / 100), 0.013 * k, GREEN_ZONE);        // зона «СОВМЕЩЕНО»
+    arc(0.0945, -M_SWEEP - 3.2, -M_SWEEP, 0.013 * k, PAL.redZone);
+    arc(0.0945, M_SWEEP, M_SWEEP + 3.2, 0.013 * k, PAL.redZone);
+    arc(0.088, -M_SWEEP, M_SWEEP, 3, PAL.ink);
+    const marks = [[0, 2, '0'], [0.02, 0], [0.05, 0], [0.1, 2, '0,1'], [0.2, 0], [0.3, 0], [0.4, 0], [0.5, 2, '0,5'], [0.75, 0], [1, 2, '1'], [1.25, 0], [1.5, 1], [1.75, 0], [2, 2, '2']];
+    for (const [v, rank, text] of marks) for (const sgn of v ? [-1, 1] : [1]) {
+      const a = sgn * errAngle(v), [x1, y1] = pt(0.088, a), [x2, y2] = pt(rank === 2 ? 0.102 : rank ? 0.098 : 0.095, a);
+      c2.strokeStyle = PAL.ink; c2.lineWidth = rank === 2 ? 5 : rank ? 3.5 : 2.5;
+      c2.beginPath(); c2.moveTo(x1, y1); c2.lineTo(x2, y2); c2.stroke();
+      if (text) { const [nx, ny] = pt(0.1145, a * 1.03); T.drawLabel(c2, text, nx, ny, 0.0165 * k, { color: PAL.ink, weight: 600, spacing: 0 }); }
+    }
+    T.drawLabel(c2, 'НИЖЕ', cx - 0.094 * k, cy - 0.006 * k, 0.0145 * k, { color: PAL.ink, weight: 600 });
+    T.drawLabel(c2, 'ВЫШЕ', cx + 0.094 * k, cy - 0.006 * k, 0.0145 * k, { color: PAL.ink, weight: 600 });
+    T.drawLabel(c2, 'ГРАД', cx, cy - 0.045 * k, 0.011 * k, { color: '#5a5142', weight: 600 });
+    const dial = new THREE.Mesh(new THREE.PlaneGeometry(M_W + 0.004, M_H + 0.004), new THREE.MeshStandardMaterial({ map: T.canvasTexture(cv, { aniso: 8 }), roughness: 0.62, metalness: 0 }));
+    dial.position.z = 0.003;
+    meter.add(dial);
+    const ns = new THREE.Shape();
+    ns.moveTo(-0.0042, -0.014); ns.lineTo(0.0042, -0.014); ns.lineTo(0.0036, 0); ns.lineTo(0.0013, 0.099); ns.lineTo(-0.0013, 0.099); ns.lineTo(-0.0036, 0); ns.closePath();
+    errNeedle.add(new THREE.Mesh(G.merge([
+      G.extrude(ns, 0.002, 0.0004),
+      G.lathe([[0.0125, -0.002], [0.0125, 0.003], [0.0125, 0.003], [0.009, 0.0048], [0, 0.0048]], 16),
+    ]), mat.bakelite));
+    errNeedle.position.set(0, M_PIV, 0.0075);
+    errNeedle.rotation.z = -M_PARK * DEG;
+    meter.add(errNeedle);
+    const glass = new THREE.Mesh(new THREE.PlaneGeometry(M_W, M_H), mat.glass);
+    glass.position.z = 0.0145; glass.renderOrder = 3;
+    meter.add(glass);
+  }
+  on(meter, MX, MY, ZI);
+  on(ui.plate('РАССОГЛАСОВАНИЕ', { size: 0.022, screws: false }), MX, MY - M_H / 2 - 0.013 - 0.008 - 0.019, ZI);
+  let errValue = -ERR_SPAN, errShown = M_PARK;         // показание (°) и текущий угол стрелки
+  const gError = { object3D: meter, get value() { return errValue; }, get angle() { return errShown; } };
+  const lampAligned = on(ui.lamp({ color: 'green', radius: 0.026, label: 'СОВМЕЩЕНО' }), 0.7, -0.16, ZI);
 
   // ------------------------------------------------------------------ декор вне панели
   {
@@ -362,6 +412,7 @@ export function createElevationStation(ctx) {
     if (!bDrive.pressed) { driveHold = false; driveAcc = 0; return false; }
     if (driveHold || engine.current !== station.id || !live() || wheel.turning) return false;
     const s = game.state, el = s.turret.elevation;
+    if (s.breech.open && el > game.C.LOAD_ANGLE + 0.004) { driveHold = true; game.elevate(-0.01); return false; }   // заперто: один отказ
     if (Math.abs(el) < 0.005) {
       if (driving) audio.clunk();                    // дошли до упора привода
       driveHold = true;                              // до следующего нажатия
@@ -407,10 +458,13 @@ export function createElevationStation(ctx) {
     } else bugShown = null;
     bug.visible = tgt !== null;
     shutter.object3D.visible = tgt === null;
-    lampStale.set(tgt !== null && cp.stale ? 'blink' : false);
+    lampStale.set(cp && cp.stale ? 'blink' : false);
 
     const err = tgt === null ? null : Math.round((el - tgt) * 100);          // сотые градуса
-    gError.setValue(err === null ? -ERR_SPAN : Math.max(-ERR_SPAN, Math.min(ERR_SPAN, err / 100)), first ? { instant: true } : undefined);
+    errValue = err === null ? -ERR_SPAN : Math.max(-ERR_SPAN, Math.min(ERR_SPAN, err / 100));
+    const errTo = err === null ? M_PARK : errAngle(errValue);
+    errShown = first ? errTo : Math.abs(errTo - errShown) < 0.05 ? errTo : errShown + (errTo - errShown) * (1 - Math.exp(-dt * 12));
+    errNeedle.rotation.z = -errShown * DEG;
     lampAligned.set(err !== null && Math.abs(err) <= ALIGN_TOL);
     lampLoad.set(el <= game.C.LOAD_ANGLE + 1e-9);
     lockBar.visible = !!(s.breech && s.breech.open);

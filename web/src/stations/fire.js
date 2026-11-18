@@ -157,12 +157,13 @@ export function createFireStation(ctx) {
   // ------------------------------------------------------------------ смотровая щель в броневом козырьке
   const HOOD = { y: 1.478, z: -0.075, tilt: 10 * DEG };
   const hoodM = mtx([0, HOOD.y, HOOD.z], [HOOD.tilt, 0, 0]);
-  const SLIT = { w: 0.56, h: 0.034, y: 0.118 };
+  const SLIT = { w: 0.56, h: 0.05, y: 0.127 };
   const slitHole = () => { const p = new THREE.Path(); p.setFromPoints(G.roundedRectShape(SLIT.w, SLIT.h, 0.012).getPoints(4).reverse()); return p; };
-  stat(dark, G.xf(G.slab(0.94, 0.25, 0.05, { r: 0.02, bevel: 0.008, hole: slitHole() }), { p: [0, 0.125 + (SLIT.y - 0.125), -0.05] }), hoodM.clone().multiply(mtx([0, 0.125 - SLIT.y + 0.0, 0])));
-  stat(mat.darkSteel, G.xf(G.slab(0.64, 0.08, 0.014, { r: 0.016, bevel: 0.004, hole: slitHole() }), { p: [0, SLIT.y, 0] }), hoodM);
+  // броневой козырёк: плита с прорезью (прорезь — в центре плиты) и накладная рамка щели
+  stat(dark, G.xf(G.slab(0.94, 0.254, 0.05, { r: 0.02, bevel: 0.008, hole: slitHole() }), { p: [0, SLIT.y, -0.05] }), hoodM);
+  stat(mat.darkSteel, G.xf(G.slab(0.64, 0.094, 0.014, { r: 0.016, bevel: 0.004, hole: slitHole() }), { p: [0, SLIT.y, 0] }), hoodM);
   for (const sx of [-1, 1]) for (const k of [0.33, 1]) for (const sy of [-1, 1]) {
-    stat(mat.steel, G.xf(G.hexGeometry(0.008, 0.006), { p: [sx * k * 0.3, SLIT.y + sy * 0.029, 0.014] }), hoodM);
+    stat(mat.steel, G.xf(G.hexGeometry(0.008, 0.006), { p: [sx * k * 0.3, SLIT.y + sy * 0.036, 0.014] }), hoodM);
   }
   stat(frame, box(0.9, 0.3, 0.84, 0, HOOD.y + 0.14, -0.53));
   // вид в щель: полоска «небо/море», при выстреле вспыхивает
@@ -182,13 +183,14 @@ export function createFireStation(ctx) {
   slit.position.set(0, SLIT.y, -0.036);
   hood.add(slit);
   const flareMat = new THREE.SpriteMaterial({
-    map: mat.glowTexture, color: 0xffb060, blending: THREE.AdditiveBlending, transparent: true, opacity: 0, depthWrite: false, fog: false,
+    map: mat.glowTexture, color: 0xffb060, blending: THREE.AdditiveBlending, transparent: true, opacity: 0, depthWrite: false, depthTest: false, fog: false,
   });
+  flareMat.color.setRGB(2.6, 1.5, 0.62);       // ярче единицы: отсвет ложится и на верх пульта
   const flare = new THREE.Sprite(flareMat);
-  flare.position.set(0, SLIT.y, 0.03); flare.scale.set(1.25, 0.42, 1); flare.visible = false;
+  flare.position.set(0, SLIT.y - 0.03, 0.03); flare.scale.set(2.1, 0.86, 1); flare.visible = false; flare.renderOrder = 20;
   hood.add(flare);
   const title = ui.plate('ОГОНЬ', { size: 0.034 });
-  title.object3D.position.set(0, 0.043, 0);
+  title.object3D.position.set(0, 0.04, 0);
   hood.add(title.object3D);
   const SLIT_BASE = new THREE.Color(0.5, 0.55, 0.62), SLIT_HOT = new THREE.Color(7, 4.6, 2.4);
 
@@ -224,18 +226,16 @@ export function createFireStation(ctx) {
 
   // ------------------------------------------------------------------ состояние анимаций и события игры
   let needReset = true;            // новое задание: очистить ленту, закрыть крышку, выставить счётчики без прокрутки
-  let recloseAt = -1;              // время (engine.time), когда после выстрела захлопнуть крышку
+  let reclose = 0;                 // с до захлопывания крышки после выстрела (0 — не ждём)
   let flareV = 0;                  // 0…1 — вспышка в щели
   const recoil = { x: 0, v: 0 };   // откат спускового рычага
-  let lastUpdate = -1e9;
 
-  const visibleNow = () => engine.time - lastUpdate < 0.3;     // пост сейчас обновляется (виден)
+  const visibleNow = () => group.visible;      // движок обновляет только видимые посты; скрытому анимация печати не нужна
   const offs = [
     game.on('phase', ph => { if (ph === 'briefing') needReset = true; }),
     game.on('fired', () => {
-      flareV = 1;
-      recoil.v -= 9;
-      recloseAt = engine.time + 0.45;
+      if (visibleNow()) { flareV = 1; recoil.v -= 9; reclose = 0.45; }
+      else reclose = 0.01;                     // пост скрыт: без вспышки и отката, крышку закрыть при первом обновлении
       telegraph.print('ВЫСТРЕЛ №' + game.state.shots, { color: PAL.redZone, animate: visibleNow() });
     }),
     game.on('impact', e => {
@@ -255,7 +255,7 @@ export function createFireStation(ctx) {
 
   function reset() {
     needReset = false;
-    recloseAt = -1; flareV = 0; recoil.x = recoil.v = 0;
+    reclose = 0; flareV = 0; recoil.x = recoil.v = 0;
     telegraph.clear();
     armCover.set(false);
     const s = game.state;
@@ -267,7 +267,6 @@ export function createFireStation(ctx) {
 
   function update(dt, time) {
     const s = game.state;
-    lastUpdate = time;
     if (needReset) reset();
     const here = engine.current === 'fire';
 
@@ -282,8 +281,8 @@ export function createFireStation(ctx) {
       if (here) audio.switchFlip();
     }
     if (armed && !armCover.open) armCover.set(true);          // взведено извне — крышка не может быть закрыта
-    if (recloseAt >= 0 && time >= recloseAt) {
-      recloseAt = -1;
+    if (reclose > 0 && (reclose -= dt) <= 0) {
+      reclose = 0;
       if (!armed && armCover.open) { armCover.set(false); if (here) audio.clunk(); }
     }
     armLamp.set(armed);
@@ -341,6 +340,11 @@ export function createFireStation(ctx) {
     },
     /** Для тестов и отладки (не для игровой логики). */
     controls: { readyLamps, armToggle, armCover, fireLever, cBearing, cElev, cCharges, lampHE, lampAP, lampFlight, watch, armLamp, telegraph, slit, flare },
-    dispose() { offs.forEach(off => off()); offs.length = 0; telegraph.dispose(); },
+    dispose() {
+      offs.forEach(off => off()); offs.length = 0;
+      telegraph.dispose();
+      [watch, lampFlight, cBearing, cElev, cCharges, lampHE, lampAP, armToggle, armCover, fireLever, armLamp].forEach(c => { if (c.dispose) c.dispose(); });
+      slitMat.map.dispose(); slitMat.dispose(); flareMat.dispose();
+    },
   };
 }

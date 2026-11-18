@@ -16,8 +16,9 @@ const CY = BY + LU * Math.cos(TU), CZ = BZ - LU * Math.sin(TU);     // верх�
 const XL = -0.88, XR = 0.575;             // левая/правая кромка стола и панели
 const TX = 0.74, TW = 0.30, TZ = 0.07;    // колонна рычага: центр по X, ширина, лицевая плоскость (z)
 const SLAB = 0.03;                        // толщина лицевых плит
-const HX = -0.29, HW = 0.44, HH = 0.44, HD = 0.062;   // кожух счётного механизма на приборной панели
+const HX = -0.29, HW = 0.44, HD = 0.062;   // кожух счётного механизма на приборной панели
 const WY = -0.047, WW = 0.34, WH = 0.23;  // окно механизма (центр по высоте панели, ширина, высота)
+const HB = -0.214, HT = 0.301, HLID = 0.008;          // низ кожуха, верх его «головы» (в координатах панели), выступ головы
 
 export function createComputerStation(ctx) {
   const { engine, THREE, ui, mat, audio, game } = ctx;
@@ -113,11 +114,12 @@ export function createComputerStation(ctx) {
 
     // лицевые плиты: стол, приборная панель, кожух механизма, плита колонны
     const hole = rrPath(WW, WH, 0.02);
-    const housing = G.slab(HW, HH, HD, { r: 0.03, bevel: 0.012, segs: 3, curve: 5, hole });
-    // окно в кожухе смещено: сдвигаем кожух так, чтобы отверстие встало на место окна
+    // кожух: корпус с окном (низ заподлицо с кромкой панели — не нависает над столом) и «голова» с шильдиком поста
+    const housing = G.slab(HW, 2 * (WY - HB), HD, { r: 0.03, bevel: 0.012, segs: 3, curve: 5, hole });
     housing.translate(HX, WY, 0);
-    const housingTop = G.slab(HW, HH / 2 - WY - WH / 2 - 0.004 + 0.0, HD, { r: 0.03, bevel: 0.012, segs: 3, curve: 5 });
-    housingTop.translate(HX, (WY + HH / 2 + 0.0) + (HH / 2 - WY - WH / 2 - 0.004) / 2 - 0.02, 0);
+    const hm = 2 * WY - HB;                 // верх корпуса кожуха = низ головы
+    const housingTop = G.slab(HW + 0.024, HT - hm, HD + HLID, { r: 0.03, bevel: 0.012, segs: 3, curve: 5 });
+    housingTop.translate(HX, (HT + hm) / 2, 0);
     const light = G.merge([
       toStation(facePlate(XR - XL, LD, (XL + XR) / 2, 0), desk),
       toStation(facePlate(XR - XL, LU, (XL + XR) / 2, 0), upper),
@@ -202,7 +204,7 @@ export function createComputerStation(ctx) {
   const shRepeat = shutter(cRepeat, 0.044, 'НЕТ ЗАМЕРА', 'black');
 
   // ------------------------------------------------------------------ счётный механизм за стеклом
-  put(upper, ui.plate('ВЫЧИСЛИТЕЛЬ', { size: 0.034, style: 'black' }), HX, 0.168, HD);
+  put(upper, ui.plate('ВЫЧИСЛИТЕЛЬ', { size: 0.034, style: 'black' }), HX, 0.176, HD + HLID);
   const mech = new THREE.Group();
   mech.name = 'mechanism';
   put(upper, mech, HX, WY, 0);
@@ -303,7 +305,7 @@ export function createComputerStation(ctx) {
     for (const sx of [-1, 0, 1]) for (const sy of [-1, 1]) nickel.push(G.xf(G.hexGeometry(0.0065, 0.004), { p: [sx * (WW / 2 - 0.02), sy * (WH / 2 + 0.0125), bz + 0.012] }));
     for (const sx of [-1, 1]) nickel.push(G.xf(G.hexGeometry(0.0065, 0.004), { p: [sx * (WW / 2 + 0.0125), 0, bz + 0.012] }));
     // болты по углам кожуха
-    for (const sx of [-1, 1]) for (const sy of [-1, 1]) nickel.push(G.xf(G.hexGeometry(0.009, 0.006), { p: [sx * (HW / 2 - 0.028), sy * (HH / 2 - 0.028) - WY, HD] }));
+    for (const sx of [-1, 1]) nickel.push(G.xf(G.hexGeometry(0.009, 0.006), { p: [sx * (HW / 2 - 0.026), HB + 0.024 - WY, HD] }));
     const nm = new THREE.Mesh(G.merge(nickel), mat.nickel);
     mech.add(nm);
     // стальной мостик через ось средней шестерни и направляющая толкателя
@@ -342,8 +344,8 @@ export function createComputerStation(ctx) {
     },
   });
   put(desk, wheel, -0.63, 0);
-  put(desk, label('ДАЛЬНОСТЬ', SZ_D, 0.2, 'ivory'), -0.30, 0.165);
-  put(desk, fine, -0.30, -0.032);
+  put(desk, label('ДАЛЬНОСТЬ', SZ_D, 0.2, 'ivory'), -0.30, 0.15);
+  put(desk, fine, -0.30, -0.045);
 
   // ------------------------------------------------------------------ стол: заряд
   const SX = 0.02, SY = 0.006;
@@ -575,7 +577,7 @@ export function createComputerStation(ctx) {
     id: 'computer',
     title: 'ВЫЧИСЛИТЕЛЬ',
     group,
-    camera: { position: [0, 1.46, 1.32], target: [0, 1.116, 0], fov: 46 },
+    camera: { position: [0.24, 1.46, 1.32], target: [0.07, 1.116, 0], fov: 46 },
     update,
     onEnter() { active = true; },
     onLeave() { active = false; animT = 0; denyT = 0; },

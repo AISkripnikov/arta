@@ -316,24 +316,45 @@ export function drawLeadAtlas(canvas, label) {
   }
 }
 
-/** Шкала алидады: canvas вдоль линейки (ось X — дальность), kmTotal км на всю длину, tailKm — хвост за осью. */
-export function drawRulerScale(canvas, kmTotal, tailKm, label) {
+/**
+ * Шкала алидады: canvas вдоль линейки (ось X — дальность от оси, 0 — на левом краю), kmTotal км на всю длину.
+ * Прозрачный целлулоид с кромками, делениями через 0.1 км и красной визирной линией по оси.
+ */
+export function drawRulerScale(canvas, kmTotal, label) {
   const W = canvas.width, H = canvas.height, ppk = W / kmTotal;
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(255,236,170,0.20)';
+  ctx.fillRect(0, 0, W, H);
   // кромки линейки
-  ctx.fillStyle = 'rgba(20,24,28,0.75)';
+  ctx.fillStyle = 'rgba(20,24,28,0.8)';
   ctx.fillRect(0, 0, W, 3); ctx.fillRect(0, H - 3, W, 3);
-  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
   ctx.fillRect(0, 3, W, 2); ctx.fillRect(0, H - 5, W, 2);
-  ctx.fillStyle = 'rgba(16,20,24,0.9)';
-  for (let j = 0; j <= (kmTotal - tailKm) * 10 + 0.5; j++) {
-    const x = (tailKm + j / 10) * ppk;
+  ctx.fillStyle = 'rgba(16,20,24,0.88)';
+  for (let j = 0; j <= kmTotal * 10 + 0.5; j++) {
+    const x = j / 10 * ppk;
     const km = j % 10 === 0, half = j % 5 === 0;
-    const len = km ? (j % 50 === 0 ? H * 0.36 : H * 0.26) : half ? H * 0.15 : H * 0.07;
+    const len = km ? (j % 50 === 0 ? H * 0.3 : H * 0.22) : half ? H * 0.14 : H * 0.07;
     const w = km ? 3 : 1.4;
     ctx.fillRect(x - w / 2, H - 5 - len, w, len);
-    if (km) ctx.fillRect(x - w / 2, 5, w, len * 0.55);
-    if (km && j % 50 === 0 && j > 0) label(ctx, String(j / 10), x, H * 0.36, H * 0.25, { color: 'rgba(16,20,24,0.92)', weight: 700, spacing: 0 });
+    ctx.fillRect(x - w / 2, 5, w, len);
+    if (km && j > 0) {
+      label(ctx, String(j / 10), x + H * 0.2, H * 0.25, H * (j % 50 === 0 ? 0.2 : 0.15), { color: 'rgba(16,20,24,0.9)', weight: 700, spacing: 0 });
+    }
   }
+  // визирная линия
+  ctx.fillStyle = 'rgba(176,30,20,0.95)';
+  ctx.fillRect(0, H / 2 - 1.25, W, 2.5);
+}
+
+/** Бирка с двумя отсчётами (видна под лупой): «X 12.34  Y 07.80». */
+export function drawTag(canvas, a, b, label) {
+  const W = canvas.width, H = canvas.height;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#111316'; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = 'rgba(232,224,200,0.6)'; ctx.lineWidth = 3; ctx.strokeRect(3.5, 3.5, W - 7, H - 7);
+  label(ctx, a, W * 0.27, H / 2, H * 0.42, { color: '#e8e0c8', weight: 600, spacing: 0.04, upper: false, maxWidth: W * 0.44 });
+  label(ctx, b, W * 0.73, H / 2, H * 0.42, { color: '#e8e0c8', weight: 600, spacing: 0.04, upper: false, maxWidth: W * 0.44 });
 }
