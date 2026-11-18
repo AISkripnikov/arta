@@ -1671,7 +1671,7 @@ export function createGame(opts = {}) {
 
   // ---------- свои в зоне поражения ----------
   /** Свои ближе FRIEND_ZONE км к точке прицеливания (замер выбранной цели, решение вычислителя, фактическая наводка
-   *  заряженного орудия) → массив своих из state.friends. Вид снаряда не учитывает. */
+   *  заряженного орудия) → массив своих из state.friends, ближайший к прицелу — первым. Вид снаряда не учитывает. */
   function friendsInDanger() {
     if (!state.mission || state.activeTarget == null) return [];
     const fr = state.friends.filter((f) => f.alive && !f.arrived && !f.sunk);
@@ -1680,7 +1680,8 @@ export function createGame(opts = {}) {
     const pt = (brg, rng) => pts.push({ x: bat.x + rng * Math.sin(brg * RAD), y: bat.y + rng * Math.cos(brg * RAD) });
     if (rec) { pt(rec.bearing, rec.range); if (cp.elevation != null && !cp.stale) pt(rec.bearing, cp.range); }
     if (cp.elevation != null && state.checklist.loaded) pt(state.turret.bearing - (cp.windBearing || 0), cp.range);
-    return fr.filter((f) => pts.some((p) => Math.hypot(p.x - f.x, p.y - f.y) < FRIEND_ZONE));
+    const near = (f) => Math.min(...pts.map((p) => Math.hypot(p.x - f.x, p.y - f.y)));
+    return fr.map((f) => ({ f, d: near(f) })).filter((q) => q.d < FRIEND_ZONE).sort((a, b2) => a.d - b2.d).map((q) => q.f);
   }
   /** Кого заденет выстрел: id ближайшего к прицелу своего или null. Осветительный и дымовой снаряд своим не вредят → null. */
   function friendInDanger() {

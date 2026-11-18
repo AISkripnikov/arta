@@ -5,6 +5,8 @@ import { createGame } from '../src/game/index.js';
 import { CAMPAIGN, dailyDef, isLand } from '../src/game/missions.js';
 import { RAD, norm, tick, waitBreech, waitReport, unlockAll, botStep, playBot, autoAA, fireQuiet, noWind, start, elevTo, turnTo, friendNear } from './bot.js';
 
+/** Настройки по умолчанию (полный список — см. README, раздел 8). */
+const DEF = { sens: 1, invert: false, lefty: false, vibro: true, vibroPower: 'high', hints: true, autosave: true, speed: 1, confirmFriendly: true, crewPanel: 'full', volFx: 100, volAmb: 70, volRadio: 100, text: 1, quality: 'high', fps: 60, nightTint: 'normal', showFps: false };
 const mem = (init) => { const m = {}; if (init) m['arta2.save'] = JSON.stringify(init); return { mem: m, get: (k) => m[k] || null, set: (k, v) => { m[k] = v; } }; };
 const brgTo = (bat, o) => norm(Math.atan2(o.x - bat.x, o.y - bat.y) / RAD);
 const withRandom = (v, fn) => { const R = Math.random; Math.random = () => v; try { return fn(); } finally { Math.random = R; } };
@@ -748,7 +750,7 @@ test('задание дня: одна дата — одно задание; сч
 test('настройки: значения по умолчанию, проверка, событие, сохранение', () => {
   const st = mem();
   const g = createGame({ storage: st });
-  assert.deepEqual(g.settings(), { sens: 1, text: 1, lefty: false, vibro: true });
+  assert.deepEqual(g.settings(), DEF);
   const ev = []; g.on('settings', (e) => ev.push(e));
   assert.ok(g.setSetting('sens', 5).ok); assert.equal(g.settings().sens, 1.6);
   assert.ok(g.setSetting('sens', 0.1).ok); assert.equal(g.settings().sens, 0.6);
@@ -757,8 +759,8 @@ test('настройки: значения по умолчанию, провер
   assert.equal(g.setSetting('text', 1.2).ok, false); assert.ok(g.setSetting('text', 1.3).ok); assert.ok(g.setSetting('text', 1.15).ok);
   assert.ok(g.setSetting('lefty', true).ok); assert.ok(g.setSetting('vibro', false).ok);
   assert.equal(g.setSetting('volume', 3).ok, false);
-  assert.equal(ev.length, 7); assert.deepEqual(ev[6], { sens: 1.25, text: 1.15, lefty: true, vibro: false });
-  assert.deepEqual(createGame({ storage: st }).settings(), { sens: 1.25, text: 1.15, lefty: true, vibro: false });
+  assert.equal(ev.length, 7); assert.deepEqual(ev[6], { ...DEF, sens: 1.25, text: 1.15, lefty: true, vibro: false });
+  assert.deepEqual(createGame({ storage: st }).settings(), { ...DEF, sens: 1.25, text: 1.15, lefty: true, vibro: false });
   assert.deepEqual(g.save.settings, g.settings());
 });
 
@@ -772,13 +774,13 @@ test('старое сохранение (xp, звёзды, рекорды, об�
   assert.equal(g.campaign.length, 36);
   assert.deepEqual(g.save.upgrades, { hoist: 0, range: 0, spotter: 0, armor: 0, magazine: 0, repair: 0 });
   assert.equal(g.points(), 6);
-  assert.deepEqual(g.save.settings, { sens: 1, text: 1, lefty: false, vibro: true });
+  assert.deepEqual(g.save.settings, DEF);
   assert.equal(g.save.daily, null); assert.equal(g.save.resume, null); assert.equal(g.resumeInfo(), null);
   assert.ok(g.startMission(30).ok); assert.equal(g.startMission(31).ok, false);
   // мусор в новых полях не ломает загрузку
   const g2 = createGame({ storage: mem({ upgrades: { hoist: 9, armor: 'x' }, settings: { sens: 99, text: 7 }, daily: 5, resume: 'да' }) });
   assert.deepEqual(g2.save.upgrades, { hoist: 3, range: 0, spotter: 0, armor: 0, magazine: 0, repair: 0 });
-  assert.deepEqual(g2.save.settings, { sens: 1, text: 1, lefty: false, vibro: true });
+  assert.deepEqual(g2.save.settings, DEF);
   assert.equal(g2.save.daily, null); assert.equal(g2.save.resume, null);
 });
 

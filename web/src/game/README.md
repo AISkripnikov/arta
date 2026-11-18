@@ -119,7 +119,7 @@ stats: { friendlyHits, friendlyKills, convoyLost, convoyArrived, planesDown, bom
 ## Действия → `{ ok:true, … }` | `{ ok:false, reason }` (+ событие `denied`)
 | Метод | Примечания |
 |---|---|
-| `startMission(i)`, `startSkirmish()`, `startSurvival()`, **`startDaily('YYYY-MM-DD')`**, `begin()`, `quit({keep}?)`, `pause(b)`, `setSpeed(1|3)`, `setDifficulty(0|1)`, `setMuted(b)` | `start…` → `briefing`; `begin()` → `playing` (и стирает старый `save.resume`); `quit()` из фазы `playing` стирает `save.resume` (из `briefing|won|lost` — не трогает), `quit({keep:true})` — никогда |
+| `startMission(i)`, `startSkirmish()`, `startSurvival()`, **`startDaily('YYYY-MM-DD')`**, `begin()`, `quit({keep}?)`, `pause(b)`, `setSpeed(1|2|3)`, `setDifficulty(0|1)`, `setMuted(b)` | `start…` → `briefing`; `begin()` → `playing` (стирает старый `save.resume`, ставит `state.speed = settings.speed`); `quit()` из фазы `playing` стирает `save.resume` (из `briefing|won|lost` — не трогает), `quit({keep:true})` — никогда |
 | `selectTarget(id)`, `setPin(id, x, y)` | только живые цели (`'F1'`, уничтоженная или ушедшая — отказ) с донесением или ночным квадратом |
 | `setAlidade({ bearing?, range? })`, `pivots()`, `setPivot(i)`, `drawLine()`, `clearLines()`, `recordMeasurement()` | как раньше |
 | `predict(id, tAhead=0)` → `{x,y}`\|null | прогноз по последнему донесению |
@@ -137,9 +137,13 @@ stats: { friendlyHits, friendlyKills, convoyLost, convoyArrived, planesDown, bom
 | **`upgrades()`** → `[{ id, title, desc, level, max: 3, cost: 2|3|4|null, effect, next }]` | `effect` — что даёт текущий уровень (строка), `next` — что даст следующий (`null` на максимуме) |
 | **`buyUpgrade(id)`**, **`resetUpgrades()`**, **`points()`** | только вне боя (`menu|won|lost`) и пока нет сохранённого боя (`save.resume` — отказ «Сначала закончите или сбросьте сохранённый бой»: «ПОГРЕБ» уже лежит в снимке); сброс возвращает все очки |
 | **`dailyInfo(dateKey)`** → `{ date, title, name, brief, best: {score,stars}|null }` \| `null` (плохая дата) | не меняет состояние |
-| **`settings()`** → копия `{ sens, text, lefty, vibro }`, **`setSetting(key, value)`** | `sens` обрезается до 0.6…1.6 (шаг 0.05); `text` — только 1 \| 1.15 \| 1.3; событие `settings` |
+| **`settings()`** → копия всех настроек, **`setSetting(key, value)`** → `{ok}` | ключи и области — раздел 8; неизвестный ключ или значение вне области — отказ `{ok:false}` + `denied`, ничего не меняется; событие `settings` |
+| **`resetSettings()`** → `{ok}` | все настройки по умолчанию + `save.muted = false`; сложность и прогресс не трогает; события `settings`, `state` |
+| **`resetProgress({ settings: false }?)`** → `{ok}` | стирает весь прогресс; в любой фазе (бой сначала бросается); события `phase` (если была не `menu`), `save`, `upgrades`, `settings` (только при `settings: true`), `state` — раздел 8 |
+| **`friendsInDanger()`** → `friend[]`, **`friendInDanger()`** → id \| `null`, `FRIEND_ZONE` = 0.4 | свои в зоне поражения — раздел 8 |
+| `SETTINGS` | `{ key: { def, list } }` — значение по умолчанию и список допустимых значений (`list: null` у булевых и числовых) |
 | **`snapshot()`** → JSON \| `null` (не в бою) | весь идущий бой |
-| **`restore(snap?)`** → `{ok}` | без аргумента — из `save.resume`; фаза сразу `playing`, пауза снята, скорость ×1 |
+| **`restore(snap?)`** → `{ok}` | без аргумента — из `save.resume`; фаза сразу `playing`, пауза снята, скорость — `settings.speed` |
 | **`suspend()`** | записать `save.resume` сейчас (выход с сохранением, уход приложения в фон) |
 | **`discardResume()`**, **`resumeInfo()`** → `{ title, time, integrity, kind }` \| `null` | `kind`: `'campaign'|'skirmish'|'survival'|'daily'` |
 | `rank()`, `lit(x,y)`, `smoked(targetId)`, `shellPosition(f)`, `solve`, `chargeRange`, `isLand`, `coastAt`, `fmt.km/time/brg` | как раньше |
@@ -158,7 +162,7 @@ stats: { friendlyHits, friendlyKills, convoyLost, convoyArrived, planesDown, bom
   Налёт добавлен в три старых задания: 19 «Танкеры», 23 «Генеральное сражение», 26 «Штормовая дуэль».
 - `game.save` = `{ unlocked, stars[], records[], difficulty, muted, xp, survivalBest,`
   `upgrades: { hoist, range, spotter, armor, magazine, repair } (0…3), points (производное, пересчитывается),`
-  `settings: { sens, text, lefty, vibro }, daily: null | { date, score, stars }, resume: null | { snap, title, savedAt, kind, integrity } }`.
+  `settings: { …18 ключей, раздел 8 }, daily: null | { date, score, stars }, resume: null | { snap, title, savedAt, kind, integrity } }`.
   Старые сохранения загружаются: чего нет — по умолчанию; мусор в новых полях заменяется значениями по умолчанию.
 
 ## События `game.on(name, fn)` → функция отписки
@@ -186,7 +190,8 @@ stats: { friendlyHits, friendlyKills, convoyLost, convoyArrived, planesDown, bom
 | `plane` | `{ id, down: true }` · `{ id, bombed: true }` |
 | `aa` | `{ jammed: true|false }` — клин / остыл |
 | `upgrades` | `game.upgrades()` после покупки/сброса |
-| `settings` | `game.settings()` |
+| `settings` | `game.settings()` (после `setSetting`, `resetSettings`, `resetProgress({settings:true})`) |
+| `save` | `game.save` — прогресс стёрт (`resetProgress`): перерисовать меню, звание, рекорды, «ПРОДОЛЖИТЬ БОЙ» |
 | `restored` | `resumeInfo()` на момент восстановления (после него сразу `phase` и `state`) |
 
 `game.update(dtSeconds)` вызывать каждый кадр (сама учитывает паузу, фазу и ускорение времени).
@@ -293,14 +298,48 @@ transport, landing, destroyer, cruiser, minelayer, howitzer, radar, fort, submar
 (местная дата устройства, `'YYYY-MM-DD'`).
 
 ### 8. Настройки и сохранение боя
-- `save.settings = { sens: 0.6…1.6 (1), text: 1|1.15|1.3 (1), lefty: false, vibro: true }`. Логика их только хранит.
+- `save.settings` — 18 ключей. Логика их хранит и проверяет; применяет интерфейс (кроме `autosave` и `speed`).
+  Типы строгие: булевы — только `true/false`, числа — только числа (строка `'30'` — отказ).
+
+  | Ключ | Область | По умолчанию | Смысл |
+  |---|---|---|---|
+  | `sens` | число 0.6…1.6, шаг 0.05 (вне границ — обрезается, не отказ) | 1 | чувствительность маховиков |
+  | `invert` | bool | false | инверсия маховиков |
+  | `lefty` | bool | false | режим для левши |
+  | `vibro` | bool | true | вибрация |
+  | `vibroPower` | `'low'` \| `'high'` | `'high'` | сила вибрации |
+  | `hints` | bool | true | подсказки обучения (текст + кольцо) |
+  | `autosave` | bool | true | запись боя каждые 15 с; `suspend()` работает всегда |
+  | `speed` | 1 \| 2 | 1 | скорость боя по умолчанию: ставится в `begin()` и `restore()` |
+  | `confirmFriendly` | bool | true | спрашивать «СВОИ В ЗОНЕ. ОГОНЬ?» (спрашивает интерфейс, `fire()` не блокируется) |
+  | `crewPanel` | `'full'` \| `'compact'` \| `'off'` | `'full'` | плашки расчёта |
+  | `volFx`, `volAmb`, `volRadio` | число 0…100 (округляется до целого) | 100, 70, 100 | громкость эффектов / фона башни / радио |
+  | `text` | 1 \| 1.15 \| 1.3 | 1 | размер надписей |
+  | `quality` | `'high'` \| `'mid'` \| `'low'` | `'high'` | качество графики |
+  | `fps` | 60 \| 30 | 60 | ограничение кадров |
+  | `nightTint` | `'normal'` \| `'soft'` | `'normal'` | яркость ночного красного фильтра |
+  | `showFps` | bool | false | счётчик кадров |
+
+  Общий звук вкл/выкл — по-прежнему `save.muted` / `setMuted(b)` (не в `settings`; события не шлёт). Сложность — `save.difficulty` / `setDifficulty`.
+  Старое сохранение: недостающие и негодные значения — по умолчанию, лишние ключи отбрасываются.
+  Смена `speed` посреди боя текущую скорость не трогает (её меняет `setSpeed`); `setSpeed` принимает 1, 2, 3.
+- `resetSettings()` — `save.settings` по умолчанию, `save.muted = false`. Сложность не трогает.
+- `resetProgress({ settings })` — `unlocked: 1`, `stars: []`, `records: []`, `xp: 0`, `survivalBest: null`, `upgrades` — все 0, `points: 0`,
+  `daily: null`, `resume: null`; лишние поля прежних версий удаляются. Без `settings: true` остаются `settings`, `muted`, `difficulty`;
+  с ним — и они по умолчанию (`difficulty: 0`, `muted: false`). В фазах `briefing|playing|won|lost` сначала `quit()` (событие `phase: 'menu'`).
+  Флагов «обучение пройдено / ролик показан / что нового» в логике нет — ключи `localStorage` интерфейса он чистит сам (по событию `save`).
+- Свои в зоне поражения — один источник правды: `friendsInDanger()` → свои (объекты из `state.friends`, ближайший к прицелу первым)
+  ближе `FRIEND_ZONE` = 0.4 км к одной из точек прицеливания: замер выбранной цели; тот же пеленг на дальности вычислителя (расчёт не устарел);
+  фактическая наводка заряженного орудия (`turret.bearing − windBearing`, `computer.range`). Вид снаряда не учитывает — для плашки
+  «СВОИ В ЗОНЕ ПОРАЖЕНИЯ». `friendInDanger()` → id ближайшего или `null`; при заряженном ОСВ/ДЫМ — всегда `null` (своим они не вредят) —
+  для вопроса перед выстрелом. Вне боя — `[]` / `null`.
 - `snapshot()` — обычный JSON `{ v, state, sys }` (без функций; `JSON.parse(JSON.stringify(snap))` — без потерь): состояние целиком
   (цели, свои, снаряды в полёте, налёт, расчёт, журнал) и служебная часть — отложенные действия `sys.events = [{ t, a, p }]`
   (`a` — имя: `radio, windShift, activate, finish, nextWave, enemyShell, friendShell, report, raidWarn, raidStart, raidEnd`), счётчики.
   Внутрь снимка интерфейсу лезть не нужно.
 - `restore(snap)` — в любой фазе, в т.ч. в свежесозданной игре: фаза `playing`, события `phase`, `restored`, `state`.
   Случайность после восстановления новая (исход боя не предопределён). Снимок другой версии (`v`) — отказ.
-- `save.resume = { snap, title, savedAt (время боя), kind, integrity }` пишется `suspend()` и автоматически каждые 15 с боя;
+- `save.resume = { snap, title, savedAt (время боя), kind, integrity }` пишется `suspend()` и автоматически каждые 15 с боя (если `settings.autosave`);
   стирается в `missionEnd`, `discardResume()`, `quit()` без `keep` из идущего боя, и при `begin()` нового боя. Размер — 15–30 КБ: `state.radio` хранит последние 150 строк, в ОБОРОНЕ следы (`state.tracks`) убранных целей удаляются (`state.history` растёт по записи на выстрел).
 - Сценарий интерфейса: при запуске `game.resumeInfo()` → предложить «ПРОДОЛЖИТЬ БОЙ» → `game.restore()`;
   уход в фон (`visibilitychange`) → `game.suspend()`; «выйти с сохранением» → `suspend(); quit({ keep: true })`.
