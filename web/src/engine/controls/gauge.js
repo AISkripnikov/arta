@@ -45,6 +45,22 @@ export function gauge(c, opts = {}) {
     const g = ctx.createRadialGradient(h, h, h * 0.2, h, h, h);
     g.addColorStop(0, 'rgba(255,250,235,0.25)'); g.addColorStop(0.75, 'rgba(120,100,60,0.0)'); g.addColorStop(1, 'rgba(90,70,30,0.32)');
     ctx.fillStyle = g; ctx.fillRect(0, 0, S, S);
+    {                                                   // старая эмаль: рыжие крапины и сеточка трещин — под шкалой, бледно
+      let sd = Math.round(R * 1e4) + 7;
+      const rnd = () => { sd = (sd * 16807) % 2147483647; return sd / 2147483647; };
+      for (let i = 0; i < 26; i++) {
+        const a = rnd() * TAU, rr = h * (0.15 + 0.8 * Math.sqrt(rnd())), sz = h * (0.01 + rnd() * 0.035);
+        ctx.fillStyle = 'rgba(120,85,40,' + (0.04 + rnd() * 0.07).toFixed(3) + ')';
+        ctx.beginPath(); ctx.arc(h + Math.cos(a) * rr, h + Math.sin(a) * rr, sz, 0, TAU); ctx.fill();
+      }
+      ctx.strokeStyle = 'rgba(90,75,50,0.07)'; ctx.lineWidth = Math.max(1, h * 0.004);
+      for (let i = 0; i < 14; i++) {
+        let x = h + (rnd() - 0.5) * h * 1.6, y = h + (rnd() - 0.5) * h * 1.6;
+        ctx.beginPath(); ctx.moveTo(x, y);
+        for (let j = 0; j < 5; j++) { x += (rnd() - 0.5) * h * 0.18; y += (rnd() - 0.5) * h * 0.18; ctx.lineTo(x, y); }
+        ctx.stroke();
+      }
+    }
     const rOut = h * 0.93, rMaj = h * 0.76, rMin = h * 0.85;
     const dir = v => { const a = angleOf(v); return [Math.sin(a), -Math.cos(a)]; };
     // зоны

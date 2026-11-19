@@ -9,8 +9,8 @@ attribute vec4 aColor; attribute float aSize;
 uniform float uScale;
 varying vec4 vColor;
 void main(){
-  vColor = aColor;
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  vColor = vec4(aColor.rgb, aColor.a * smoothstep(0.18, 0.4, -mv.z));   // у самой камеры частица гаснет, а не растёт во весь экран
   gl_Position = projectionMatrix * mv;
   gl_PointSize = clamp(aSize * uScale / max(0.05, -mv.z), 1.5, 300.0);
 }`;
@@ -126,8 +126,18 @@ export function createFx(engine, host) {
   let amount = 1;                                   // доля частиц по уровню качества (0 — эффекты частиц выключены)
   let postFlash = 0, postFlashDur = 0, postFlashT = 0;
 
-  /** Точка в мировых координатах: position — Vector3 | [x,y,z]; station — id поста (тогда position локальная), иначе текущий пост, если local !== false. */
+  /**
+   * Точка в мировых координатах: position — Vector3 | [x,y,z]; station — id поста (тогда position локальная), иначе текущий
+   * пост, если не world: true. screen: [x, y] (−1…1, как NDC: [0, 0] — центр кадра, y вверх) и depth (м от камеры, по
+   * умолчанию 0.8 — перед пультом) — точка «в кадре»: видна на любом посту при любом соотношении сторон экрана.
+   */
   function world(o, fallback) {
+    if (o && o.screen) {
+      const cam = engine.camera;
+      _v.set(o.screen[0], o.screen[1], 0.5).unproject(cam).sub(cam.position).normalize()
+        .multiplyScalar(o.depth > 0 ? o.depth : 0.8).add(cam.position);
+      return _v;
+    }
     const p = (o && o.position) || fallback;
     const st = o && o.station !== undefined ? o.station : (o && o.world ? null : engine.current);
     if (p && p.isVector3) _v.copy(p); else _v.fromArray(p);
@@ -245,7 +255,7 @@ export function createFx(engine, host) {
         let vx = Math.cos(a) * q * sp, vy = u * sp, vz = Math.sin(a) * q * sp;
         if (d) { vx = vx * 0.5 + d.x * sp; vy = vy * 0.5 + d.y * sp; vz = vz * 0.5 + d.z * sp; }
         const hot = rnd(0.8, 1);
-        spark.spawn(p.x, p.y, p.z, vx, vy, vz, rnd(0.3, 0.9), rnd(0.024, 0.038), 0.012,
+        spark.spawn(p.x, p.y, p.z, vx, vy, vz, rnd(0.3, 0.9), rnd(0.013, 0.022), 0.007,
           1.0 * hot, 0.9 * hot, 0.6 * hot, 1, 1.0, 0.42, 0.08, 0.9, 5.5, 0);
       }
       host.flashLight('#ffc070', 0.35, 0.1, p);

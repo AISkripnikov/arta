@@ -6,26 +6,19 @@
 // счётчики пеленга и угла, шильдик целеуказания и стрелка в прицеле «куда вести стволы».
 // Пост ничего не решает сам: показывает game.state.aa / game.state.raid и вызывает game.slewAA()/game.fireAA().
 // Небо рисуется и обновляется только пока пост текущий; для соседей проём закрыт заслонкой.
+// Небо — шейдер «по углам» (seasky.js): каждый пиксель проёма → пеленг/угол места → то же небо, солнце, облака, море и
+// время суток, что в смотровой щели и в трубе. Самолёты освещены солнцем задания (не светом башни); трассы светятся,
+// у точки прицеливания рвутся снаряды (клубки разрывов), сбитый — огненный шар и дымный след, бомба — столб воды и вспышка.
+// Частицы (seasky.createParticles) — один вызов отрисовки; они «привязаны к миру»: при наводке сдвигаются вместе с небом.
 // Hotspots: aaPad, aaFire (он же aaTrigger — имя из подсказок обучения), aaSlewB, aaSlewE.
 import { makePlane } from './ships.js';
+import { lookFor, createSkyPlaneMaterial, createLitColorMaterial, createParticles, PK, rnd } from './seasky.js';
 
 const DEG = Math.PI / 180;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const wrap180 = (a) => ((a + 540) % 360 + 360) % 360 - 180;
 const hash = (n) => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
 
-// палитра неба — та же, что в смотровой щели поста «ОГОНЬ» (fire-slit.js)
-const SKY = {
-  day:        { top: '#6f93b6', low: '#cfdbdf', sea0: '#5b7890', sea1: '#243a4c', cloud: '255,255,255', ca: 0.5 },
-  storm:      { top: '#2f3a44', low: '#737d82', sea0: '#3f4d55', sea1: '#161f26', cloud: '112,122,128', ca: 0.38 },
-  fog:        { top: '#8d979b', low: '#b3b9b9', sea0: '#8f999b', sea1: '#566267', cloud: '205,210,210', ca: 0.4 },
-  night:      { top: '#04070e', low: '#17263c', sea0: '#0e1a28', sea1: '#020407', cloud: '30,40,56', ca: 0.4 },
-  nightStorm: { top: '#030508', low: '#111a24', sea0: '#0b131a', sea1: '#010203', cloud: '14,18,24', ca: 0.6 },
-  nightFog:   { top: '#0b0e11', low: '#191e22', sea0: '#12171a', sea1: '#06080a', cloud: '26,31,35', ca: 0.5 },
-};
-const TW = 512, TH = 1024;            // холст неба
-const TEX_B = 60;                     // ° пеленга на один повтор текстуры
-const TEX_E0 = -14, TEX_ES = 108;     // текстура по высоте: от −14° до +94°
 
 // проём и геометрия вида (локальные координаты поста)
 const WIN = { x0: -0.46, x1: 0.46, y0: 1.0, y1: 1.44 };
@@ -70,59 +63,34 @@ export function createAAStation(ctx) {
   group.add(sky);
 
   const BW = 1.7, BH = 0.96, BY = -0.115;        // задник с запасом на тряску камеры; сдвинут вниз, чтобы не торчал над щитом
-  const cv = T.makeCanvas(TW, TH), c2 = cv.getContext('2d');
-  const skyTex = res(T.canvasTexture(cv, { aniso: 1, mipmaps: false }));
-  skyTex.wrapS = THREE.RepeatWrapping; skyTex.wrapT = THREE.ClampToEdgeWrapping;
-  skyTex.repeat.set(BW / M / TEX_B, BH / M / TEX_ES);
-  const back = new THREE.Mesh(res(new THREE.PlaneGeometry(BW, BH)), res(new THREE.MeshBasicMaterial({ map: skyTex })));
-  back.position.y = BY;
+  const skyMat = res(createSkyPlaneMaterial(engine.quality));
+  skyMat.uniforms.uM.value = M; skyMat.uniforms.uEye.value = 18;
+  const backGeo = res(new THREE.PlaneGeometry(BW, BH)); backGeo.translate(0, BY, 0);
+  const back = new THREE.Mesh(backGeo, skyMat);
+  back.name = 'aaSkyBack';
   sky.add(back);
+  offs.push(engine.on('quality', (q) => skyMat.userData.setQuality(q)));
+  // самолёты: свет неба задания, не помещения
+  const planeMat = res(createLitColorMaterial());
+  // частицы: разрывы снарядов, дымные следы, огненные шары, столб воды от бомбы
+  const fxp = createParticles(THREE, { max: 220 });
+  fxp.mesh.renderOrder = 3;
+  sky.add(fxp.mesh);
+  own.push(fxp);
+  let fxAim = null;
   // козырёк над проёмом: закрывает задник сверху при любом положении камеры
   { const hood = new THREE.Mesh(res(new THREE.BoxGeometry(ww + 0.5, 0.02, 0.7)), mat.paint(PAL.panelDark, { wear: 0.8 })); hood.position.set(wcx, 1.478, -0.41); group.add(hood); }
 
-  const info = { mode: '', paints: 0, planes: 0, tracers: 0, arrow: false, seek: false, shooting: false, flash: 0, falling: 0, current: false };
+  const info = { mode: '', tod: '', paints: 0, planes: 0, tracers: 0, arrow: false, seek: false, shooting: false, flash: 0, falling: 0, current: false, particles: 0 };
 
-  function paintSky(mode) {
-    const P = SKY[mode], night = mode.startsWith('night'), storm = /storm/i.test(mode), fog = /fog/i.test(mode);
-    const yOf = (el) => TH - (el - TEX_E0) / TEX_ES * TH;
-    const hor = yOf(0);
-    let g = c2.createLinearGradient(0, hor, 0, 0);
-    g.addColorStop(0, P.low); g.addColorStop(fog ? 0.75 : 0.3, P.top); g.addColorStop(1, P.top);
-    c2.fillStyle = g; c2.fillRect(0, 0, TW, hor);
-    g = c2.createLinearGradient(0, hor, 0, TH);
-    g.addColorStop(0, P.sea0); g.addColorStop(1, P.sea1);
-    c2.fillStyle = g; c2.fillRect(0, hor, TW, TH - hor);
-    if (night && !fog) {                                   // звёзды
-      for (let i = 0; i < (storm ? 50 : 260); i++) {
-        const x = hash(i * 3 + 1) * TW, y = hash(i * 3 + 2) * (hor - 30), br = 0.3 + 0.7 * hash(i * 3 + 3);
-        c2.fillStyle = `rgba(215,225,255,${(br * (storm ? 0.5 : 1)).toFixed(2)})`;
-        c2.fillRect(x, y, br > 0.85 ? 2 : 1.3, br > 0.85 ? 2 : 1.3);
-      }
-    }
-    // облака: гряды из мягких пятен; по горизонтали текстура повторяется
-    const n = storm ? 44 : fog ? 16 : 24;
-    for (let i = 0; i < n; i++) {
-      const el = 3 + Math.pow(hash(i * 7 + 1), 1.5) * (storm ? 78 : 62);
-      const cx = hash(i * 7 + 2) * TW, cy = yOf(el), sc = (0.6 + hash(i * 7 + 3) * 0.9) * (storm ? 1.5 : 1);
-      const blobs = 5 + Math.floor(hash(i * 7 + 4) * 5);
-      for (let k = 0; k < blobs; k++) {
-        const bx = cx + (hash(i * 31 + k * 5 + 1) - 0.5) * 120 * sc, by = cy + (hash(i * 31 + k * 5 + 2) - 0.5) * 26 * sc;
-        const r = (16 + hash(i * 31 + k * 5 + 3) * 26) * sc, a = P.ca * (0.35 + 0.65 * hash(i * 31 + k * 5 + 4));
-        for (const dx of [-TW, 0, TW]) {
-          if (bx + dx + r < 0 || bx + dx - r > TW) continue;
-          const rg = c2.createRadialGradient(bx + dx, by, 0, bx + dx, by, r);
-          rg.addColorStop(0, `rgba(${P.cloud},${a.toFixed(3)})`); rg.addColorStop(1, `rgba(${P.cloud},0)`);
-          c2.fillStyle = rg; c2.fillRect(bx + dx - r, by - r * 0.62, r * 2, r * 1.24);
-        }
-      }
-    }
-    // дымка у горизонта
-    g = c2.createLinearGradient(0, hor - 34, 0, hor + 10);
-    g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.75, night ? 'rgba(60,80,105,0.25)' : 'rgba(255,255,255,0.3)'); g.addColorStop(1, 'rgba(255,255,255,0)');
-    c2.fillStyle = g; c2.fillRect(0, hor - 34, TW, 44);
-    skyTex.needsUpdate = true;
-    info.mode = mode; info.paints++;
-    reticleMat.color.set(night ? '#ffb347' : storm ? '#e8e0c8' : '#11161b');
+  let look = null;
+  function applyLook(L, mode) {
+    look = L;
+    skyMat.userData.setLook(L); planeMat.userData.setLook(L);
+    planeMat.uniforms.uHazeK.value = L.fog ? 0.3 : L.storm ? 0.12 : 0;
+    const night = L.night, storm = L.storm;
+    info.mode = mode; info.tod = L.tod; info.paints++;
+    reticleMat.color.set(night ? '#ffb347' : storm ? '#e8e0c8' : L.tod === 'evening' || L.tod === 'dawn' ? '#1a1410' : '#11161b');
     reticleMat.opacity = night ? 0.7 : 0.85;
   }
 
@@ -176,32 +144,31 @@ export function createAAStation(ctx) {
 
   // трассы: один InstancedMesh
   const NTR = 8;
-  const trGeo = res(new THREE.PlaneGeometry(0.015, 0.12));
-  const trMat = res(new THREE.MeshBasicMaterial({ color: 0xff8a2e, transparent: true, opacity: 0.95, depthWrite: false }));
+  const trGeo = res(new THREE.PlaneGeometry(0.022, 0.14));
+  // трасса: яркая голова и тающий хвост, светится (сложение, цвет выше единицы — свечение постобработки)
+  const trMat = res(new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false,
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; vec4 p = vec4(position, 1.0); \n#ifdef USE_INSTANCING\n p = instanceMatrix * p; \n#endif\n gl_Position = projectionMatrix * modelViewMatrix * p; }',
+    fragmentShader: `varying vec2 vUv;
+      void main(){ float x = abs(vUv.x - 0.5) * 2.0, core = smoothstep(1.0, 0.0, x), y = vUv.y;
+        float a = core * core * smoothstep(0.0, 0.85, y) * (0.35 + 0.65 * y);
+        vec3 c = mix(vec3(1.0, 0.36, 0.08), vec3(1.4, 1.15, 0.7), smoothstep(0.75, 1.0, y) * smoothstep(0.6, 0.0, x));
+        gl_FragColor = vec4(c * a, 1.0);
+        #include <colorspace_fragment>
+      }`,
+  }));
   const tracers = new THREE.InstancedMesh(trGeo, trMat, NTR);
   tracers.frustumCulled = false; tracers.count = 0; tracers.renderOrder = 4;
   sky.add(tracers);
   const trs = [];                                // { s, from, tx, ty }
-  const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _z = new THREE.Vector3(0, 0, 1);
+  const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _z = new THREE.Vector3(0, 0, 1), _sun = new THREE.Vector3();
 
   // вспышки и дым разрывов (пул спрайтов)
-  const booms = [];                              // { b, e, t, glow, smoke }
-  const glowPool = [0, 1, 2].map(() => { const s = new THREE.Sprite(mat.glowSprite('#ffb347', 0.9)); s.visible = false; sky.add(s); return s; });
-  const smokeTex = (() => {                      // мягкое пятно с альфой (glowTexture — под сложение, для дыма не годится)
-    const c = T.makeCanvas(64, 64), x = c.getContext('2d'), g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
-    g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.5, 'rgba(255,255,255,0.55)'); g.addColorStop(1, 'rgba(255,255,255,0)');
-    x.fillStyle = g; x.fillRect(0, 0, 64, 64);
-    return res(T.canvasTexture(c, { aniso: 1, mipmaps: false }));
-  })();
-  const smokePool = [0, 1, 2].map(() => {
-    const s = new THREE.Sprite(res(new THREE.SpriteMaterial({ map: smokeTex, color: 0x1c1a18, transparent: true, opacity: 0, depthWrite: false })));
-    s.visible = false; sky.add(s); return s;
-  });
   const spark = new THREE.Sprite(mat.glowSprite('#fff3d6', 0.9)); spark.visible = false; sky.add(spark);
   // вспышка бомбы на весь проём
   const bombMat = res(new THREE.MeshBasicMaterial({ color: 0xffd9a0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
   const bombFlash = new THREE.Mesh(back.geometry, bombMat);
-  bombFlash.position.set(0, BY, 0.2); bombFlash.visible = false; bombFlash.renderOrder = 7;
+  bombFlash.position.set(0, 0, 0.2); bombFlash.visible = false; bombFlash.renderOrder = 7;
   sky.add(bombFlash);
   let bombT = -1;
 
@@ -212,7 +179,7 @@ export function createAAStation(ctx) {
   function planeFor(id) {
     let r = planes.get(id);
     if (!r) {
-      const grp = freePlanes.pop() || makePlane({ mat });
+      const grp = freePlanes.pop() || makePlane({ material: planeMat });
       grp.rotation.order = 'YXZ';
       sky.add(grp);
       r = { grp, hit: 0, seen: 0 };
@@ -314,14 +281,25 @@ export function createAAStation(ctx) {
     const cur = engine.current === 'aa';
     if (e.down) {
       const p = game.state.raid && game.state.raid.planes.find((q) => q.id === e.id);
-      if (p && cur) {
-        const i = booms.length % 3;
-        booms.push({ b: p.bearing, e: p.elevation, r: p.range, t: 0, glow: glowPool[i], smoke: smokePool[i] });
-        if (booms.length > 3) booms.shift();
+      if (p && cur) {                                          // огненный шар и обломки (огонь самолёта — ships.js)
+        const a = game.state.aa;
+        proj(p.bearing, p.elevation, a, _o);
+        const sz = sizeOf(p.range) * M;
+        for (let i = 0; i < 7; i++) fxp.emit(PK.SMOKE, _o.x + (rnd() - 0.5) * sz * 0.5, _o.y + (rnd() - 0.5) * sz * 0.4, 0.07, (rnd() - 0.5) * sz * 0.6, (rnd() - 0.3) * sz * 0.5, 0,
+          sz * 0.55, 1.8, 2.4 + rnd(), 1.9, 0.95, 0.35, 1, 2, 0, 0.6, 0, 1);
+        fxp.emit(PK.GLOW, _o.x, _o.y, 0.09, 0, 0, 0, sz * 2.4, 0.5, 0.45, 2, 1.5, 0.8, 1, 1, 0, 0, 0, 1);
+        for (let i = 0; i < 6; i++) { const an = rnd() * 6.283, v = sz * (0.8 + rnd()); fxp.emit(PK.GLOW, _o.x, _o.y, 0.08, Math.cos(an) * v, Math.sin(an) * v, 0, sz * 0.12, 0, 0.9 + rnd() * 0.5, 1.8, 0.9, 0.4, 1, 1, sz * 2, 0.4, 0, 1); }
         snd('impactFar');
       }
     } else if (e.bombed && cur) {
       bombT = 0;
+      // столб воды от бомбы у башни: внизу проёма, по пеленгу самолёта
+      const a = game.state.aa, p = game.state.raid && game.state.raid.planes.find((q) => q.id === e.id);
+      if (a && p) {
+        proj(p.bearing + (rnd() - 0.5) * 6, -1.6, a, _o);
+        const H = 6 * M;
+        for (let i = 0; i < 10; i++) fxp.emit(PK.WATER, _o.x + (rnd() - 0.5) * H * 0.3, _o.y, 0.05, (rnd() - 0.5) * H * 0.2, H * (1.2 + rnd() * 0.9), 0, H * 0.22, 1, 2.2 + rnd(), 0.85, 0.9, 0.93, 0.9, 3, H * 1.1, 0.2, 0);
+      }
       snd('bombHit');
       try { engine.shake(1.3, 0.8); } catch (err) { /* нет тряски */ }
     }
@@ -379,8 +357,26 @@ export function createAAStation(ctx) {
     // небо
     const m = s.mission || {}, w = m.weather || 'clear', fog = w === 'fog';
     const mode = m.night ? (w === 'storm' ? 'nightStorm' : fog ? 'nightFog' : 'night') : (w === 'storm' ? 'storm' : fog ? 'fog' : 'day');
-    if (mode !== info.mode) paintSky(mode);
-    skyTex.offset.set((a.bearing - BW / M / 2) / TEX_B, (a.elevation + (BY - BH / 2) / M - TEX_E0) / TEX_ES);
+    const L = lookFor(m);
+    if (L !== look || mode !== info.mode) applyLook(L, mode);
+    const su = skyMat.uniforms;
+    su.uAim.value.set(a.bearing, a.elevation); su.uTime.value = time;
+    { const wd = m.wind || {}, to = ((wd.from || 0) + 180) * DEG, cs = (L.storm ? 0.012 : 0.004) * (1 + (wd.speed || 0) / 8);
+      su.uCloudOff.value.set(L.cloudSeed + Math.sin(to) * time * cs, L.cloudSeed * 0.7 - Math.cos(to) * time * cs); }
+    su.uPixAng.value = DEG / (M * 900);
+    // солнце для самолётов: из мира задания в систему неба за проёмом, затем в мировые координаты сцены башни
+    { const B = a.bearing * DEG, E = a.elevation * DEG, sd = L.sunDir;
+      const fx = Math.sin(B) * Math.cos(E), fy = Math.sin(E), fz = -Math.cos(B) * Math.cos(E);
+      const rx = Math.cos(B), rz = Math.sin(B);                     // вправо
+      const ux = -rz * fy, uy = rz * fx - rx * fz, uz = rx * fy;      // вверх = вправо × вперёд
+      _sun.set(sd.x * rx + sd.z * rz, sd.x * ux + sd.y * uy + sd.z * uz, -(sd.x * fx + sd.y * fy + sd.z * fz));
+      sky.getWorldQuaternion(_q); planeMat.uniforms.uSun.value.copy(_sun.applyQuaternion(_q)).normalize(); }
+    // частицы привязаны к миру: небо «поехало» при наводке — сдвигаем и их
+    if (fxAim) { const dB = wrap180(a.bearing - fxAim.b), dE = a.elevation - fxAim.e; if (dB || dE) fxp.translate(-dB * Math.cos(a.elevation * DEG) * M, -dE * M, 0); }
+    else fxAim = { b: 0, e: 0 };
+    fxAim.b = a.bearing; fxAim.e = a.elevation;
+    fxp.update(dt);
+    fxp.clearImmediate();
 
     // самолёты
     let shown = 0, falling = 0, best = null, sparkOn = false;
@@ -404,7 +400,7 @@ export function createAAStation(ctx) {
         const out = !!p.attacked;
         g.rotation.set(-(out ? -1 : 1) * p.elevation * DEG * 0.6, out ? Math.PI / 2 : -Math.PI / 2, Math.sin(time * 1.3 + p.id * 2.1) * 0.12);
         if (U.setState) U.setState({ burning: !p.alive || p.hit > 0.45, down: p.alive ? 0 : fall / FALL });
-        if (U.update && g.visible) U.update(dt, time);
+        if (U.update && g.visible) U.update(dt, time, fxp);
         if (g.visible) shown++;
         if (p.alive) {
           if (p.hit > r.hit + 1e-6 && shooting) { sparkOn = true; spark.position.set(x + (Math.random() - 0.5) * sz * M * 0.6, y + (Math.random() - 0.5) * sz * M * 0.3, 0.09); spark.scale.setScalar((0.5 + Math.random() * 0.8) * Math.max(0.03, sz * M * 0.5)); }
@@ -442,7 +438,7 @@ export function createAAStation(ctx) {
         shotAcc -= 1; shotSide ^= 1;
         const B = barrels[shotSide];
         B.kick = 1; lastShot = time;
-        if (trs.length < NTR) trs.push({ s: 0, from: shotSide, tx: (Math.random() - 0.5) * 0.03, ty: (Math.random() - 0.5) * 0.03 });
+        if (trs.length < NTR) trs.push({ s: 0, from: shotSide, tx: (Math.random() - 0.5) * 0.03, ty: (Math.random() - 0.5) * 0.03, boom: rnd() < 0.55 });
         snd('aaBurst');
       }
     } else shotAcc = 0.99;                                     // первый выстрел — сразу
@@ -456,7 +452,15 @@ export function createAAStation(ctx) {
     for (let i = trs.length - 1; i >= 0; i--) {
       const t = trs[i];
       t.s += dt / 0.42;
-      if (t.s >= 1) { trs.splice(i, 1); continue; }
+      if (t.s >= 1) {                                              // снаряд долетел до точки прицеливания — разрыв-клубок
+        if (t.boom) {
+          const x = t.tx + (rnd() - 0.5) * CONE * M * 1.4, y = t.ty + (rnd() - 0.5) * CONE * M * 1.4, r0 = 0.012 + rnd() * 0.008;
+          fxp.emit(PK.GLOW, x, y, 0.05, 0, 0, 0, r0 * 2.2, 0.3, 0.16, 2, 1.4, 0.7, 1, 1, 0, 0, 0, 1);
+          const g = look && look.night ? 0.05 : 0.11 + rnd() * 0.05;
+          fxp.emit(PK.SMOKE, x, y, 0.04, (rnd() - 0.5) * 0.004, 0.002, 0, r0, 2.4, 2.6 + rnd() * 1.4, g, g * 0.96, g * 0.92, 0.85, 0, 0, 0, 0);
+        }
+        trs.splice(i, 1); continue;
+      }
     }
     for (const t of trs) {
       const tip = tips[t.from], e = 1 - (1 - t.s) * (1 - t.s), k = 1 - 0.9 * e;
@@ -469,20 +473,9 @@ export function createAAStation(ctx) {
     if (nt) tracers.instanceMatrix.needsUpdate = true;
     info.tracers = nt;
 
-    // разрывы сбитых
-    for (let i = booms.length - 1; i >= 0; i--) {
-      const b = booms[i];
-      b.t += dt;
-      if (b.t > 4) { b.glow.visible = false; b.smoke.visible = false; booms.splice(i, 1); continue; }
-      proj(b.b, b.e, a, _o);
-      const sz = sizeOf(b.r) * M;
-      b.glow.visible = b.t < 0.45;
-      b.glow.position.set(_o.x, _o.y, 0.1); b.glow.scale.setScalar(sz * (1.2 + b.t * 5));
-      b.smoke.visible = true;
-      b.smoke.position.set(_o.x + b.t * 0.01, _o.y + b.t * 0.006, 0.08);
-      b.smoke.scale.setScalar(sz * (1.3 + b.t * 0.7));
-      b.smoke.material.opacity = 0.8 * Math.min(1, b.t * 6) * (1 - b.t / 4);
-    }
+    // дульное пламя: светящиеся «звёзды» у срезов
+    for (const B of barrels) if (B.kick > 0.55) { const tp = tips[barrels.indexOf(B)]; fxp.put(PK.GLOW, tp.x, tp.y, tp.z + 0.02, 0.05 + rnd() * 0.03, 1.8, 1.2, 0.6, 1, 1); }
+    info.particles = fxp.write();
     // вспышка бомбы
     if (bombT >= 0) {
       bombT += dt;
@@ -497,6 +490,7 @@ export function createAAStation(ctx) {
     release(); fireBtn.pressed = false; padHeld = false;
     if (servoOn) { snd('servo', 0); servoOn = false; }
     trs.length = 0; tracers.count = 0; tracers.visible = false;
+    fxp.clear(); fxAim = null;
     for (const B of barrels) { B.kick = 0; B.flash.visible = false; B.mesh.position.set(0, 0, 0); }
     spark.visible = false;
   }

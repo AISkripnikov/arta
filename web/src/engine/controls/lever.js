@@ -47,7 +47,7 @@ export function lever(c, opts = {}) {
   const gripR = Math.max(0.015, L * 0.075), gripLen = Math.max(0.06, L * 0.36);
   const gripG = new THREE.CapsuleGeometry(gripR, gripLen, 4, 12);
   gripG.rotateZ(Math.PI / 2); gripG.translate(0, 0, L);
-  arm.add(new THREE.Mesh(gripG, opts.color ? c.mat.paint(opts.color, { wear: 0.2 }) : c.mat.bakelite));
+  arm.add(new THREE.Mesh(gripG, opts.color ? c.mat.paint(opts.color, { wear: 0.2 }) : (c.mat.knurled || c.mat.bakelite)));
   const handle = new THREE.Object3D(); handle.position.set(0, 0, L); arm.add(handle);
 
   // подписи: одна — под основанием; две — сбоку от прорези у верхнего и нижнего положений (не закрываются рукоятью)
@@ -205,7 +205,7 @@ export function slewLever(c, opts = {}) {
   arm.add(new THREE.Mesh(bar, c.mat.ochre));
   const gripR = Math.max(0.021, L * 0.11);
   const grip = new THREE.SphereGeometry(gripR, 16, 12); grip.scale(1, 1.25, 1); grip.translate(0, L, 0);
-  arm.add(new THREE.Mesh(grip, c.mat.bakelite));
+  arm.add(new THREE.Mesh(grip, c.mat.knurled || c.mat.bakelite));
   const handle = new THREE.Object3D(); handle.position.set(0, L, 0); arm.add(handle);
 
   const hit = hitBox(W + 0.02, Hh + 0.04, 0.09, 0, cy + 0.01, 0.045);

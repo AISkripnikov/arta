@@ -20,7 +20,12 @@ export function lamp(c, opts = {}) {
   group.add(new THREE.Mesh(bezel, c.mat.nickel));
   const lensG = new THREE.SphereGeometry(r * 1.04, 16, 6, 0, Math.PI * 2, 0, Math.PI / 2);
   lensG.rotateX(Math.PI / 2); lensG.scale(1, 1, 0.72); lensG.translate(0, 0, r * 0.4);
-  const offMat = c.mat.lens(col, false), onMat = c.mat.lens(col, true);
+  {                                                         // плоские UV: колба и нить накала видны сквозь линзу
+    const p = lensG.attributes.position, uv = lensG.attributes.uv, k = 1 / (r * 2.08);
+    for (let i = 0; i < p.count; i++) uv.setXY(i, p.getX(i) * k + 0.5, p.getY(i) * k + 0.5);
+  }
+  const offMat = c.mat.bulbLens ? c.mat.bulbLens(col, false) : c.mat.lens(col, false);
+  const onMat = c.mat.bulbLens ? c.mat.bulbLens(col, true) : c.mat.lens(col, true);
   const lens = new THREE.Mesh(lensG, offMat);
   group.add(lens);
   const glow = new THREE.Sprite(c.mat.glowSprite(col, 0.8));

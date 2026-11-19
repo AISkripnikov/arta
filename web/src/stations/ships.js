@@ -23,7 +23,10 @@
 //                list    — крен в градусах (+ на правый борт), необязателен;
 //                wake    — 0..1: кильватерный след (расш.; плоская пена на воде, для неподвижных — 0).
 //              Любое поле можно опустить — остаётся прежнее. Вызывать можно каждый кадр (дёшево).
-//   group.userData.update(dt, time) — анимация огня/дыма; вызывать, пока модель видима.
+//   group.userData.update(dt, time, fx) — анимация огня/дыма; вызывать, пока модель видима. fx — (расш.) пул частиц
+//              seasky.createParticles в системе координат родителя группы: тогда дым из труб (на ходу), огонь, дым и искры
+//              пожара, пузыри и пар тонущего, ходовые огни ночью (userData.night) идут частицами, а не своими спрайтами.
+//   group.userData.muzzles — (расш.) точки дульных срезов [[x,y,z],…] в координатах группы (для вспышек выстрелов).
 //   group.userData.dispose() — освободить собственные материалы (геометрии общие, живут до конца).
 //
 // makePlane(opts) → THREE.Group
@@ -31,7 +34,8 @@
 //   group.userData.setState({ burning, down }) — burning: дымный след; down 0..1: падение после сбития.
 //   group.userData.update(dt, time), group.userData.dispose() — как у корабля.
 //
-// createFleet(game, parent) / createAirWing(game, parent) — (расш.) держат модели в соответствии с game.state:
+// createFleet(game, parent, { fx }) / createAirWing(game, parent, { fx }) — (расш.) держат модели в соответствии с game.state
+//   (fx — пул частиц, см. выше; без него — прежние спрайты):
 //   fleet.sync(dt, time, place) — для каждой цели/своего с game.visible(id) (и не sunk/escaped) зовёт
 //     place(obj, group, friendly) → false, чтобы скрыть; остальные модели прячет. Состояние (огонь, погружение, след)
 //     выставляет сам. fleet.shown — сколько моделей показано. fleet.clear() — сбросить (новое задание).
@@ -57,7 +61,9 @@ export function isLandKind(kind) { return !!LAND[shipKind({ kind })]; }
 const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _s = new THREE.Vector3(1, 1, 1), _c = new THREE.Color();
 
 class Builder {
-  constructor() { this.p = []; this.c = []; }
+  constructor() { this.p = []; this.c = []; this.marks = { muzzle: [], funnel: [], mast: [] }; }
+  /** Отметка для эффектов: 'muzzle' | 'funnel' | 'mast'. */
+  mark(type, x, y, z) { this.marks[type].push([x, y, z]); return this; }
   geo(g, col, x, y, z, rx = 0, ry = 0, rz = 0) {
     const n = g.index ? g.toNonIndexed() : g;
     _m.compose(_p.set(x, y, z), _q.setFromEuler(_e.set(rx, ry, rz)), _s);
@@ -116,9 +122,18 @@ class Builder {
   /** Орудийная установка: щит/башня размера s и n стволов; dir = ±1 — куда смотрит. */
   mount(col, dark, x, y, s, dir = 1, n = 1, z = 0) {
     this.box(col, x, y, z, s * 1.4, s * 0.75, s * 1.25);
+    this.box(dark, x - dir * s * 0.1, y + s * 0.75, z, s * 0.9, s * 0.08, s * 1.05);                 // крыша башни
     for (let i = 0; i < n; i++) this.bar(dark, x + dir * s * 0.6, y + s * 0.45, z + (i - (n - 1) / 2) * s * 0.42, s * 2.3, s * 0.085, dir);
+    this.mark('muzzle', x + dir * s * 2.85, y + s * 0.6, z);
     return this;
   }
+  /** Дымовая труба: кожух, тёмный срез, отметка для дыма. */
+  funnel(col, dark, x, y, z, r, h, rTop = r) {
+    this.cyl(col, x, y, z, r, h, 8, rTop).cyl(dark, x, y + h, z, rTop * 0.92, 0.5, 8, rTop * 0.92);
+    return this.mark('funnel', x, y + h + 0.4, z);
+  }
+  /** Окна/иллюминаторы: тёмная полоса вокруг надстройки. */
+  windows(dark, x, y, z, l, w) { return this.box(dark, x, y, z, l + 0.12, 0.75, w + 0.12); }
   build() {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.p, 3));
@@ -139,8 +154,9 @@ const MODELS = {
   barge(b, C) {
     b.hull(C.rust, C.deck, 45, 9, 3, { bow: 0.14, stern: 0.92, keel: 1.2 });
     b.box(C.cargo, 3, 3, 0, 26, 2.4, 7).box(C.cargo, 3, 5.4, 0, 20, 1, 5);
-    b.box(C.sup, -17, 3, 0, 6, 4, 5).cyl(C.dark, -18.5, 7, 0, 0.7, 3, 5);
-    b.spar(C.dark, 18, 3, 0, 7, 0.25);
+    for (let i = 0; i < 4; i++) b.box(C.dark, -6 + i * 6, 5.4, 0, 0.3, 1.05, 5.1);                     // швы брезента
+    b.box(C.sup, -17, 3, 0, 6, 4, 5).windows(C.dark, -17, 5.6, 0, 6, 5).funnel(C.dark, C.dark, -18.5, 7, 0, 0.7, 3);
+    b.spar(C.dark, 18, 3, 0, 7, 0.25).mark('mast', 18, 10.2, 0);
   },
   landing(b, C) {
     for (const [ox, oz] of [[9, -15], [-13, 9], [15, 15]]) {
@@ -152,19 +168,21 @@ const MODELS = {
   },
   destroyer(b, C) {
     b.hull(C.hull, C.deck, 110, 11, 5, { bow: 0.34, stern: 0.55, sheer: 2.6 });
-    b.box(C.sup, 19, 5, 0, 14, 6.5, 7.5).box(C.sup, 20, 11.5, 0, 8, 3, 6);
-    b.cyl(C.dark, 3, 5, 0, 2.3, 10, 6, 2).cyl(C.dark, -13, 5, 0, 2.3, 9, 6, 2);
+    b.box(C.sup, 19, 5, 0, 14, 6.5, 7.5).box(C.sup, 20, 11.5, 0, 8, 3, 6).windows(C.dark, 20.4, 13.1, 0, 7.6, 6);
+    b.funnel(C.sup, C.dark, 3, 5, 0, 2.3, 10, 2).funnel(C.sup, C.dark, -13, 5, 0, 2.3, 9, 2);
     b.box(C.sup, -31, 5, 0, 14, 3.6, 6.5).box(C.gun, -5, 5, 0, 9, 1.6, 3.2);
-    b.spar(C.dark, 15, 11.5, 0, 15, 0.32, -0.05).box(C.dark, 14.5, 21, 0, 0.4, 0.4, 8);
+    for (const z of [-3.9, 3.9]) b.box(0xa9a79c, -4, 6.2, z, 6, 1, 1.4).box(C.gun, -20, 5, z * 0.7, 6, 1.2, 1.1);  // шлюпки, торпедные аппараты
+    b.spar(C.dark, 15, 11.5, 0, 15, 0.32, -0.05).box(C.dark, 14.5, 21, 0, 0.4, 0.4, 8).mark('mast', 14.4, 26.4, 0);
     b.spar(C.dark, -27, 8.6, 0, 9, 0.25, -0.05);
     b.mount(C.gun, C.dark, 39, 6.2, 3.4, 1).mount(C.gun, C.dark, -29, 8.6, 3.2, -1).mount(C.gun, C.dark, -44, 5, 3.4, -1);
   },
   cruiser(b, C) {
     b.hull(C.hull, C.deck, 180, 20, 7, { bow: 0.33, stern: 0.5, sheer: 3.2 });
-    b.box(C.sup, 28, 7, 0, 28, 7, 13).box(C.sup, 31, 14, 0, 15, 6, 10).cyl(C.sup, 31, 20, 0, 2.8, 9, 6, 2.2).box(C.dark, 31, 29, 0, 4, 2, 9);
-    b.cyl(C.dark, 6, 7, 0, 3.7, 14, 6, 3.2).cyl(C.dark, -13, 7, 0, 3.7, 13, 6, 3.2);
+    b.box(C.sup, 28, 7, 0, 28, 7, 13).box(C.sup, 31, 14, 0, 15, 6, 10).windows(C.dark, 31.5, 18.2, 0, 14.6, 10).cyl(C.sup, 31, 20, 0, 2.8, 9, 6, 2.2).box(C.dark, 31, 29, 0, 4, 2, 9);
+    b.funnel(C.sup, C.dark, 6, 7, 0, 3.7, 14, 3.2).funnel(C.sup, C.dark, -13, 7, 0, 3.7, 13, 3.2);
     b.box(C.sup, -40, 7, 0, 24, 5.5, 11).cyl(C.sup, -38, 12.5, 0, 2, 8, 6, 1.6);
-    b.spar(C.dark, 24, 20, 0, 16, 0.4, -0.04).spar(C.dark, -32, 12.5, 0, 18, 0.4, -0.04).box(C.dark, -32.6, 26, 0, 0.4, 0.4, 9);
+    for (const z of [-6.6, 6.6]) for (const x of [-6, -18]) b.box(0xa9a79c, x, 8.2, z, 7, 1.3, 2);
+    b.spar(C.dark, 24, 20, 0, 16, 0.4, -0.04).spar(C.dark, -32, 12.5, 0, 18, 0.4, -0.04).box(C.dark, -32.6, 26, 0, 0.4, 0.4, 9).mark('mast', 23.4, 36, 0);
     b.cyl(C.gun, 48, 7, 0, 4.2, 4, 8);
     b.mount(C.gun, C.dark, 64, 8.6, 6.2, 1, 2).mount(C.gun, C.dark, 48, 11, 6.2, 1, 2);
     b.mount(C.gun, C.dark, -58, 12.5, 6, -1, 2).mount(C.gun, C.dark, -73, 7, 6.2, -1, 2);
@@ -172,8 +190,8 @@ const MODELS = {
   },
   minelayer(b, C) {
     b.hull(C.hull, C.deck, 80, 11, 4, { bow: 0.3, stern: 0.9, sheer: 1.8 });
-    b.box(C.sup, 16, 4, 0, 13, 5.5, 8).box(C.sup, 17, 9.5, 0, 7, 2.6, 6).cyl(C.dark, 3, 4, 0, 2, 8.5, 6, 1.7);
-    b.spar(C.dark, 12, 9.5, 0, 11, 0.28, -0.05).box(C.dark, 11.6, 16, 0, 0.35, 0.35, 6);
+    b.box(C.sup, 16, 4, 0, 13, 5.5, 8).box(C.sup, 17, 9.5, 0, 7, 2.6, 6).windows(C.dark, 17.2, 10.8, 0, 6.6, 6).funnel(C.sup, C.dark, 3, 4, 0, 2, 8.5, 1.7);
+    b.spar(C.dark, 12, 9.5, 0, 11, 0.28, -0.05).box(C.dark, 11.6, 16, 0, 0.35, 0.35, 6).mark('mast', 11.5, 20.5, 0);
     for (const z of [-2.6, 2.6]) {
       b.box(C.dark, -22, 4, z, 32, 0.45, 0.5);
       for (let i = 0; i < 5; i++) b.cyl(C.dark, -34 + i * 5.6, 4.45, z, 0.95, 1.5, 6, 0.6);
@@ -182,8 +200,9 @@ const MODELS = {
   },
   tanker(b, C) {
     b.hull(0x2f3337, C.rust, 140, 18, 5, { bow: 0.24, stern: 0.7, sheer: 1.4, keel: 2 });
-    b.box(C.sup, -52, 5, 0, 20, 9, 14).box(C.sup, -50, 14, 0, 10, 2.8, 11).cyl(C.dark, -57, 14, 0, 2.6, 7.5, 6, 2.2);
-    b.box(C.sup, 10, 5, 0, 10, 8.5, 13).box(C.sup, 10, 13.5, 0, 6, 2.6, 9);
+    b.box(C.sup, -52, 5, 0, 20, 9, 14).box(C.sup, -50, 14, 0, 10, 2.8, 11).windows(C.dark, -50, 15.3, 0, 9.6, 11).funnel(C.sup, C.dark, -57, 14, 0, 2.6, 7.5, 2.2);
+    for (let i = 0; i < 3; i++) b.windows(C.dark, -52, 6.5 + i * 2.4, 0, 19.6, 13.6);
+    b.box(C.sup, 10, 5, 0, 10, 8.5, 13).box(C.sup, 10, 13.5, 0, 6, 2.6, 9).windows(C.dark, 10, 14.8, 0, 5.6, 9).mark('mast', 44, 21, 0);
     b.box(C.gun, -10, 7, 0, 112, 0.5, 1.6);
     for (let i = 0; i < 7; i++) if (i !== 4) b.cyl(C.gun, -34 + i * 11.5, 5, 0, 1.9, 1.1, 6);
     b.spar(C.dark, 44, 5.8, 0, 15, 0.35).spar(C.dark, -24, 5, 0, 15, 0.35).box(C.sup, 60, 6.2, 0, 14, 2, 9);
@@ -191,14 +210,14 @@ const MODELS = {
   submarine(b, C) {
     b.hull(C.hull, C.dark, 72, 6.4, 1.5, { bow: 0.38, stern: 0.12, keel: 1.4, sheer: 0.7 });
     b.box(C.sup, 3, 1.5, 0, 10, 4.6, 3).box(C.sup, 2, 6.1, 0, 5.5, 1.3, 2.4);
-    b.spar(C.dark, 3, 7.4, 0, 4.5, 0.16).spar(C.dark, 0.8, 7.4, 0, 3, 0.16);
+    b.spar(C.dark, 3, 7.4, 0, 4.5, 0.16).spar(C.dark, 0.8, 7.4, 0, 3, 0.16).mark('mast', 3, 11.8, 0);
     b.mount(C.gun, C.dark, 14, 1.7, 1.5, 1);
     b.box(C.dark, -2, 1.5, 0, 46, 0.35, 2.6);
   },
   battery(b, C) {
     for (const z of [-11, 11]) {
       b.cyl(SAND, 0, 0, z, 9.5, 3.2, 8, 7.2);
-      b.box(C.gun, 0.5, 3.2, z, 3.2, 2.6, 5).bar(C.dark, 2, 4.6, z, 8.5, 0.34, 1, 0.22);
+      b.box(C.gun, 0.5, 3.2, z, 3.2, 2.6, 5).bar(C.dark, 2, 4.6, z, 8.5, 0.34, 1, 0.22).mark('muzzle', 10.2, 6.5, z);
     }
     b.box(EARTH, -5, 0, 0, 9, 2.4, 9).box(C.cargo, -5, 2.4, 0, 6, 1.2, 6);
     b.spar(C.dark, -8, 0, 4, 9, 0.18);
@@ -208,6 +227,7 @@ const MODELS = {
     for (const z of [-11, 11]) b.cyl(C.dark, 2, 14, z, 5, 3, 8, 4).bar(C.dark, 5, 15.3, z - 1, 11, 0.42, 1, 0.15).bar(C.dark, 5, 15.3, z + 1, 11, 0.42, 1, 0.15);
     for (const z of [-15, -5, 5, 15]) b.box(C.dark, 26.6, 3.4, z, 1.4, 1.6, 4.2);
     b.box(C.dark, -6, 14, 0, 5, 3.2, 5).spar(C.dark, -6, 17.2, 0, 10, 0.2);
+    for (const z of [-11, 11]) b.mark('muzzle', 15.5, 17, z);
   },
   radar(b, C) {
     b.box(CONCRETE, -7, 0, 0, 8, 4, 7).box(C.dark, -7, 4, 0, 8.6, 0.5, 7.6).cyl(EARTH, 2, 0, 0, 7, 1, 8, 6);
@@ -219,15 +239,18 @@ const MODELS = {
   },
   patrol(b, C) {
     b.hull(C.hull, C.deck, 38, 7, 3, { bow: 0.36, stern: 0.7, sheer: 1.4, keel: 1 });
-    b.box(C.sup, 2, 3, 0, 9, 3.4, 4.6).box(C.sup, 3, 6.4, 0, 4.4, 1.8, 3.6).cyl(C.dark, -4.5, 3, 0, 0.9, 3.6, 6, 0.7);
-    b.spar(C.dark, 1.5, 8.2, 0, 7, 0.16, -0.06).box(C.dark, 1.2, 12.6, 0, 0.25, 0.25, 3.6);
+    b.box(C.sup, 2, 3, 0, 9, 3.4, 4.6).box(C.sup, 3, 6.4, 0, 4.4, 1.8, 3.6).windows(C.dark, 3.2, 7.2, 0, 4, 3.6).funnel(C.sup, C.dark, -4.5, 3, 0, 0.9, 3.6, 0.7);
+    b.spar(C.dark, 1.5, 8.2, 0, 7, 0.16, -0.06).box(C.dark, 1.2, 12.6, 0, 0.25, 0.25, 3.6).mark('mast', 1.1, 15.1, 0);
     b.mount(C.gun, C.dark, 11.5, 3.6, 1.7, 1);
     b.box(C.gun, -13, 3, 1.6, 4, 1.1, 1.2).box(C.gun, -13, 3, -1.6, 4, 1.1, 1.2);
   },
   transport(b, C) {
     b.hull(C.hull, C.deck, 120, 16, 6, { bow: 0.26, stern: 0.66, sheer: 1.6, keel: 2 });
     b.box(C.hull, 50, 6.3, 0, 16, 2.3, 9).box(C.hull, -51, 6, 0, 16, 2.4, 13);
-    b.box(C.sup, -4, 6, 0, 24, 7.5, 12.5).box(C.sup, -1, 13.5, 0, 12, 2.8, 10).cyl(C.dark, -8, 13.5, 0, 2.7, 8.5, 6, 2.4);
+    b.box(C.sup, -4, 6, 0, 24, 7.5, 12.5).box(C.sup, -1, 13.5, 0, 12, 2.8, 10).windows(C.dark, -0.6, 14.9, 0, 11.6, 10).funnel(C.sup, C.dark, -8, 13.5, 0, 2.7, 8.5, 2.4);
+    for (let i = 0; i < 2; i++) b.windows(C.dark, -4, 8 + i * 2.6, 0, 23.6, 12.1);
+    for (const z of [-6.6, 6.6]) b.box(0xb9b7ae, -10, 13.6, z, 6, 1.1, 1.6);
+    b.mark('mast', 37.5, 23, 0);
     for (const x of [28, -30]) {
       b.box(C.cargo, x, 6, 0, 16, 1.5, 9).spar(C.dark, x + 9.5, 6, 0, 17, 0.4);
       b.spar(C.dark, x + 9.5, 9, 0, 14, 0.2, -0.9).spar(C.dark, x + 9.5, 9, 0, 9, 0.2, 0.9);
@@ -235,8 +258,8 @@ const MODELS = {
   },
 };
 
-const geoCache = new Map();   // 'kind:F|E' → { geometry, size }
-let shipMat = null, wakeGeo = null, wakeMat = null, blobTex = null;
+const geoCache = new Map();   // 'kind:F|E' → { geometry, size, marks }
+let shipMat = null, landMat = null, wakeGeo = null, wakeMat = null, blobTex = null;
 
 function modelFor(kind, friendly) {
   const key = kind + (friendly ? ':F' : ':E');
@@ -249,15 +272,39 @@ function modelFor(kind, friendly) {
     const dims = { patrol: [38, 7, 3], transport: [120, 16, 6] }[kind] || [60, 10, 4];
     b.box(BAND, dims[0] * (kind === 'transport' ? 0.19 : -0.2), 0.15, 0, dims[0] * 0.075, dims[2] + 0.12, dims[1] + 0.5);
     if (kind === 'transport') b.cyl(BAND, -8, 18, 0, 2.62, 2, 6, 2.55);
+    if (kind === 'patrol') b.cyl(BAND, -4.5, 5.2, 0, 0.93, 0.9, 6, 0.75);
   }
   const geometry = b.build(), bb = geometry.boundingBox;
-  m = { geometry, size: { length: +(bb.max.x - bb.min.x).toFixed(1), beam: +(bb.max.z - bb.min.z).toFixed(1), height: +bb.max.y.toFixed(1) } };
+  m = { geometry, marks: b.marks, size: { length: +(bb.max.x - bb.min.x).toFixed(1), beam: +(bb.max.z - bb.min.z).toFixed(1), height: +bb.max.y.toFixed(1) } };
   geoCache.set(key, m);
   return m;
 }
 
-function sharedShipMat() {
-  return shipMat || (shipMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+// Корпус: вершинные цвета + в шейдере — тёмная полоса ватерлинии (сурик), грязь и потёки ржавчины книзу, разнотон листов.
+// Координаты модели — метры натуры, поэтому узор не зависит от масштаба, с которым пост ставит корабль.
+function patchHull(m, waterline) {
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vObj;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvObj = position;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vObj;')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+      {
+        float y = vObj.y;
+        float pl = fract(sin(dot(floor(vec2(vObj.x * 0.33, (vObj.y + vObj.z) * 0.5)), vec2(12.9898, 78.233))) * 43758.5453);
+        float st = fract(sin(floor(vObj.x * 1.7 + vObj.z * 0.3) * 91.7) * 4375.85);
+        diffuseColor.rgb *= 0.92 + 0.1 * pl;
+        diffuseColor.rgb *= mix(0.74, 1.05, clamp(y / 10.0, 0.0, 1.0));
+        diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.78, 0.6, 0.48), st * st * 0.45 * smoothstep(5.0, 0.8, y) * step(0.7, y));
+        ${waterline ? `diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.19, 0.075, 0.055), smoothstep(0.8, 0.55, y));
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.05, 0.06, 0.065), smoothstep(0.05, -0.3, y));` : ''}
+      }`);
+  };
+  m.customProgramCacheKey = () => (waterline ? 'arta-hull-w' : 'arta-hull-l');
+  return m;
+}
+function sharedShipMat(land) {
+  if (land) return landMat || (landMat = patchHull(new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }), false));
+  return shipMat || (shipMat = patchHull(new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }), true));
 }
 function blob() {
   if (blobTex) return blobTex;
@@ -291,6 +338,15 @@ function wake() {
   wakeGeo.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
   wakeGeo.computeVertexNormals();
   wakeMat = new THREE.MeshBasicMaterial({ color: 0xe8eef0, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide });
+  // пена тает к хвосту следа и рвётся на клочья
+  wakeMat.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vObj;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvObj = position;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vObj;')
+      .replace('#include <alphamap_fragment>', `#include <alphamap_fragment>
+        { float n = fract(sin(dot(floor(vObj.xz * vec2(40.0, 160.0)), vec2(12.9898, 78.233))) * 43758.5453);
+          diffuseColor.a *= smoothstep(-1.5, -0.2, vObj.x) * (0.55 + 0.45 * n) * (0.6 + 0.4 * smoothstep(0.0, 0.01, vObj.y + 0.004)); }`);
+  };
+  wakeMat.customProgramCacheKey = () => 'arta-wake';
   return wakeGeo;
 }
 
@@ -301,17 +357,29 @@ function smokeSprite(color, additive) {
   return s;
 }
 
+// свой генератор: украшения не трогают Math.random (игра и замеры с зерном остаются повторяемыми)
+let rs = 0x9e3779b9;
+const rnd = () => { rs = (rs + 0x6d2b79f5) | 0; let t = Math.imul(rs ^ (rs >>> 15), 1 | rs); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const _v = new THREE.Vector3();
+// частицы (seasky PK): 0 дым, 1 вода, 2 свечение
+function toFx(obj, group, x, y, z) {
+  obj.localToWorld(_v.set(x, y, z));
+  const par = group.parent;
+  if (par && !par.isScene) par.worldToLocal(_v);
+  return _v;
+}
+
 export function makeShip(kind, opts = {}) {
   const k = shipKind({ kind });
   const friendly = !!opts.friendly || k === 'patrol';
-  const { geometry, size } = modelFor(k, friendly);
+  const { geometry, size, marks } = modelFor(k, friendly);
   const land = !!LAND[k];
   const big = kind === 'battleship' ? 1.22 : 1;            // линкор — тот же силуэт крейсера, но крупнее
-  const L = size.length * big, H = size.height * big;
+  const L = size.length * big, H = size.height * big, Bm = size.beam * big;
   const group = new THREE.Group();
   group.name = 'ship:' + k;
   const body = new THREE.Group();                          // тонет и кренится он, а не group: её ставит вызывающий
-  const mesh = new THREE.Mesh(geometry, sharedShipMat());
+  const mesh = new THREE.Mesh(geometry, sharedShipMat(land));
   body.add(mesh); body.scale.setScalar(big);
   group.add(body);
   const st = { burning: false, sinking: 0, list: 0, wake: 0 };
@@ -319,6 +387,9 @@ export function makeShip(kind, opts = {}) {
   const pitchDir = seed % 2 ? 1 : -1;
   let fx = null, wk = null;                                // огонь/дым и след создаются при первой надобности
   const own = [];
+  const acc = { smoke: 0, fire: 0, ember: 0, bubble: 0, fun: 0 };
+  // точка пожара: ближе к миделю, на палубе
+  const fireAt = [-L * 0.08 / big, H * (land ? 0.45 : 0.32) / big, 0];
 
   function ensureFx() {
     if (fx) return;
@@ -329,6 +400,7 @@ export function makeShip(kind, opts = {}) {
     own.push(fx.fire.material, ...fx.smoke.map((s) => s.material));
     group.add(fx);
   }
+  let usesParticles = false;
   function apply() {
     const s = st.sinking;
     if (land) {
@@ -345,14 +417,75 @@ export function makeShip(kind, opts = {}) {
       if (!wk) { wk = new THREE.Mesh(wake(), wakeMat); wk.position.y = 0.3; wk.scale.setScalar(L); wk.renderOrder = 1; group.add(wk); }
       wk.visible = true;
     } else if (wk) wk.visible = false;
-    if (st.burning || s > 0) ensureFx();
-    if (fx) fx.visible = st.burning || s > 0;
+    if (!usesParticles && (st.burning || s > 0)) ensureFx();
+    if (fx) fx.visible = !usesParticles && (st.burning || s > 0);
+  }
+  function particles(dt, time, P) {
+    const s = st.sinking, alive = land ? 1 - 0.5 * s : 1 - s, sc = group.scale.x * big;
+    if (!(dt > 0)) dt = 0;
+    group.updateMatrixWorld(true);
+    // дым из труб на ходу
+    if (st.wake > 0.02 && !st.burning && s <= 0 && marks.funnel.length) {
+      acc.fun += dt * 1.1 * marks.funnel.length;
+      while (acc.fun >= 1) {
+        acc.fun -= 1;
+        const f = marks.funnel[Math.floor(rnd() * marks.funnel.length)], p = toFx(body, group, f[0], f[1], f[2]);
+        const g = friendly ? 0.55 : 0.3;
+        P.emit(0, p.x, p.y, p.z, 0, 2.5 * sc, 0, 4.5 * sc, 3.2, 6 + 2 * rnd(), g, g * 0.98, g * 0.95, 0.45, 0, -0.3 * sc, 0.5, 0.9);
+      }
+    }
+    if (st.burning || s > 0) {
+      const fp = toFx(body, group, fireAt[0], fireAt[1], fireAt[2]), fx0 = fp.x, fy0 = fp.y, fz0 = fp.z;
+      // пламя: огненные клубы, которые темнеют в дым (огонь «подсвечивает» дым снизу)
+      acc.fire += dt * 7 * alive;
+      while (acc.fire >= 1) {
+        acc.fire -= 1;
+        P.emit(0, fx0 + (rnd() - 0.5) * L * 0.12 * group.scale.x, fy0, fz0 + (rnd() - 0.5) * Bm * 0.5 * group.scale.x, 0, (3 + 3 * rnd()) * sc, 0,
+          L * 0.07 * group.scale.x, 1.5, 1.4 + rnd() * 0.6, 1.9, 0.95, 0.35, 0.9, 2, -0.5 * sc, 0.6, 0.4, 1);
+      }
+      acc.smoke += dt * 3.2 * (0.35 + 0.65 * alive);
+      while (acc.smoke >= 1) {
+        acc.smoke -= 1;
+        const g = 0.08 + 0.06 * rnd();
+        P.emit(0, fx0 + (rnd() - 0.5) * L * 0.1 * group.scale.x, fy0 + L * 0.04 * group.scale.x, fz0, 0, (4 + 2 * rnd()) * sc, 0,
+          L * 0.1 * group.scale.x, 3.5, 7 + 3 * rnd(), g, g * 0.95, g * 0.9, 0.8, 0, -0.2 * sc, 0.35, 0.8);
+      }
+      acc.ember += dt * 6 * alive;
+      while (acc.ember >= 1) {
+        acc.ember -= 1;
+        P.emit(2, fx0, fy0 + 2 * sc, fz0, (rnd() - 0.5) * 6 * sc, (6 + 8 * rnd()) * sc, (rnd() - 0.5) * 6 * sc, 1.6 * sc, 0, 1 + rnd(), 1.8, 0.8, 0.25, 1, 1, 2 * sc, 0.4, 0.2, 1);
+      }
+      // тонет: пузыри и пена у борта, пар
+      if (!land && s > 0 && s < 1) {
+        acc.bubble += dt * 8;
+        while (acc.bubble >= 1) {
+          acc.bubble -= 1;
+          const p = toFx(group, group, (rnd() - 0.5) * L, 0, (rnd() - 0.5) * Bm * 1.4);
+          P.emit(1, p.x, 1, p.z, 0, (2 + 4 * rnd()) * sc, 0, 2.5 * sc, 1.5, 1.2 + rnd(), 0.85, 0.9, 0.92, 0.7, 3, 4 * sc, 0.3);
+        }
+        if (rnd() < dt * 1.5) {
+          const p = toFx(group, group, (rnd() - 0.5) * L * 0.5, 2, 0);
+          P.emit(0, p.x, p.y, p.z, 0, 3 * sc, 0, L * 0.08 * group.scale.x, 2.5, 5, 0.8, 0.82, 0.84, 0.35, 0, 0, 0.4, 0.8);
+        }
+      }
+    }
+    // ходовые огни ночью (свои — ярче; противник идёт затемнённым — огни тусклые)
+    if (group.userData.night && !land && s <= 0) {
+      const a = friendly ? 1 : 0.45, m = marks.mast[0], sz = 9 * group.scale.x;
+      if (m) { const p = toFx(body, group, m[0], m[1], m[2]); P.put(2, p.x, p.y, p.z, sz, 1.6 * a, 1.6 * a, 1.5 * a, 1, 1); }
+      const bx = L * 0.12 / big, by = H * 0.45 / big, bz = Bm * 0.5 / big;
+      let p = toFx(body, group, bx, by, -bz); P.put(2, p.x, p.y, p.z, sz, 1.8 * a, 0.25 * a, 0.2 * a, 1, 1);
+      p = toFx(body, group, bx, by, bz); P.put(2, p.x, p.y, p.z, sz, 0.25 * a, 1.6 * a, 0.5 * a, 1, 1);
+    }
+    void time;
   }
 
   group.userData.kind = k;
   group.userData.land = land;
-  group.userData.size = { length: L, beam: size.beam * big, height: H };
+  group.userData.size = { length: L, beam: Bm, height: H };
   group.userData.state = st;
+  group.userData.night = false;
+  group.userData.muzzles = marks.muzzle.map((m) => [m[0] * big, m[1] * big, m[2] * big]);
   group.userData.setState = (o) => {
     if (!o) return;
     if (o.burning != null) st.burning = !!o.burning;
@@ -361,7 +494,12 @@ export function makeShip(kind, opts = {}) {
     if (o.wake != null) st.wake = +o.wake || 0;
     apply();
   };
-  group.userData.update = (dt, time) => {
+  group.userData.update = (dt, time, P) => {
+    if (P) {
+      if (!usesParticles) { usesParticles = true; if (fx) fx.visible = false; }
+      particles(dt, time, P);
+      return;
+    }
     if (!fx || !fx.visible) return;
     const s = st.sinking, alive = land ? 1 - 0.5 * s : 1 - s;
     const top = H * (land ? 0.7 : 0.5) * (1 - s), x0 = -L * 0.08;
@@ -384,30 +522,46 @@ export function makeShip(kind, opts = {}) {
 }
 
 // ---------- самолёт ----------
-let planeGeo = null, planeMat = null;
+let planeGeo = null, planeMat = null, propGeo = null, propMat = null;
 function planeGeometry() {
   if (planeGeo) return planeGeo;
-  const b = new Builder(), body = 0x3c4439, dark = 0x1d2023, belly = 0x7e8a92;
-  b.geo(new THREE.CylinderGeometry(0.75, 0.3, 11, 6), body, -0.5, 0, 0, 0, 0, -Math.PI / 2);        // фюзеляж: нос толще
-  b.geo(new THREE.CylinderGeometry(0.5, 0.78, 1.2, 6), dark, 5.6, 0, 0, 0, 0, -Math.PI / 2);        // капот
-  b.box(dark, 6.3, -1.4, 0, 0.12, 2.8, 0.3);                                                         // винт
+  const b = new Builder(), body = 0x3c4439, dark = 0x1d2023, belly = 0x7e8a92, mark = 0xb8b2a0;
+  b.geo(new THREE.CylinderGeometry(0.75, 0.3, 11, 8), body, -0.5, 0, 0, 0, 0, -Math.PI / 2);        // фюзеляж: нос толще
+  b.geo(new THREE.CylinderGeometry(0.5, 0.78, 1.2, 8), dark, 5.6, 0, 0, 0, 0, -Math.PI / 2);        // капот
+  b.geo(new THREE.ConeGeometry(0.3, 0.7, 6), dark, 6.5, 0, 0, 0, 0, -Math.PI / 2);                  // кок винта
   b.box(body, 1.4, -0.5, 0, 2.7, 0.22, 14).box(belly, 1.4, -0.56, 0, 2.5, 0.06, 13.6);               // крыло
+  b.box(mark, 1.4, -0.38, 5.2, 1.6, 0.04, 1.6).box(mark, 1.4, -0.38, -5.2, 1.6, 0.04, 1.6);          // опознавательные знаки
   b.box(body, -5.2, 0.1, 0, 1.4, 0.14, 4.6).box(body, -5.4, 0.2, 0, 1.6, 1.9, 0.14);                 // оперение
   b.box(0x9fb4c0, 1.2, 0.6, 0, 2.6, 0.6, 0.8);                                                       // фонарь
   b.box(dark, 1.2, -1.1, 0, 2.4, 0.5, 0.5);                                                          // бомба под брюхом
   planeGeo = b.build();
   planeMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  // диск винта: полупрозрачный, с размытыми лопастями
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(32, 32, 4, 32, 32, 32);
+  g.addColorStop(0, 'rgba(40,40,40,0.5)'); g.addColorStop(0.85, 'rgba(40,40,40,0.28)'); g.addColorStop(1, 'rgba(40,40,40,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+  x.fillStyle = 'rgba(20,20,20,0.35)';
+  for (let i = 0; i < 3; i++) { x.save(); x.translate(32, 32); x.rotate(i * 2.094); x.beginPath(); x.moveTo(0, 0); x.arc(0, 0, 31, -0.12, 0.25); x.closePath(); x.fill(); x.restore(); }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  propGeo = new THREE.CircleGeometry(1.9, 18); propGeo.rotateY(Math.PI / 2);
+  propMat = new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, side: THREE.DoubleSide });
   return planeGeo;
 }
 
-export function makePlane() {
+/** opts: { material } — свой материал корпуса (например, seasky.createLitColorMaterial для зенитки). */
+export function makePlane(opts = {}) {
   const group = new THREE.Group();
   group.name = 'plane';
   const body = new THREE.Group();
-  body.add(new THREE.Mesh(planeGeometry(), planeMat));
+  body.add(new THREE.Mesh(planeGeometry(), opts.material || planeMat));
+  const prop = new THREE.Mesh(propGeo, propMat);
+  prop.position.x = 6.45; prop.renderOrder = 2;
+  body.add(prop);
   group.add(body);
   const st = { burning: false, down: 0 };
-  let trail = null;
+  let trail = null, killed = false, acc = 0;
   const own = [];
   group.userData.size = { length: 12, span: 14, height: 2.8 };
   group.userData.state = st;
@@ -416,14 +570,42 @@ export function makePlane() {
     if (o.burning != null) st.burning = !!o.burning;
     if (o.down != null) st.down = Math.max(0, Math.min(1, +o.down || 0));
     body.rotation.z = -st.down * 0.9; body.rotation.x = st.down * 2.5;
+    if (st.down <= 0) killed = false;
+    if (trail) for (const s of trail) s.visible = st.burning && !group.userData.particles;
+  };
+  /** P — пул частиц (seasky) в системе координат родителя: дымный след, огненный шар при сбитии. */
+  group.userData.update = (dt, time, P) => {
+    prop.rotation.x = time * 47;
+    if (P) {
+      group.userData.particles = true;
+      if (trail) for (const s of trail) s.visible = false;
+      const sc = group.scale.x;
+      group.updateMatrixWorld(true);
+      if (st.down > 0 && !killed) {
+        killed = true;
+        const p = toFx(body, group, 0, 0, 0);
+        P.emit(2, p.x, p.y, p.z, 0, 0, 0, 40 * sc, 0.8, 0.4, 2, 1.5, 0.9, 1, 1, 0, 0, 0, 1);
+        for (let i = 0; i < 6; i++) P.emit(0, p.x + (rnd() - 0.5) * 8 * sc, p.y + (rnd() - 0.5) * 6 * sc, p.z + (rnd() - 0.5) * 8 * sc, (rnd() - 0.5) * 8 * sc, (rnd() - 0.3) * 8 * sc, (rnd() - 0.5) * 8 * sc,
+          12 * sc, 1.8, 2.2 + rnd(), 1.9, 0.9, 0.3, 1, 2, 0, 1, 0, 1);
+      }
+      if (st.burning && dt > 0) {
+        acc += dt * 14;
+        while (acc >= 1) {
+          acc -= 1;
+          const p = toFx(body, group, -1.5 - rnd() * 2, 0.2, 0);
+          const g = 0.1 + 0.08 * rnd();
+          P.emit(0, p.x, p.y, p.z, 0, 0.5 * sc, 0, 3.2 * sc, 3.5, 2.6 + rnd(), g, g, g * 0.95, 0.75, 0, 0, 0.3, 0.5);
+          if (rnd() < 0.5) P.emit(2, p.x, p.y, p.z, 0, 0, 0, 3.4 * sc, 0.2, 0.25, 1.9, 0.9, 0.3, 1, 1, 0, 0, 0, 1);
+        }
+      }
+      return;
+    }
     if (st.burning && !trail) {
       trail = [smokeSprite(0xff7a20, true), smokeSprite(0x1f1d1c, false), smokeSprite(0x2a2726, false)];
       trail.forEach((s) => { group.add(s); own.push(s.material); });
     }
-    if (trail) for (const s of trail) s.visible = st.burning;
-  };
-  group.userData.update = (dt, time) => {
     if (!trail || !st.burning) return;
+    for (const s of trail) s.visible = true;
     trail[0].position.set(-1, 0, 0); trail[0].scale.setScalar(5 + Math.sin(time * 30)); trail[0].material.opacity = 0.9;
     for (let i = 1; i < 3; i++) {
       const ph = (time * 0.9 + i * 0.5) % 1;
@@ -437,10 +619,11 @@ export function makePlane() {
 // ---------- флот и авиакрыло: модели по game.state ----------
 const _st = { burning: false, sinking: 0, wake: 0 };
 
-export function createFleet(game, parent) {
+export function createFleet(game, parent, opts = {}) {
   const map = new Map();          // id цели (число) / своего (строка) → { group, kind, stamp }
   let stamp = 0, placeFn = null, dtNow = 0, timeNow = 0;
   const api = { shown: 0, entries: map, sync, clear, dispose: clear };
+  const P = opts.fx || null;
 
   function one(o, friendly) {
     if (o.sunk || o.escaped) return;
@@ -463,7 +646,7 @@ export function createFleet(game, parent) {
     g.userData.setState(_st);
     if (!g.visible) return;
     if (placeFn(o, g, friendly) === false) { g.visible = false; return; }
-    g.userData.update(dtNow, timeNow);
+    g.userData.update(dtNow, timeNow, P);
     en.stamp = stamp;
     api.shown++;
   }
@@ -476,6 +659,7 @@ export function createFleet(game, parent) {
   function sync(dt, time, place) {
     const s = game.state;
     stamp++; api.shown = 0; placeFn = place; dtNow = dt; timeNow = time;
+    if (wakeMat) wakeMat.opacity = s.mission && s.mission.night ? 0.3 : s.mission && s.mission.weather === 'fog' ? 0.6 : 0.8;
     if (s.mission && s.phase !== 'menu') {
       const ts = s.targets || [], fs = s.friends || [];
       for (let i = 0; i < ts.length; i++) one(ts[i], false);
@@ -490,10 +674,11 @@ export function createFleet(game, parent) {
   return api;
 }
 
-export function createAirWing(game, parent) {
+export function createAirWing(game, parent, opts = {}) {
   const pool = [];                // { group, id }
   const api = { shown: 0, pool, sync, clear, dispose: clear };
   const _ps = { burning: false, down: 0 };
+  const P = opts.fx || null;
   function sync(dt, time, place) {
     const s = game.state, raid = s.mission && s.phase !== 'menu' ? s.raid : null, ps = raid ? raid.planes : null;
     let n = 0;
@@ -509,7 +694,7 @@ export function createAirWing(game, parent) {
       _ps.burning = !p.alive || p.hit > 0.5; _ps.down = down;
       en.group.userData.setState(_ps);
       en.group.visible = place(p, en.group, down) !== false;
-      if (en.group.visible) { en.group.userData.update(dt, time); api.shown++; }
+      if (en.group.visible) { en.group.userData.update(dt, time, P); api.shown++; }
     }
     for (let i = n; i < pool.length; i++) pool[i].group.visible = false;
   }

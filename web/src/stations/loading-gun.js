@@ -34,6 +34,20 @@ export function buildLoadingGun(ctx, root) {
   const dark = mat.paint(PAL.panelDark, { wear: 0.8 });
   const black = mat.emissive('#020303', 1);
   const chamberMat = mat.memo('loading:chamber', () => new THREE.MeshStandardMaterial({ color: 0x15181b, roughness: 0.55, metalness: 0.7 }));
+  // побежалость у каморы: от синевато-фиолетового у канала через бронзу к соломенному и светлой стали к краю (u — по окружности, v — радиус)
+  const heatMat = mat.memo('loading:heat', () => {
+    const W = 64, H = 128, cv = T.makeCanvas(W, H), c = cv.getContext('2d'), rnd = T.mulberry32(17);
+    const gr = c.createLinearGradient(0, H, 0, 0);
+    gr.addColorStop(0, '#3a3f63'); gr.addColorStop(0.08, '#5a4a74'); gr.addColorStop(0.16, '#8a5f45'); gr.addColorStop(0.26, '#b8935a');
+    gr.addColorStop(0.36, '#d2c39a'); gr.addColorStop(0.5, '#e2e2dc'); gr.addColorStop(1, '#eeeeea');
+    c.fillStyle = gr; c.fillRect(0, 0, W, H);
+    for (let i = 0; i < 40; i++) { c.fillStyle = 'rgba(' + (rnd() < 0.5 ? '0,0,0' : '255,255,255') + ',0.06)'; c.fillRect(0, rnd() * H, W, 1 + rnd() * 2); }
+    const m = new THREE.MeshStandardMaterial({ color: 0xc9cdd1, map: T.canvasTexture(cv, { repeat: true }), roughness: 0.3 / 0.68, metalness: 0.95,
+      roughnessMap: mat.textures ? mat.textures.metal.pack : null, normalMap: mat.textures ? mat.textures.metal.normal : null });
+    m.normalScale.set(0.25, 0.25);
+    return m;
+  });
+  const greased = mat.greased || mat.darkSteel, brass = mat.brass || mat.steel;
 
   // ---------------------------------------------------------------- помощники
   const box = (w, h, d, x = 0, y = 0, z = 0) => { const g = new THREE.BoxGeometry(w, h, d); g.translate(x, y, z); return g; };
@@ -86,7 +100,12 @@ export function buildLoadingGun(ctx, root) {
   const rb = bucket();
   rb.add(paint, G.lathe([[JR, -RL], [RR, -RL], [RR, -RL], [RR, -0.07], [RR, -0.07], [RR + 0.012, -0.062], [RR + 0.012, -0.012], [RR, 0], [RR, 0], [0.3, 0]], 40));
   rb.add(mat.steel, G.lathe([[JR, -1.5], [JR, -RL]], 32));                                     // полированная труба — видна при откате
-  rb.add(mat.steel, G.lathe([[0.302, -0.001], [0.302, 0.004], [0.302, 0.004], [CH + 0.006, 0.004], [CH + 0.006, 0.004], [CH, -0.002]], 40));
+  {                                                                                            // зеркало казённого среза: проточка с побежалостью
+    const g = G.lathe([[0.302, -0.001], [0.302, 0.004], [0.302, 0.004], [CH + 0.006, 0.004], [CH + 0.006, 0.004], [CH, -0.002]], 40);
+    const pos = g.attributes.position, uv = g.attributes.uv;
+    for (let i = 0; i < pos.count; i++) uv.setY(i, (Math.hypot(pos.getX(i), pos.getY(i)) - CH) / (0.302 - CH));
+    recoil.add(new THREE.Mesh(g, heatMat));
+  }
   for (let i = 0; i < 3; i++) rb.add(mat.steel, sector(CH - 0.005, -0.15, -0.015, (20 + i * 120) * DEG, 60 * DEG, true));   // секторы нарезки каморы
   for (let i = 0; i < 12; i++) {                                                               // болты казённого среза
     const a = (15 + i * 30) * DEG;
@@ -123,8 +142,10 @@ export function buildLoadingGun(ctx, root) {
   const rotor = new THREE.Group(); rotor.name = 'breechRotor'; rotor.position.set(BX, 0, FZ);
   hinge.add(rotor);
   const ob = bucket();
-  ob.add(mat.darkSteel, cylZ(0.15, -0.11, 0, 0, 0, 24));
-  for (let i = 0; i < 3; i++) ob.add(mat.steel, sector(0.158, -0.1, -0.01, (80 + i * 120) * DEG, 60 * DEG));
+  ob.add(greased, cylZ(0.15, -0.11, 0, 0, 0, 24));
+  for (let i = 0; i < 3; i++) ob.add(greased, sector(0.158, -0.1, -0.01, (80 + i * 120) * DEG, 60 * DEG));
+  ob.add(brass, G.lathe([[0.135, -0.125], [0.147, -0.125], [0.147, -0.125], [0.147, -0.11], [0.147, -0.11], [0.135, -0.11]], 28));   // обтюратор (виден при открытом затворе)
+  ob.add(brass, G.lathe([[0.118, 0.047], [0.118, 0.053], [0.118, 0.053], [0.136, 0.053], [0.136, 0.053], [0.136, 0.047]], 32));      // латунное стопорное кольцо на крышке затвора
   ob.add(mat.steel, G.lathe([[0.112, 0.048], [0.112, 0.062], [0.112, 0.062], [0.05, 0.068], [0.05, 0.068], [0.05, 0.092], [0.044, 0.097], [0, 0.097]], 24));
   const A0 = -35 * DEG;                                      // рукоять затвора в закрытом положении
   ob.add(mat.steel, rotZ(box(0.2, 0.03, 0.016, 0.1, 0, 0.078), A0));

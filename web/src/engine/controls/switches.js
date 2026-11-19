@@ -244,7 +244,7 @@ export function rotarySelector(c, opts = {}) {
   shape.absarc(0, 0, rb, Math.PI / 2 + a0, Math.PI / 2 - a0 + TAU, false);
   shape.absarc(0, yt, rt, Math.PI / 2 - a0, Math.PI / 2 + a0, false);
   const body = extrude(shape, 0.03, 0.006, 3, 10);
-  knob.add(new THREE.Mesh(merge([body, lathe([[R * 0.86, 0], [R * 0.86, 0.008], [R * 0.7, 0.012]], 24)]), c.mat.bakelite));
+  knob.add(new THREE.Mesh(merge([body, lathe([[R * 0.86, 0], [R * 0.86, 0.008], [R * 0.7, 0.012]], 24)]), c.mat.knurled || c.mat.bakelite));
   const mark = new THREE.Mesh(xf(slab(R * 0.085, R * 0.62, 0.002, { r: R * 0.03, bevel: 0.0004 }), { p: [0, R * 0.62, 0.03] }), c.mat.ivory);
   knob.add(mark);
 

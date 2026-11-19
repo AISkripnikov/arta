@@ -4,17 +4,22 @@
 //   снаряд рядом      — лёгкий толчок, немного пыли
 //   попадание/бомба   — сильный толчок, лампы мигают, пыль, искры и дым из-под потолка
 //   отказ узла        — искры и дым у привода (ПОВОРОТ, ПОДЪЁМ), пар у элеватора (ЗАРЯЖАНИЕ), искры у плафона (свет)
-//   зенитка стреляет  — мелкая дрожь
+//   неисправность идёт — пока узел не починили: редкие искры у привода (ПОВОРОТ, ПОДЪЁМ), струйка пара у элеватора (ЗАРЯЖАНИЕ)
+//   зенитка стреляет  — мелкая дрожь; клин от перегрева — толчок и пар над казёнником (ЗЕНИТКА)
 //   ночь              — engine.setNight: красные лампы и красная коррекция кадра вместо CSS-фильтра #night
 export function createVfx({ engine, game }) {
   const fx = engine.fx, offs = [];
   const s = () => game.state;
   const playing = () => s().phase === 'playing';
   const pick = (list) => list[(Math.random() * list.length) | 0];
-  // точки в координатах поста: под потолком у стены, по сторонам пульта
-  const OVERHEAD = [[-0.95, 2.0, -0.55], [0.95, 1.95, -0.55], [0.5, 2.25, -0.1], [-0.45, 2.2, -0.2]];
+  // места эффектов — точки «в кадре» (fx: screen [x, y] от −1 до 1, depth — метры от камеры): видны на любом посту, перед
+  // пультом и не за панелями. Кадр, не закрытый верхней и нижней полосами и правым столбцом оболочки: y от −0.7 до 0.78,
+  // x до 0.86. Под потолком — верх кадра; привод и элеватор — справа внизу, у края пульта.
+  const OVERHEAD = [[-0.72, 0.62], [0.7, 0.6], [0.42, 0.66], [-0.38, 0.64]].map((sc) => ({ screen: sc, depth: 0.85 }));
   const BREECH = [-0.5, 1.1, -0.3];                 // казённый срез орудия на посту ЗАРЯЖАНИЕ (loading-gun.js: K.X, K.Y, K.ZB)
-  let smokeInBore = false, aaT = 0;
+  const DRIVE = { screen: [0.72, -0.5], depth: 0.75 }, HOIST = { screen: [0.7, -0.38], depth: 0.75 };
+  const AA_GUN = { screen: [0.02, 0.6], depth: 0.9 }, LAMPS = [{ screen: [-0.81, 0.55], depth: 0.85 }, { screen: [0.81, 0.55], depth: 0.85 }];
+  let smokeInBore = false, aaT = 0, faultT = 2;
 
   // на уровнях с постобработкой красный фильтр ночи рисует движок — CSS-слой #night прячем
   const style = document.createElement('style');
@@ -46,23 +51,27 @@ export function createVfx({ engine, game }) {
     fx.flicker(bomb ? 0.95 : 0.75, bomb ? 1.0 : 0.6);
     fx.dust({ amount: bomb ? 1.6 : 1 });
     const p = pick(OVERHEAD);
-    fx.sparks({ position: p, amount: bomb ? 1.4 : 1 });
-    fx.puff({ kind: 'smoke', position: p, amount: bomb ? 1 : 0.6 });
+    fx.sparks({ ...p, amount: bomb ? 1.4 : 1 });
+    fx.puff({ kind: 'smoke', ...p, amount: bomb ? 1 : 0.6 });
   }));
   offs.push(game.on('fault', (e) => {
     if (!playing() || !e || e.fixed) return;
     const cur = engine.current;
     if (e.kind === 'lights') {
       fx.flicker(1, 1.2);
-      fx.sparks({ position: [Math.random() < 0.5 ? -1.0 : 1.0, 1.42, -0.7], amount: 0.8 });
+      fx.sparks({ ...pick(LAMPS), amount: 0.8 });
     } else if (e.kind === 'drive' && (cur === 'traverse' || cur === 'elevation')) {
-      const p = [0.78, 0.62, -0.15];
-      fx.sparks({ position: p, dir: [0, 0.35, 0.8], amount: 1 });
-      fx.puff({ kind: 'smoke', position: p, amount: 0.8 });
+      fx.sparks({ ...DRIVE, dir: [-0.3, 0.5, 0.5], amount: 1 });
+      fx.puff({ kind: 'smoke', ...DRIVE, amount: 0.8 });
     } else if (e.kind === 'hoist' && cur === 'loading') {
-      fx.puff({ kind: 'steam', position: [0.72, 0.5, -0.3], dir: [-0.15, 1, 0.3] });
-      fx.sparks({ position: [0.72, 0.55, -0.3], amount: 0.5 });
+      fx.puff({ kind: 'steam', ...HOIST, dir: [-0.3, 1, 0.2] });
+      fx.sparks({ ...HOIST, amount: 0.5 });
     } else fx.flicker(0.35, 0.4);
+  }));
+  offs.push(game.on('aa', (e) => {
+    if (!playing() || !e || !e.jammed || engine.current !== 'aa') return;
+    fx.shake(0.12, 0.25);
+    fx.puff({ kind: 'steam', station: 'aa', ...AA_GUN, dir: [0, 1, 0.15], amount: 0.7 });
   }));
   offs.push(game.on('phase', () => { if (!playing()) { fx.clear(); smokeInBore = false; } }));
 
@@ -81,6 +90,17 @@ export function createVfx({ engine, game }) {
       aaT -= dt;
       if (aaT <= 0) { aaT = 0.09; fx.shake(engine.current === 'aa' ? 0.07 : 0.025, 0.14); }
     } else aaT = 0;
+    // узел ещё не починен — напоминание там, где он стоит
+    const f = st.faults;
+    if (st.phase === 'playing' && !st.paused && f && (f.drive || f.hoist)) {
+      faultT -= dt;
+      if (faultT <= 0) {
+        faultT = 2.5 + Math.random() * 3;
+        const cur = engine.current;
+        if (f.drive && (cur === 'traverse' || cur === 'elevation')) fx.sparks({ ...DRIVE, dir: [-0.3, 0.5, 0.5], amount: 0.3 });
+        else if (f.hoist && cur === 'loading') fx.puff({ kind: 'steam', ...HOIST, dir: [-0.3, 1, 0.2], amount: 0.35 });
+      }
+    }
   }));
 
   return {

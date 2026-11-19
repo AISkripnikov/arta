@@ -33,7 +33,10 @@ export function handwheel(c, opts = {}) {
   wheel.position.z = H;
   group.add(wheel);
 
-  const rimParts = [new THREE.TorusGeometry(R, tube, 10, 40)];
+  // обод — литой профиль «D»: сплюснут к панели, чуть толще с лица (ладонь ложится на скругление)
+  const rimG = new THREE.TorusGeometry(R, tube, 12, 48);
+  { const p = rimG.attributes.position; for (let i = 0; i < p.count; i++) { const z = p.getZ(i); p.setZ(i, z > 0 ? z * 0.9 : z * 0.62); } rimG.computeVertexNormals(); }
+  const rimParts = [rimG];
   const hubR = R * 0.2;
   for (let i = 0; i < spokes; i++) {
     const len = R - hubR * 0.6;
@@ -59,7 +62,7 @@ export function handwheel(c, opts = {}) {
       [kr * 0.85, tube + 0.012 + kl * 0.78], [kr * 0.95, tube + 0.012 + kl * 0.93], [kr * 0.7, tube + 0.012 + kl], [0, tube + 0.012 + kl],
     ], 12);
     grip.translate(0, R, 0);
-    wheel.add(new THREE.Mesh(grip, c.mat.bakelite));
+    wheel.add(new THREE.Mesh(grip, c.mat.knurled || c.mat.bakelite));
   }
   wheel.add(new THREE.Mesh(merge(nickelParts), c.mat.nickel));
 
