@@ -276,9 +276,9 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
   const keep = await p.evaluate(() => JSON.stringify(Object.fromEntries(Object.keys(localStorage).map((k) => [k, localStorage.getItem(k)]))));
   await p.reload();
   await p.waitForFunction(() => window.__arta);
-  // безголовый Chromium на file:// изредка теряет ВСЁ хранилище при перезагрузке (воспроизводится и на старых сборках;
+  // безголовый Chromium на file:// изредка теряет ВСЁ хранилище при перезагрузке (воспроизводится и на старых сборках; остаётся только arta2.autoTier, который заново кладёт seedTier;
   // сама игра хранилище целиком не чистит). Тогда возвращаем снимок и перезагружаем ещё раз — проверка ниже та же.
-  if (await p.evaluate(() => localStorage.length === 0)) {
+  if (await p.evaluate(() => !localStorage.getItem('arta2.save') && Object.keys(localStorage).every((k) => k === 'arta2.autoTier'))) {   // autoTier заново кладёт seedTier
     console.log('среда потеряла localStorage при перезагрузке — повтор с тем же сохранением');
     await p.evaluate((k) => { for (const [n, v] of Object.entries(JSON.parse(k))) localStorage.setItem(n, v); }, keep);
     await p.waitForTimeout(1000);
