@@ -36,7 +36,7 @@ const strHash = (s) => { let h = 2166136261; s = String(s); for (let i = 0; i < 
 const TOD = {
   day:      { label: 'ДЕНЬ', el: [34, 52], az: [150, 215], zen: '#4f7fb6', hor: '#cbd9e2', sun: '#fff1da', sunI: 3.0, glow: 1, cloud: 0.32, cDark: 0.15, cLit: '#ffffff', cShade: '#9aa8b8', sea: '#1d4058', sss: '#2f8a8a', fog: 2.6e-5, amb: 1, stars: 0 },
   dawn:     { label: 'РАССВЕТ', el: [3, 8], az: [78, 112], zen: '#46679a', hor: '#c8bcc4', sun: '#ffae74', sunI: 2.2, glow: 1.7, cloud: 0.38, cDark: 0.2, cLit: '#ffd6b8', cShade: '#6a6f8c', sea: '#1d3550', sss: '#3a7a84', fog: 3.4e-5, amb: 0.72, stars: 0 },
-  overcast: { label: 'ПАСМУРНО', el: [26, 40], az: [140, 220], zen: '#7f8b97', hor: '#bcc4ca', sun: '#eef1f2', sunI: 0.9, glow: 0.35, cloud: 0.86, cDark: 0.32, cLit: '#d9dde0', cShade: '#7f8891', sea: '#2a3e4a', sss: '#3c6e70', fog: 4.2e-5, amb: 0.9, stars: 0 },
+  overcast: { label: 'ПАСМУРНО', el: [26, 40], az: [140, 220], zen: '#68737f', hor: '#b4bcc2', sun: '#eef1f2', sunI: 0.9, glow: 0.35, cloud: 0.86, cDark: 0.32, cLit: '#d9dde0', cShade: '#7f8891', sea: '#2a3e4a', sss: '#3c6e70', fog: 4.2e-5, amb: 0.9, stars: 0 },
   evening:  { label: 'ВЕЧЕР', el: [4, 9], az: [248, 284], zen: '#46628f', hor: '#d6c4b0', sun: '#ffa04e', sunI: 2.4, glow: 1.9, cloud: 0.4, cDark: 0.2, cLit: '#ffcf96', cShade: '#6f6884', sea: '#1c3148', sss: '#5a7a6a', fog: 3.2e-5, amb: 0.75, stars: 0 },
   fog:      { label: 'ТУМАН', el: [22, 34], az: [140, 220], zen: '#a3abaf', hor: '#c2c7c7', sun: '#f6f2e6', sunI: 0.8, glow: 0.6, cloud: 0.6, cDark: 0.1, cLit: '#e0e3e3', cShade: '#a8aeb0', sea: '#4c5c62', sss: '#62807e', fog: 3.6e-4, amb: 0.95, stars: 0 },
   storm:    { label: 'ШТОРМ', el: [20, 32], az: [140, 220], zen: '#2c3640', hor: '#76808a', sun: '#c8ced2', sunI: 0.45, glow: 0.2, cloud: 0.92, cDark: 0.62, cLit: '#8c969e', cShade: '#2f363c', sea: '#1d2a32', sss: '#2e4c4c', fog: 1.1e-4, amb: 0.62, stars: 0 },
@@ -88,10 +88,12 @@ export function skyBaseJS(L, dx, dy, dz, out) {
 
 // ---------------------------------------------------------------- GLSL ---------------------------------------------
 export const GLSL = {
+  // шум — выборка из плиточной текстуры 128×128 с мип-уровнями (дешевле хеша на программном GPU, и вдали шум сам
+  // сглаживается мип-картой); h12 — хеш для звёзд и дождя
   noise: /* glsl */`
+uniform sampler2D uNoise;
 float h12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
-float vnoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
-  return mix(mix(h12(i), h12(i + vec2(1.0, 0.0)), f.x), mix(h12(i + vec2(0.0, 1.0)), h12(i + vec2(1.0, 1.0)), f.x), f.y); }
+float vnoise(vec2 p) { return texture2D(uNoise, (p + 0.5) * 0.0078125).r; }
 float fbm(vec2 p) { float a = 0.5, s = 0.0; for (int i = 0; i < OCT; i++) { s += a * vnoise(p); p = p * 2.03 + vec2(17.1, 9.2); a *= 0.5; } return s; }
 `,
   skyUniforms: /* glsl */`
@@ -143,13 +145,13 @@ vec3 skyFull(vec3 d) {
   float sd = dot(d, uSunDir);
   if (uNight > 0.5) {
     c += vec3(0.85, 0.9, 1.0) * starField(d) * uStars * (1.0 - uCloud * 0.6);
-    float md = acos(clamp(sd, -1.0, 1.0));
+    float md = sqrt(max(2.0 - 2.0 * sd, 0.0));          // ≈ угол до луны (малые углы)
     float disc = smoothstep(0.0105, 0.0085, md) * uMoon;
     float phase = 0.55 + 0.45 * smoothstep(-0.006, 0.008, dot(d - uSunDir, normalize(vec3(-uSunDir.z, 0.0, uSunDir.x))));
     c = mix(c, vec3(0.92, 0.94, 0.86) * phase, disc);
     c += uSunCol * 0.18 * exp(-md * 18.0) * uMoon;
   } else {
-    float md = acos(clamp(sd, -1.0, 1.0));
+    float md = sqrt(max(2.0 - 2.0 * sd, 0.0));
     c += uSunCol * uSunI * (smoothstep(0.011, 0.008, md) * 3.0 + exp(-md * 60.0) * 0.6);
   }
   vec4 cl = clouds(d);
@@ -159,6 +161,19 @@ vec3 skyFull(vec3 d) {
 }
 `,
 };
+let noiseTex = null;
+/** Плиточный шум 128×128 (общий для всех шейдеров мира снаружи). */
+export function noiseTexture() {
+  if (noiseTex) return noiseTex;
+  const N = 128, d = new Uint8Array(N * N * 4);
+  let r = 0x1234567;
+  for (let i = 0; i < N * N; i++) { r = (Math.imul(r, 1664525) + 1013904223) | 0; const v = (r >>> 24); d[i * 4] = v; d[i * 4 + 1] = v; d[i * 4 + 2] = v; d[i * 4 + 3] = 255; }
+  noiseTex = new THREE.DataTexture(d, N, N, THREE.RGBAFormat);
+  noiseTex.wrapS = noiseTex.wrapT = THREE.RepeatWrapping;
+  noiseTex.magFilter = THREE.LinearFilter; noiseTex.minFilter = THREE.LinearMipmapLinearFilter; noiseTex.generateMipmaps = true;
+  noiseTex.needsUpdate = true;
+  return noiseTex;
+}
 const octFor = (q) => (!q || q.tier === 'high' ? 4 : q.tier === 'mid' ? 3 : 2);
 
 /** Униформы неба (общие для неба, моря и плоскости зенитки). */
@@ -169,6 +184,7 @@ export function createSkyUniforms() {
     uCloud: { value: 0.3 }, uCloudDark: { value: 0.2 }, uCloudLit: { value: new THREE.Color() }, uCloudShade: { value: new THREE.Color() },
     uCloudOff: { value: new THREE.Vector2() }, uStars: { value: 0 }, uMoon: { value: 0 }, uTime: { value: 0 }, uPixAng: { value: 0.001 },
     uFlash: { value: 0 }, uFlashDir: { value: new THREE.Vector3(0, 0.3, -1).normalize() }, uHaze: { value: 0 },
+    uNoise: { value: noiseTexture() },
   };
 }
 export function applyLookUniforms(u, L) {
@@ -191,12 +207,12 @@ function skyMaterial(u, q) {
     vertexShader: /* glsl */`varying vec3 vDir;
       void main() { vec4 w = modelMatrix * vec4(position, 1.0); vDir = w.xyz - cameraPosition; gl_Position = projectionMatrix * viewMatrix * w; gl_Position.z = gl_Position.w; }`,
     fragmentShader: /* glsl */`${GLSL.skyUniforms}${GLSL.noise}${GLSL.sky}
-      uniform vec4 uFlare[4]; uniform vec3 uFlareCol;
+      uniform vec4 uFlare[4]; uniform vec3 uFlareCol; uniform float uNF;
       varying vec3 vDir;
       void main() {
         vec3 d = normalize(vDir);
         vec3 c = skyFull(vec3(d.x, max(d.y, 0.0), d.z));
-        for (int i = 0; i < 4; i++) { vec4 f = uFlare[i]; if (f.w <= 0.0) continue;
+        for (int i = 0; i < 4; i++) { if (float(i) >= uNF) break; vec4 f = uFlare[i]; if (f.w <= 0.0) continue;
           vec3 fd = normalize(f.xyz - cameraPosition); float a = max(dot(d, fd), 0.0);
           c += uFlareCol * f.w * (pow(a, 3000.0) * 0.5 + pow(a, 300.0) * 0.1 + pow(a, 40.0) * 0.025 * (0.3 + uHaze)); }
         gl_FragColor = vec4(c, 1.0);
@@ -222,7 +238,9 @@ function seaMaterial(u, q) {
         vec2 pn = vec2(vnoise(p.xz * 0.0031), vnoise(p.xz * 0.0057 + 5.3)) * 6.2832;
         for (int i = 0; i < NW; i++) {
           vec4 w = uWave[i]; float k = w.z, A = w.w;
-          float ph = k * dot(w.xy, p.xz) - sqrt(9.81 * k) * uTime + float(i) * 1.7 + (mod(float(i), 2.0) < 0.5 ? pn.x : pn.y);
+          float pv = mod(float(i), 2.0) < 0.5 ? pn.x : pn.y;
+          float ph = k * dot(w.xy, p.xz) - sqrt(9.81 * k) * uTime + float(i) * 1.7 + pv;
+          A *= 0.9 + 0.55 * sin(pv + float(i) * 1.3);
           float qa = uSteep / (k * float(NW) + 1e-4);
           disp.xz += qa * w.xy * cos(ph) * min(A * k * 4.0, 1.0); disp.y += A * sin(ph);
         }
@@ -234,7 +252,7 @@ function seaMaterial(u, q) {
     fragmentShader: /* glsl */`${GLSL.skyUniforms}${GLSL.noise}${GLSL.sky}
       uniform vec4 uWave[4]; uniform float uSteep; uniform float uAmpSum;
       uniform vec3 uSea; uniform vec3 uSss; uniform float uLight; uniform float uFogDen; uniform float uFoam; uniform float uSeaR;
-      uniform vec2 uWind; uniform vec4 uFlare[4]; uniform vec3 uFlareCol; uniform vec4 uPatch[6];
+      uniform vec2 uWind; uniform vec4 uFlare[4]; uniform vec3 uFlareCol; uniform vec4 uPatch[6]; uniform float uNF; uniform float uNP;
       varying vec3 vW; varying float vCrest;
       void main() {
         vec3 P = vW; vec3 toC = cameraPosition - P; float dist = length(toC); vec3 V = toC / dist;
@@ -244,7 +262,9 @@ function seaMaterial(u, q) {
         for (int i = 0; i < NW; i++) {
           vec4 w = uWave[i]; float k = w.z, A = w.w;
           float L = 6.2832 / k, f = 1.0 - smoothstep(L * 0.07, L * 0.28, foot);
-          float ph = k * dot(w.xy, P.xz) - sqrt(9.81 * k) * uTime + float(i) * 1.7 + (mod(float(i), 2.0) < 0.5 ? pn.x : pn.y);
+          float pv = mod(float(i), 2.0) < 0.5 ? pn.x : pn.y;
+          float ph = k * dot(w.xy, P.xz) - sqrt(9.81 * k) * uTime + float(i) * 1.7 + pv;
+          A *= 0.9 + 0.55 * sin(pv + float(i) * 1.3);
           float s = k * A * cos(ph);
           n.xz -= w.xy * s * f; vr += 0.5 * (k * A) * (k * A) * (1.0 - f);
         }
@@ -282,11 +302,11 @@ function seaMaterial(u, q) {
         // пена: гребни в шторм и пятна от разрывов (контраст гаснет с размером пикселя)
         float fn = vnoise(P.xz * 0.11 + uWind * uTime * 0.6), fc = mix(0.5, fn, 1.0 - smoothstep(4.0, 20.0, foot));
         float foam = uFoam * smoothstep(0.45, 0.95, vCrest + (fc - 0.5) * 0.6);
-        for (int i = 0; i < 6; i++) { vec4 pp = uPatch[i]; if (pp.w <= 0.0) continue;
+        for (int i = 0; i < 6; i++) { if (float(i) >= uNP) break; vec4 pp = uPatch[i]; if (pp.w <= 0.0) continue;
           float dd = length(P.xz - pp.xy) / pp.z; foam += pp.w * smoothstep(1.0, 0.35, dd + (fc - 0.5) * 0.5); }
         col = mix(col, vec3(0.86, 0.9, 0.92) * (uLight * 1.6 + 0.04), clamp(foam, 0.0, 0.9));
         // «люстры»: свет на воде и дорожка-отражение
-        for (int i = 0; i < 4; i++) { vec4 f = uFlare[i]; if (f.w <= 0.0) continue;
+        for (int i = 0; i < 4; i++) { if (float(i) >= uNF) break; vec4 f = uFlare[i]; if (f.w <= 0.0) continue;
           vec3 Lv = f.xyz - P; float dl = length(Lv); Lv /= dl;
           float att = f.w / (1.0 + (dl / 700.0) * (dl / 700.0));
           vec3 Hf = normalize(Lv + V); float nhf = max(dot(n, Hf), 0.001), tf = (1.0 - nhf * nhf) / (nhf * nhf);
@@ -320,7 +340,8 @@ export function createParticles(THREE_, o = {}) {
   const aK = new THREE.InstancedBufferAttribute(new Float32Array(N * 4), 4).setUsage(THREE.DynamicDrawUsage);
   geo.setAttribute('aP', aP); geo.setAttribute('aC', aC); geo.setAttribute('aK', aK);
   geo.instanceCount = 0;
-  const uniforms = { uFogDen: { value: 0 }, uFogCol: { value: new THREE.Color() }, uFade: { value: 1 } };
+  const ATTRS = [aP, aC, aK];
+  const uniforms = { uFogDen: { value: 0 }, uFogCol: { value: new THREE.Color() }, uFade: { value: 1 }, uNoise: { value: noiseTexture() } };
   const mat = new THREE.ShaderMaterial({
     uniforms, transparent: true, depthWrite: false, toneMapped: false, fog: false,
     blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
@@ -351,10 +372,10 @@ export function createParticles(THREE_, o = {}) {
         float a, shade = 1.0;
         if (vK.x < 0.5) {
           float n = vnoise(vUv * 3.0 + vK.z * 31.0) * 0.6 + vnoise(vUv * 6.5 + vK.z * 17.0) * 0.4;
-          a = smoothstep(1.0, 0.2, r + (n - 0.5) * 0.75); shade = 0.72 + 0.32 * vUv.y + (n - 0.5) * 0.25;
+          a = smoothstep(1.0, 0.2, r + (n - 0.5) * 0.75) * smoothstep(1.0, 0.75, r); shade = 0.72 + 0.32 * vUv.y + (n - 0.5) * 0.25;
         } else if (vK.x < 1.5) {
           float n = vnoise(vUv * 5.0 + vK.z * 13.0);
-          a = smoothstep(1.0, 0.15, r + (n - 0.5) * 0.9); shade = 0.86 + 0.22 * vUv.y;
+          a = smoothstep(1.0, 0.15, r + (n - 0.5) * 0.9) * smoothstep(1.0, 0.75, r); shade = 0.86 + 0.22 * vUv.y;
         } else {
           a = exp(-r * r * 5.0) + smoothstep(0.3, 0.0, r) * 0.6;
         }
@@ -447,7 +468,7 @@ export function createParticles(THREE_, o = {}) {
       }
       geo.instanceCount = m;
       mesh.visible = m > 0;
-      if (m) for (const at of [aP, aC, aK]) { at.clearUpdateRanges(); at.addUpdateRange(0, m * 4); at.needsUpdate = true; }
+      if (m) for (const at of ATTRS) { at.clearUpdateRanges(); at.addUpdateRange(0, m * 4); at.needsUpdate = true; }
       return m;
     },
     clear() { n = 0; imm.n = 0; geo.instanceCount = 0; mesh.visible = false; },
@@ -518,16 +539,17 @@ export function createOutside(ctx, opts) {
   const U = createSkyUniforms();
   const flareU = { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] };
   const flareCol = { value: new THREE.Color(1, 0.86, 0.62) };
-  const skyU = Object.assign({}, U, { uFlare: flareU, uFlareCol: flareCol });
+  const nFl = { value: 0 };
+  const skyU = Object.assign({}, U, { uFlare: flareU, uFlareCol: flareCol, uNF: nFl });
   const sky = new THREE.Mesh(new THREE.SphereGeometry(60000, 32, 16), skyMaterial(skyU, q));
-  sky.frustumCulled = false; sky.renderOrder = -10;
+  sky.frustumCulled = false; sky.renderOrder = 50;            // непрозрачное, но последним: море, суша и корабли уже закрыли свою часть кадра (ранний тест глубины)
   scene.add(sky);
   const seaU = Object.assign({}, U, {
     uWave: { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] },
     uSteep: { value: 0.5 }, uAmpSum: { value: 1 }, uSea: { value: new THREE.Color() }, uSss: { value: new THREE.Color() },
     uLight: { value: 1 }, uFogDen: { value: 3e-5 }, uFoam: { value: 0 }, uWind: { value: new THREE.Vector2(0, 1) }, uSeaR: { value: SEA_R },
     uFlare: flareU, uFlareCol: flareCol,
-    uPatch: { value: [0, 1, 2, 3, 4, 5].map(() => new THREE.Vector4()) },
+    uPatch: { value: [0, 1, 2, 3, 4, 5].map(() => new THREE.Vector4()) }, uNF: nFl, uNP: { value: 0 },
   });
   const seaGeo = (() => {   // кольца вокруг камеры: густо вблизи, редко вдали
     const A = 96, R = 56, pos = [], idx = [];
@@ -550,7 +572,7 @@ export function createOutside(ctx, opts) {
   scene.add(sea);
 
   // дождь: полоса перед камерой (только шторм)
-  const rainU = { uTime: { value: 0 }, uAmt: { value: 0 }, uSlant: { value: 0.15 }, uScale: { value: new THREE.Vector2(40, 6) }, uCol: { value: new THREE.Color() } };
+  const rainU = { uNoise: { value: noiseTexture() }, uTime: { value: 0 }, uAmt: { value: 0 }, uSlant: { value: 0.15 }, uScale: { value: new THREE.Vector2(40, 6) }, uCol: { value: new THREE.Color() } };
   const rain = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
     uniforms: rainU, transparent: true, depthTest: false, depthWrite: false, toneMapped: false, fog: false,
     vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
@@ -597,10 +619,12 @@ export function createOutside(ctx, opts) {
     const p = [], col = [];
     const cRock = new THREE.Color(0x6f6c60), cTop = new THREE.Color(0x5f6f52), cFoot = new THREE.Color(0x8c8672), cc = new THREE.Color();
     const pt = (a, d, h, c) => { p.push(Math.sin(a * DEG) * d, h, -Math.cos(a * DEG) * d); col.push(c.r, c.g, c.b); };
-    const face = (a, d, h, k) => cc.copy(cFoot).lerp(cRock, clamp(h / 8, 0, 1)).lerp(cTop, clamp((h - 8) / 30, 0, 1) * k);
+    const face = (a, d, h, k) => cc.copy(cFoot).lerp(cRock, clamp(h / 8, 0, 1)).lerp(cTop, clamp((h - 8) / 30, 0, 1) * k).multiplyScalar(0.8 + 0.35 * hash(a * 5.3 + 1));
+    const cSurf = new THREE.Color(0xe4e8e6);
     const quad = (a0, d0, h0, a1, d1, h1) => {     // склон от уреза воды к гребню (гребень дальше на 6 высот) и плато за ним
       const k = 0.7 + 0.3 * hash(a0 * 13.1), e0 = d0 + h0 * 6, e1 = d1 + h1 * 6;
       const m0 = face(a0, d0, h0 * 0.5, k).clone(), m1 = face(a1, d1, h1 * 0.5, k).clone();
+      pt(a0, d0 - 8, 0.2, cSurf); pt(a1, d1 - 8, 0.2, cSurf); pt(a1, d1, 1.6, cSurf); pt(a0, d0 - 8, 0.2, cSurf); pt(a1, d1, 1.6, cSurf); pt(a0, d0, 1.6, cSurf);   // прибой
       pt(a0, d0, 0, cFoot); pt(a1, d1, 0, cFoot); pt(a1, (d1 + e1) / 2, h1 * 0.62, m1); pt(a0, d0, 0, cFoot); pt(a1, (d1 + e1) / 2, h1 * 0.62, m1); pt(a0, (d0 + e0) / 2, h0 * 0.62, m0);
       pt(a0, (d0 + e0) / 2, h0 * 0.62, m0); pt(a1, (d1 + e1) / 2, h1 * 0.62, m1); pt(a1, e1, h1, face(a1, d1, h1, k)); pt(a0, (d0 + e0) / 2, h0 * 0.62, m0); pt(a1, e1, h1, face(a1, d1, h1, k)); pt(a0, e0, h0, face(a0, d0, h0, k));
       pt(a0, e0, h0, cTop); pt(a1, e1, h1, cTop); pt(a1, e1 + 1600, h1 * 1.15, cTop); pt(a0, e0, h0, cTop); pt(a1, e1 + 1600, h1 * 1.15, cTop); pt(a0, e0 + 1600, h0 * 1.15, cTop);
@@ -651,7 +675,8 @@ export function createOutside(ctx, opts) {
     sun.position.copy(L.sunDir).multiplyScalar(1000); sun.target.position.set(0, 0, 0);
     scene.fog.density = L.fogDensity;
     seaU.uFogDen.value = L.fogDensity; particles.uniforms.uFogDen.value = L.fogDensity;
-    landMat.color.set(night ? 0x23262a : L.fog ? 0xb8bdb8 : L.tod === 'overcast' || L.storm ? 0x9aa098 : 0xffffff);
+    landMat.color.set(night ? 0x23262a : L.fog ? 0x8c908c : L.tod === 'overcast' || L.storm ? 0x9aa098 : 0xffffff);
+    landMat.emissive.copy(L.horizon).multiplyScalar(night ? 0.04 : L.fog ? 0.5 : L.storm ? 0.22 : 0.1);   // воздушная дымка на берегу
     rain.visible = L.storm;
     rainU.uCol.value.copy(L.horizon).lerp(C_WHITE, 0.4);
     rainU.uAmt.value = night ? 0.5 : 1;
@@ -741,9 +766,15 @@ export function createOutside(ctx, opts) {
 
   // ---- состояние кадра ----
   const firedSeen = new Map();       // id цели → firedAt, вспышку которого уже показали
+  const smokeAcc = new Map();        // n завесы → накопитель выпуска клубов
   let lightningT = 99, lightningNext = 6, bx = 0, by = 0;
   const _v = new THREE.Vector3(), _w = new THREE.Vector3();
-  let curPlace = null;
+  let curPlace = null, sinkDt = 0;
+  function sinkFoam(en) {
+    const g = en.group, st = g.userData.state;
+    if (!g.visible || g.userData.land || !(st.sinking > 0)) return;
+    if (rnd() < sinkDt * 1.5) addPatch(g.position.x, g.position.z, g.userData.size.length * EX * 0.45, 5, 0.6);
+  }
 
   function placeShip(o, g, friendly) {
     const dxk = o.x - bx, dyk = o.y - by, b = Math.atan2(dxk, dyk) / DEG, isLand = g.userData.land;
@@ -836,6 +867,7 @@ export function createOutside(ctx, opts) {
         nf++;
       }
       for (let i = nf; i < 2; i++) flareL[i].intensity = 0;
+      nFl.value = nf;
       out.flares = nf;
 
       // дымзавесы: валы клубов поперёк линии «батарея — завеса», подпитываются, пока стоят
@@ -845,13 +877,15 @@ export function createOutside(ctx, opts) {
         if (k <= 0.02) continue;
         ns++;
         const x = (q2.x - bx) * 1000, z = -(q2.y - by) * 1000, d = Math.max(1, Math.hypot(x, z)), pxv = -z / d, pzv = x / d;
-        const rate = dt * 7 * k;
-        for (let j = 0; j < 3; j++) if (R() < rate) {
-          const o = (R() - 0.5) * 900, h = R();
-          smokeCol(_c2, look.night ? 0.35 : 0.86);
-          particles.emit(PK.SMOKE, x + pxv * o + (R() - 0.5) * 80, 30 + h * 90, z + pzv * o + (R() - 0.5) * 80, (R() - 0.5) * 2, 1.5 + R(), (R() - 0.5) * 2,
-            130 + 90 * R(), 0.8, 10 + 6 * R(), _c2.r, _c2.g, _c2.b, 0.55 * k, 0, 0, 0.12, 1);
+        let acc2 = (smokeAcc.get(q2.n) || 0) + dt * 6 * k;
+        while (acc2 >= 1) {
+          acc2 -= 1;
+          const o = (R() - 0.5) * 1000, h = R();
+          smokeCol(_c2, look.night ? 0.35 : 0.84 + 0.1 * R());
+          particles.emit(PK.SMOKE, x + pxv * o + (R() - 0.5) * 80, 25 + h * 120, z + pzv * o + (R() - 0.5) * 80, (R() - 0.5) * 2, 1.5 + R(), (R() - 0.5) * 2,
+            150 + 110 * R(), 0.7, 12 + 6 * R(), _c2.r, _c2.g, _c2.b, 0.6 * k, 0, 0, 0.12, 1);
         }
+        smokeAcc.set(q2.n, acc2);
       }
       out.smokes = ns;
 
@@ -863,16 +897,14 @@ export function createOutside(ctx, opts) {
       const PU = seaU.uPatch.value;
       for (let i = 0; i < 6; i++) {
         const p = patches[i];
-        if (p.t < p.life) { p.t += dt; const k = p.k * clamp(p.t * 3, 0, 1) * (1 - p.t / p.life); PU[i].set(p.x, p.z, p.r * (1 + p.t * 0.12), k); nfoam++; }
-        else PU[i].set(0, 0, 1, 0);
+        if (p.t < p.life) { p.t += dt; const k = p.k * clamp(p.t * 3, 0, 1) * (1 - p.t / p.life); PU[nfoam++].set(p.x, p.z, p.r * (1 + p.t * 0.12), k); }
       }
+      for (let i = nfoam; i < 6; i++) PU[i].set(0, 0, 1, 0);
+      seaU.uNP.value = nfoam;
       info.foam = nfoam;
       // тонущие: пена и пузыри у борта
-      fleet.entries.forEach((en) => {
-        const g = en.group, st = g.userData.state;
-        if (!g.visible || g.userData.land || !(st.sinking > 0)) return;
-        if (R() < dt * 1.5) addPatch(g.position.x, g.position.z, g.userData.size.length * EX * 0.45, 5, 0.6);
-      });
+      sinkDt = dt;
+      fleet.entries.forEach(sinkFoam);
       return true;
     },
     /**
@@ -919,15 +951,15 @@ export function createOutside(ctx, opts) {
       for (const sd of srcs) {
         const d = o.dist || 60, sx = rt.x * sd * (o.side || 14), sz = rt.z * sd * (o.side || 14);
         const x = fw.x * d + sx, z = fw.z * d + sz, y = EYE - (o.below || 8);
-        particles.emit(PK.GLOW, x, y, z, 0, 0, 0, d * 1.2, 0.8, 0.32, 2, 1.55, 0.85, 1, 1, 0, 0, 0, 1);
-        for (let i = 0; i < 3; i++) particles.emit(PK.SMOKE, x + fw.x * i * 20, y + 2, z + fw.z * i * 20, fw.x * (30 + 30 * R()), 2 + 4 * R(), fw.z * (30 + 30 * R()),
-          d * 0.5, 1.2, 0.45 + 0.2 * R(), 1.8, 1.0, 0.45, 0.9, 2, 0, 1.2, 0, 1);
-        smokeCol(_c2, night ? 0.3 : 0.5);
-        for (let i = 0; i < 7; i++) {
-          const k = i / 6;
-          particles.emit(PK.SMOKE, x + fw.x * (10 + 70 * k) + (R() - 0.5) * 16, y + R() * 6, z + fw.z * (10 + 70 * k) + (R() - 0.5) * 16,
-            fw.x * (8 + 10 * R()) + rt.x * (o.drift || 0), 1.5 + 2 * R(), fw.z * (8 + 10 * R()) + rt.z * (o.drift || 0),
-            d * (0.38 + 0.25 * R()), 2.2, 3.6 + R() * 1.2, _c2.r, _c2.g, _c2.b, 0.75, 0, 0, 0.25, 0.8);
+        particles.emit(PK.GLOW, x, y, z, 0, 0, 0, d * 0.9, 0.8, 0.28, 2, 1.45, 0.7, 1, 1, 0, 0, 0, 1);
+        for (let i = 0; i < 3; i++) particles.emit(PK.SMOKE, x + fw.x * i * 18, y + 1 + i * 2, z + fw.z * i * 18, fw.x * (30 + 30 * R()), 2 + 4 * R(), fw.z * (30 + 30 * R()),
+          d * 0.28, 1.4, 0.4 + 0.2 * R(), 1.8, 1.0, 0.45, 0.9, 2, 0, 1.2, 0, 1);
+        smokeCol(_c2, night ? 0.22 : 0.4);
+        for (let i = 0; i < 10; i++) {                       // клубы ложатся веером перед амбразурой и сносятся ветром
+          const k = i / 9, g = 0.8 + 0.4 * R(), ahead = 40 + 220 * k, side = (R() - 0.5) * (30 + 120 * k) + sd * 10;
+          particles.emit(PK.SMOKE, fw.x * ahead + rt.x * side, y - 4 + R() * 4, fw.z * ahead + rt.z * side,
+            fw.x * (6 + 10 * R()) + rt.x * (o.drift || 0), 1.5 + 2 * R(), fw.z * (6 + 10 * R()) + rt.z * (o.drift || 0),
+            9 + 7 * R() + 10 * k, 1.6, 3.4 + R() * 1.4, _c2.r * g, _c2.g * g, _c2.b * g, 0.75, 0, 0, 0.25, 0.8);
         }
       }
     },
@@ -963,7 +995,7 @@ export function createOutside(ctx, opts) {
     reset() {
       for (const sp of splashes) sp.live = false;
       for (const p of patches) p.life = 0;
-      particles.clear(); fleet.clear(); wing.clear(); land.reset(); landFor = null; firedSeen.clear(); out._windRef = null;
+      particles.clear(); fleet.clear(); wing.clear(); land.reset(); landFor = null; firedSeen.clear(); smokeAcc.clear(); out._windRef = null;
     },
     setQuality(nq) {
       q = nq;

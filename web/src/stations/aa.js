@@ -287,7 +287,7 @@ export function createAAStation(ctx) {
         const sz = sizeOf(p.range) * M;
         for (let i = 0; i < 7; i++) fxp.emit(PK.SMOKE, _o.x + (rnd() - 0.5) * sz * 0.5, _o.y + (rnd() - 0.5) * sz * 0.4, 0.07, (rnd() - 0.5) * sz * 0.6, (rnd() - 0.3) * sz * 0.5, 0,
           sz * 0.55, 1.8, 2.4 + rnd(), 1.9, 0.95, 0.35, 1, 2, 0, 0.6, 0, 1);
-        fxp.emit(PK.GLOW, _o.x, _o.y, 0.09, 0, 0, 0, sz * 2.4, 0.5, 0.45, 2, 1.5, 0.8, 1, 1, 0, 0, 0, 1);
+        fxp.emit(PK.GLOW, _o.x, _o.y, 0.09, 0, 0, 0, sz * 1.1, 0.6, 0.3, 1.5, 0.95, 0.45, 1, 1, 0, 0, 0, 1);
         for (let i = 0; i < 6; i++) { const an = rnd() * 6.283, v = sz * (0.8 + rnd()); fxp.emit(PK.GLOW, _o.x, _o.y, 0.08, Math.cos(an) * v, Math.sin(an) * v, 0, sz * 0.12, 0, 0.9 + rnd() * 0.5, 1.8, 0.9, 0.4, 1, 1, sz * 2, 0.4, 0, 1); }
         snd('impactFar');
       }

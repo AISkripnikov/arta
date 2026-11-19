@@ -79,7 +79,8 @@ function buildEnvironment(renderer, night) {
 }
 
 /**
- * Мягкая тень дешевле штатной: 9 выборок карты (3×3, веса 1-2-1) вместо 17 у PCFShadowMap из three. На телефоне тень
+ * Мягкая тень дешевле штатной: 9 выборок карты (3×3, веса 1-2-1) вместо 17 у PCFShadowMap из three; при shadow.radius < 1
+ * (уровень mid) — 4 выборки. Ветвление по однородной переменной: на всех пикселях одно и то же, шейдер один на оба уровня. На телефоне тень
  * считается в каждом освещённом пикселе, поэтому число выборок — главное в её цене. Не нашли место вставки — остаётся штатная.
  */
 function patchShadowChunk() {
@@ -90,6 +91,14 @@ function patchShadowChunk() {
   THREE.ShaderChunk[key] = src.slice(0, a) + [
     '#if defined( SHADOWMAP_TYPE_PCF ) // ARTA_PCF9',
     '			vec2 ts = vec2( shadowRadius ) / shadowMapSize;',
+    '			if ( shadowRadius < 1.0 ) {',          // уровень mid: 4 выборки (каждая — аппаратная 2×2 с фильтрацией) в углах полутекселя
+    '				ts = vec2( 0.5 ) / shadowMapSize;',
+    '				shadow = 0.25 * (',
+    '					texture2DCompare( shadowMap, shadowCoord.xy + vec2( - ts.x, - ts.y ), shadowCoord.z ) +',
+    '					texture2DCompare( shadowMap, shadowCoord.xy + vec2( ts.x, - ts.y ), shadowCoord.z ) +',
+    '					texture2DCompare( shadowMap, shadowCoord.xy + vec2( - ts.x, ts.y ), shadowCoord.z ) +',
+    '					texture2DCompare( shadowMap, shadowCoord.xy + vec2( ts.x, ts.y ), shadowCoord.z ) );',
+    '			} else',
     '			shadow = (',
     '				texture2DCompare( shadowMap, shadowCoord.xy + vec2( - ts.x, - ts.y ), shadowCoord.z ) +',
     '				texture2DCompare( shadowMap, shadowCoord.xy + vec2( ts.x, - ts.y ), shadowCoord.z ) +',
@@ -129,7 +138,7 @@ export async function createEngine(canvas, opts = {}) {
   //   1: только ¼, 0: нет; grain — зерно; particles — доля частиц engine.fx (0 — частиц нет).
   const QUALITY = {
     high: { tier: 'high', pixelRatio: opts.maxPixelRatio || 2, rtScale: 1, samples: 4, shadow: 1024, postfx: true, bloom: 2, grain: true, particles: 1 },
-    mid: { tier: 'mid', pixelRatio: Math.min(opts.maxPixelRatio || 2, 1.5), rtScale: 0.75, samples: 4, shadow: 512, postfx: true, bloom: 1, grain: false, particles: 0.5 },
+    mid: { tier: 'mid', pixelRatio: Math.min(opts.maxPixelRatio || 2, 1.5), rtScale: 0.75, samples: 4, shadow: 512, shadowSoft: 0.9, postfx: true, bloom: 1, grain: false, particles: 0.5 },
     low: { tier: 'low', pixelRatio: 1, rtScale: 0.5, samples: 0, shadow: 0, postfx: false, bloom: 0, grain: false, particles: 0 },
   };
   const TIERS = ['low', 'mid', 'high'];
@@ -466,6 +475,7 @@ export async function createEngine(canvas, opts = {}) {
     quality = q; maxPixelRatio = q.pixelRatio;
     const sh = keyLight.shadow;
     keyLight.castShadow = q.shadow > 0;
+    sh.radius = q.shadowSoft || 1.4;
     if (q.shadow > 0 && sh.mapSize.x !== q.shadow) {
       sh.mapSize.set(q.shadow, q.shadow);
       if (sh.map) { sh.map.dispose(); sh.map = null; }
@@ -494,7 +504,8 @@ export async function createEngine(canvas, opts = {}) {
   function autoSample(ms, cpuMs) {
     if (!engine.qualityAuto) return;
     const cpu = cpuMs == null ? stats.frameMs : cpuMs;
-    if (!(ms > 0) || ms > 1000 || document.hidden) return;      // пауза, свёрнутое приложение — не замер
+    if (!(ms > 0) || ms > 3000 || document.hidden) return;      // пауза, свёрнутое приложение — не замер
+    ms = Math.min(ms, 1000);                                     // кадр в 1–3 с — очень медленный телефон, а не пауза
     if (AQ.hold > 0) { AQ.hold -= ms / 1000; return; }           // первые секунды и смена уровня: компиляция шейдеров
     AQ.acc += ms; AQ.n++;
     if (AQ.acc < 1000) return;

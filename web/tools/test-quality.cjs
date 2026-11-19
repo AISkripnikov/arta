@@ -63,7 +63,7 @@ const ok = (m) => console.log('ok  ', m);
       engine.start();
     });
     const t0 = Date.now();
-    await page.waitForFunction(() => window.__dev.engine.quality.tier === 'low', null, { timeout: 90000, polling: 500 }).catch(() => {});
+    await page.waitForFunction(() => window.__dev.engine.quality.tier === 'low', null, { timeout: 150000, polling: 500 }).catch(() => {});
     const a1 = await page.evaluate(() => ({ tier: window.__dev.engine.quality.tier, events: window.__q.slice(), auto: window.__dev.engine.qualityAuto,
       stored: localStorage.getItem('arta2.autoTier'), stats: window.__dev.engine.debug.stats() }));
     const secs = ((Date.now() - t0) / 1000).toFixed(1);

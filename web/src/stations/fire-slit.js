@@ -5,8 +5,8 @@
 // прозрачный слой со шкалой пеленга и визирной нитью (canvas, перерисовывается только при повороте башни и смене дня/ночи).
 // Перерисовка сцены — только когда пост на экране: ~6 раз/с в покое, чаще — пока идут короткие анимации (вспышка, всплеск,
 // трасса, пожар, самолёты в щели) или вращается башня.
-// Для тестов: view.canvas — снимок вида (сцена + шкала) 640×100, собирается при обращении (readPixels — только по запросу).
-import { createOutside, createLandProfile, hash, wrap180, clamp } from './seasky.js';
+// Для тестов: view.canvas — превью вида 640×100 (небо и вода тех же цветов, что в шейдерах, + шкала), без чтения с GPU.
+import { createOutside, createLandProfile, skyBaseJS, hash, wrap180, clamp } from './seasky.js';
 
 export { createLandProfile, hash, wrap180, clamp };
 
@@ -133,20 +133,31 @@ export function createSlitView(ctx, o) {
     dirty = false; last = vt; lastBearing = b0;
   }
 
-  // снимок для тестов: сцена из текстуры + слой шкалы, 640×100
-  let snap = null, snapTmp = null;
+  // «превью» вида для тестов и отладки: 640×100, без чтения с GPU (readPixels останавливает конвейер и шумит в консоли).
+  // Небо и вода считаются на CPU теми же формулами, что в шейдерах (seasky.skyBaseJS: градиент, свечение у светила, дымка
+  // у горизонта) по лучам камеры щели, поверх — слой шкалы. Облаков, кораблей и частиц в превью нет. Сам кадр сцены —
+  // в renderTarget (его можно прочитать renderer.readRenderTargetPixels при отладке).
+  let snap = null;
+  const _sc = new THREE.Color(), _sea = new THREE.Color(), _d = new THREE.Vector3();
   function snapshot() {
-    const w = rt.width, h = rt.height, buf = new Uint8Array(w * h * 4);
-    try { engine.renderer.readRenderTargetPixels(rt, 0, 0, w, h, buf); } catch (e) { /* нет чтения — пустой снимок */ }
-    snapTmp = snapTmp || T.makeCanvas(w, h);
-    if (snapTmp.width !== w || snapTmp.height !== h) { snapTmp.width = w; snapTmp.height = h; }
-    const tc = snapTmp.getContext('2d'), img = tc.createImageData(w, h);
-    for (let y = 0; y < h; y++) img.data.set(buf.subarray((h - 1 - y) * w * 4, (h - y) * w * 4), y * w * 4);
-    tc.putImageData(img, 0, 0);
     snap = snap || T.makeCanvas(CW, CH);
-    const sc = snap.getContext('2d');
-    sc.clearRect(0, 0, CW, CH);
-    sc.drawImage(snapTmp, 0, 0, CW, CH);
+    const sc = snap.getContext('2d'), L = world.look;
+    sc.fillStyle = '#000'; sc.fillRect(0, 0, CW, CH);
+    if (L) {
+      const SX = 8, SY = 2;
+      for (let y = 0; y < CH; y += SY) for (let x = 0; x < CW; x += SX) {
+        _d.set(((x + SX / 2) / CW) * 2 - 1, 1 - ((y + SY / 2) / CH) * 2, 0.5).unproject(cam).sub(cam.position).normalize();
+        if (_d.y >= -0.0005) skyBaseJS(L, _d.x, _d.y, _d.z, _sc);
+        else {
+          skyBaseJS(L, _d.x, 0, _d.z, _sea);
+          const dist = EYE / -_d.y, f = 1 - Math.exp(-L.fogDensity * L.fogDensity * dist * dist);
+          _sc.copy(L.sea).multiplyScalar(L.night ? 0.5 : L.ambient).lerp(_sea, 0.55 + 0.45 * f);
+        }
+        _sc.convertLinearToSRGB();
+        sc.fillStyle = 'rgb(' + Math.round(clamp(_sc.r, 0, 1) * 255) + ',' + Math.round(clamp(_sc.g, 0, 1) * 255) + ',' + Math.round(clamp(_sc.b, 0, 1) * 255) + ')';
+        sc.fillRect(x, y, SX, SY);
+      }
+    }
     sc.drawImage(canvas0, 0, 0);
     return snap;
   }

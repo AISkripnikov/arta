@@ -584,7 +584,7 @@ export function makePlane(opts = {}) {
       if (st.down > 0 && !killed) {
         killed = true;
         const p = toFx(body, group, 0, 0, 0);
-        P.emit(2, p.x, p.y, p.z, 0, 0, 0, 40 * sc, 0.8, 0.4, 2, 1.5, 0.9, 1, 1, 0, 0, 0, 1);
+        P.emit(2, p.x, p.y, p.z, 0, 0, 0, 13 * sc, 0.8, 0.35, 1.6, 1.0, 0.5, 1, 1, 0, 0, 0, 1);
         for (let i = 0; i < 6; i++) P.emit(0, p.x + (rnd() - 0.5) * 8 * sc, p.y + (rnd() - 0.5) * 6 * sc, p.z + (rnd() - 0.5) * 8 * sc, (rnd() - 0.5) * 8 * sc, (rnd() - 0.3) * 8 * sc, (rnd() - 0.5) * 8 * sc,
           12 * sc, 1.8, 2.2 + rnd(), 1.9, 0.9, 0.3, 1, 2, 0, 1, 0, 1);
       }

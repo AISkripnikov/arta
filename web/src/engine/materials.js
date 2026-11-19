@@ -76,7 +76,7 @@ function genPaint(S, seed) {
     const rust = Math.min(1, rs * 0.8 + rd * 0.55 + Math.max(0, w - 0.6) * 0.5);
     const k = i * 4;
     pack[k] = b255(alb); pack[k + 1] = b255(gloss); pack[k + 2] = b255(rust); pack[k + 3] = b255(w);
-    h[i] = g * 0.18 + b * 0.5 + m * 0.25 - sstep(0.66, 0.7, w) * 0.45 - sstep(0.74, 0.78, w) * 0.25;
+    h[i] = g * 0.07 + b * 0.5 + m * 0.25 - sstep(0.66, 0.7, w) * 0.45 - sstep(0.74, 0.78, w) * 0.25;
   }
   return { pack, normal: normalDataFromHeight(h, S, 2.0 * ks) };
 }
@@ -331,14 +331,19 @@ export function createMaterials() {
   }
 
   // ---- мелкие нормали: на уровне low выключены (экономия заливки), см. setDetail ----
-  let detail = true;
-  function setDetail(on) {
-    if (on === detail) return;
-    detail = on;
+  // 2 — все карты нормалей (high), 1 — только у металлов, бакелита и накатки (mid: крашеные поверхности занимают почти весь
+  // экран, их рельеф — самая дорогая часть заливки), 0 — ни у кого (low)
+  let detail = 2;
+  const DETAIL = { high: 2, mid: 1, low: 0 };
+  function setDetail(level) {
+    level = typeof level === 'boolean' ? (level ? 2 : 0) : Math.max(0, Math.min(2, level | 0));
+    if (level === detail) return;
+    detail = level;
     cache.forEach(m => {
       const n = m.userData && m.userData.detailNormal;
       if (!n) return;
-      m.normalMap = on ? n : null; m.needsUpdate = true;
+      const want = level >= (m.userData.wearUniforms ? 2 : 1) ? n : null;
+      if (m.normalMap !== want) { m.normalMap = want; m.needsUpdate = true; }
     });
   }
 
@@ -355,7 +360,7 @@ export function createMaterials() {
   }
   /**
    * (расш.) Наложить износ краски на свой MeshPhongMaterial или MeshStandardMaterial: сколы до металла, ржавчина, потёки,
-   * грязь у пола. opts: { wear=0.5, rust=1, grime=0.35, normalScale=0.55 }. Нужны UV «в метрах» (geom.boxUV(g, mat.WEAR_REPEAT)).
+   * грязь у пола. opts: { wear=0.5, rust=1, grime=0.35, normalScale=0.45 }. Нужны UV «в метрах» (geom.boxUV(g, mat.WEAR_REPEAT)).
    */
   function applyWear(m, opts = {}) {
     const wear = opts.wear == null ? 0.5 : opts.wear;
@@ -363,8 +368,8 @@ export function createMaterials() {
     const t = SETS.paint.tex;
     if (m.isMeshStandardMaterial) { m.roughnessMap = t.pack; m.onBeforeCompile = wearStandard; m.customProgramCacheKey = () => 'wearS'; }
     else { m.specularMap = t.pack; m.onBeforeCompile = wearPhong; m.customProgramCacheKey = () => 'wearP'; }
-    m.normalMap = detail ? t.normal : null; m.userData.detailNormal = t.normal;
-    const ns = opts.normalScale == null ? 0.55 : opts.normalScale;
+    m.normalMap = detail >= 2 ? t.normal : null; m.userData.detailNormal = t.normal;
+    const ns = opts.normalScale == null ? 0.45 : opts.normalScale;
     m.normalScale = new THREE.Vector2(ns, ns);
     m.needsUpdate = true;
     return m;
@@ -388,7 +393,7 @@ export function createMaterials() {
         normalMap: o.normal === false ? null : (o.knurl ? SETS.knurl.tex.normal : t.normal),
         envMapIntensity: o.env == null ? 1 : o.env,
       });
-      if (m.normalMap) { const s = o.normalScale == null ? 0.35 : o.normalScale; m.normalScale = new THREE.Vector2(s, s); m.userData.detailNormal = m.normalMap; if (!detail) m.normalMap = null; }
+      if (m.normalMap) { const s = o.normalScale == null ? 0.35 : o.normalScale; m.normalScale = new THREE.Vector2(s, s); m.userData.detailNormal = m.normalMap; if (detail < 1) m.normalMap = null; }
       if (m.roughnessMap) { m.onBeforeCompile = metalPacked; m.customProgramCacheKey = () => 'metalPacked'; }
       if (o.extra) Object.assign(m, o.extra);
       return m;
@@ -486,14 +491,16 @@ export function createMaterials() {
      */
     bulbLens(hex, on) {
       const c = toColor(hex);
+      // обе линзы — с одинаковым набором карт: одна программа шейдера на оба состояния (переключение лампы не компилирует шейдер)
+      const offMap = tex('bulbOff', () => canvasTexture(bulbCanvas(false), { aniso: 2 }));
+      const onMap = tex('bulbOn', () => canvasTexture(bulbCanvas(true), { aniso: 2 }));
       return memo('bulbLens:' + c.getHexString() + ':' + (on ? 1 : 0), () => on
         ? new THREE.MeshStandardMaterial({
-          color: c.clone().multiplyScalar(0.6), emissive: c, emissiveIntensity: 2.3, emissiveMap: tex('bulbOn', () => canvasTexture(bulbCanvas(true), { aniso: 2 })),
-          roughness: 0.22, metalness: 0,
+          color: c.clone().multiplyScalar(0.6), map: onMap, emissive: c, emissiveIntensity: 2.3, emissiveMap: onMap, roughness: 0.22, metalness: 0,
         })
         : new THREE.MeshStandardMaterial({
-          color: c.clone().multiplyScalar(0.3), map: tex('bulbOff', () => canvasTexture(bulbCanvas(false), { aniso: 2 })),
-          emissive: c, emissiveIntensity: 0.04, roughness: 0.08, metalness: 0, envMapIntensity: 1.6,
+          color: c.clone().multiplyScalar(0.3), map: offMap, emissive: c, emissiveIntensity: 0.04, emissiveMap: onMap,
+          roughness: 0.08, metalness: 0, envMapIntensity: 1.6,
         }));
     },
     /** Общий кэш для материалов, создаваемых модулями движка. */
@@ -504,7 +511,7 @@ export function createMaterials() {
     textures: { paint: SETS.paint.tex, floor: SETS.floor.tex, metal: SETS.metal.tex, knurl: SETS.knurl.tex },
     /** (расш.) Сгенерировать наборы под уровень ('high'|'mid'|'low'); обычно зовёт сам движок через bind(). */
     realize,
-    /** (расш.) Мелкие карты нормалей вкл./выкл. (bind() выключает их на уровне low; материалы перекомпилируются). */
+    /** (расш.) Мелкие карты нормалей: 2 — все (high), 1 — без крашеных (mid), 0 — нет (low); bind() ставит по уровню. */
     setDetail,
     /**
      * (расш.) Подключить к движку: наборы наполняются в первом кадре под engine.quality.tier, по событию 'quality' —
@@ -516,7 +523,7 @@ export function createMaterials() {
       let started = false, want = null;
       const queue = [];
       engine.on('quality', (q) => {
-        if (q && q.tier) setDetail(q.tier !== 'low');
+        if (q && q.tier) setDetail(DETAIL[q.tier] == null ? 2 : DETAIL[q.tier]);
         if (!started || !q || !q.tier) return;
         want = q.tier;
         for (const n of Object.keys(SETS)) if (SETS[n].size !== sizeFor(SETS[n], want) && !queue.includes(n)) queue.push(n);
@@ -526,7 +533,7 @@ export function createMaterials() {
           started = true;
           const t0 = performance.now();
           const tier = (engine.quality && engine.quality.tier) || 'high';
-          setDetail(tier !== 'low');
+          setDetail(DETAIL[tier] == null ? 2 : DETAIL[tier]);
           realize(tier);
           stats.startMs = Math.round(performance.now() - t0);
           return;

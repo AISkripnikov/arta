@@ -29,7 +29,7 @@ export function createVfx({ engine, game }) {
   offs.push(game.on('fired', () => {
     if (!playing()) return;
     const atFire = engine.current === 'fire';
-    fx.shake(atFire ? 0.5 : 0.4, 0.6);
+    fx.shake(atFire ? 0.4 : 0.3, 0.6);
     fx.flash({ from: 'slit', intensity: atFire ? 1 : 0.55, dur: 0.24, color: '#ffd29a' });
     fx.flicker(0.4, 0.5);
     fx.dust({ amount: 0.6 });
