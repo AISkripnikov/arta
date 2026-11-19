@@ -28,8 +28,6 @@ export function createInput(engine, canvas) {
   }
   function setRay(x, y, w, h) {
     ndc.set(x / w * 2 - 1, -(y / h) * 2 + 1);
-    // кадр мог быть пропущен (рисование по требованию) — мировые матрицы освежаем перед лучом
-    if (api._stale) { api._stale = false; engine.scene.updateMatrixWorld(); }
     engine.camera.updateMatrixWorld();
     raycaster.setFromCamera(ndc, engine.camera);
   }

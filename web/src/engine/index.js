@@ -447,7 +447,7 @@ export async function createEngine(canvas, opts = {}) {
     engine.fx._update(dt, time);
     if (render === 'auto') {
       render = wantRender();
-      if (!render) { rod.drew = false; rod.skipped++; engine.input._stale = true; }
+      if (!render) { rod.drew = false; rod.skipped++; }
     }
     if (render) {
       rod.drew = true; rod.n++; rod.rendered++; rod.last = time; rod.rt = false; if (rod.need > 0) rod.need--;
@@ -470,6 +470,9 @@ export async function createEngine(canvas, opts = {}) {
         try { renderer.setRenderTarget(null); renderer.render(scene, camera); grabStats(); } catch (e2) { console.error('[engine] кадр не нарисован:', e2); }
       }
       rod.inMain = false;
+      // отрисовка сама меняет кое-что в сцене (three: прозрачный двусторонний материал рисуется в два прохода и при этом
+      // поднимает material.version) — подпись снимаем заново после кадра, иначе следующий кадр всегда «изменился»
+      if (onDemand) rod.sig = sceneSig();
     } else if (render === false) scene.updateMatrixWorld();
     const ms = performance.now() - t0;
     stats.frameMs += (ms - stats.frameMs) * (stats.frames < 5 ? 1 : 0.08);
@@ -494,6 +497,9 @@ export async function createEngine(canvas, opts = {}) {
     if (onDemand && !drew && !wd) wd = setTimeout(watchdog, WD_MS);
   }
   function tick(now) {
+    // шаг по таймеру ставит lastT = performance.now(), а метка rAF — начало кадра, она бывает раньше: время назад не идёт
+    // (иначе следующий шаг посчитал бы тот же промежуток дважды)
+    if (lastT && now < lastT) now = lastT;
     // ограничение кадров: лишние кадры пропускаем целиком, dt следующего — полное время с прошлого отрисованного
     const cap = effCap();
     if (cap && lastT && now - lastT < 1000 / cap - 3) return false;
@@ -515,7 +521,7 @@ export async function createEngine(canvas, opts = {}) {
   //     engine.invalidate(seconds) от постов, смена размера и качества; плюс страховочный кадр раз в секунду.
   //     Логика (onFrame, update постов, эффекты) идёт каждый кадр как раньше. ---
   let onDemand = opts.onDemand !== false;
-  const rod = { need: 3, until: 0, rt: false, sig: NaN, last: -1, drew: true, n: 0, skipped: 0, rendered: 0, frameNo: 0, inMain: false };
+  const rod = { need: 3, until: 0, rt: false, sig: NaN, last: -1, drew: true, n: 0, skipped: 0, rendered: 0, frameNo: 0, inMain: false, why: {} };
   {
     const render0 = renderer.render;
     renderer.render = function (sc, cam) {
@@ -564,6 +570,7 @@ export async function createEngine(canvas, opts = {}) {
     s += post.night * 5.1 + post.bloom * 2.9 + post.vignette * 1.3 + post.grade * 1.1 + post.contrast * 0.7 + post.grain * 0.3
       + post.flash.x * 0.11 + post.flash.y * 0.13 + post.flash.z * 0.17 + post.flash.w * 7.3 + (post.active ? 1 : 0);
     const st = sigStack; st.length = 0; st.push(scene);
+    let sNaN = s;                                     // NaN в чьём-то параметре не должен делать «изменилось» каждый кадр
     while (st.length) {
       const o = st.pop();
       k++;
@@ -580,7 +587,7 @@ export async function createEngine(canvas, opts = {}) {
         const g = o.geometry;
         if (g) {
           const a = g.attributes;
-          for (const n in a) s += a[n].version * 0.71 * w;
+          for (const n in a) { const at = a[n]; s += (at.isInterleavedBufferAttribute ? at.data.version : at.version) * 0.71 * w; }
           if (g.index) s += g.index.version * 0.53;
           s += g.id * 0.0007 + g.drawRange.start * 0.3 + Math.min(g.drawRange.count, 1e7) * 0.0003;
           if (g.morphAttributes && o.morphTargetInfluences) for (let i = 0; i < o.morphTargetInfluences.length; i++) s += o.morphTargetInfluences[i] * (i + 2);
@@ -592,6 +599,8 @@ export async function createEngine(canvas, opts = {}) {
       } else if (o.isLight) {
         s += (o.intensity * 5.3 + o.color.r + o.color.g * 2 + o.color.b * 3 + (o.castShadow ? 1.9 : 0)) * w;
       }
+      if (s !== s) { s = sNaN; if (!rod.nan) rod.nan = (o.name || o.type) + '#' + o.id + (o.material ? ' ' + (o.material.name || o.material.type) : ''); }
+      sNaN = s;
       const ch = o.children;
       s += ch.length * 0.017 * w;
       for (let i = 0; i < ch.length; i++) st.push(ch[i]);
@@ -603,9 +612,11 @@ export async function createEngine(canvas, opts = {}) {
     const sig = sceneSig();
     const changed = !(sig === rod.sig);
     rod.sig = sig;
-    return changed || rod.need > 0 || rod.rt || time < rod.until || !!rig.tr || rig.shakeT < rig.shakeDur
-      || light.flashT < light.flashDur || light.night !== light.nightTarget || (engine.fx && engine.fx.particles > 0)
-      || !!(engine.input && engine.input.busy) || time - rod.last >= 1 || time < rod.last || (shDirty && keyLight.castShadow);
+    const why = changed ? 'scene' : rod.need > 0 ? 'need' : rod.rt ? 'view' : time < rod.until ? 'invalidate' : rig.tr ? 'camera' : rig.shakeT < rig.shakeDur ? 'shake'
+      : light.flashT < light.flashDur ? 'flash' : light.night !== light.nightTarget ? 'night' : engine.fx && engine.fx.particles > 0 ? 'particles'
+      : engine.input && engine.input.busy ? 'input' : time - rod.last >= 1 || time < rod.last ? 'keepalive' : shDirty && keyLight.castShadow ? 'shadow' : '';
+    if (why) rod.why[why] = (rod.why[why] || 0) + 1;
+    return !!why;
   }
   /** Частота кадров по уровню: «экономное» — не чаще 30 к/с, если игрок сам не выбрал частоту (engine.setFrameCap(n, true)). */
   function effCap() { return frameCap || (quality && quality.fpsCap && !frameCapChosen ? quality.fpsCap : 0); }
@@ -646,7 +657,7 @@ export async function createEngine(canvas, opts = {}) {
     emit('quality', q);
     // тени включились/выключились — у освещаемых материалов другие шейдеры: собираем их заранее, параллельно (KHR_parallel_shader_compile),
     // чтобы первый кадр нового уровня не стоял на компиляции
-    if (started && renderer.compileAsync) { try { renderer.compileAsync(scene, camera).catch(() => {}); } catch (e) { /* соберутся при отрисовке */ } }
+    if (started && renderer.compileAsync && renderer.extensions.has('KHR_parallel_shader_compile')) { try { renderer.compileAsync(scene, camera).catch(() => {}); } catch (e) { /* соберутся при отрисовке */ } }
     return q;
   }
   // «АВТО»: средний интервал между кадрами по окнам в 1 с. Четыре медленных окна подряд (> ~24 мс) — уровень ниже;
@@ -879,7 +890,7 @@ export async function createEngine(canvas, opts = {}) {
           particles: engine.fx ? engine.fx.particles : 0,
           geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures,
           programs: renderer.info.programs ? renderer.info.programs.length : 0,
-          rendered: rod.rendered, skipped: rod.skipped, renderFps: +(stats.renderFps || 0).toFixed(1), onDemand, cap: effCap(),
+          rendered: rod.rendered, skipped: rod.skipped, renderFps: +(stats.renderFps || 0).toFixed(1), onDemand, cap: effCap(), why: Object.assign({}, rod.why),
         };
       },
       /** Для проверки «АВТО» (tools/test-quality.cjs): подать count интервалов между кадрами по ms мс с временем логики cpuMs,
@@ -887,6 +898,10 @@ export async function createEngine(canvas, opts = {}) {
       autoFeed(ms, count = 1, cpuMs = 4) { for (let i = 0; i < count; i++) autoSample(ms, cpuMs); return engine.debug.stats(); },
       /** Один кадр вручную (для тестов и снимков при остановленном цикле); render=false — только логика, без отрисовки. */
       step(dt = 1 / 60, render = true) { step(dt, render); },
+      /** Кадр как в цикле: с рисованием по требованию (если оно включено). → true, если кадр нарисован (для tools/perf). */
+      /** «Подпись» сцены для рисования по требованию (число; одинаковое — кадр не нужен). */
+      sig() { return { sig: sceneSig(), nan: rod.nan || null }; },
+      tick(dt = 1 / 60) { step(dt, onDemand ? 'auto' : true); return onDemand ? rod.drew : true; },
       /** Рамка зоны управления (|x| ≤ 0.85, 0.74 ≤ y ≤ 1.46, z = 0) и габарит поста у текущего поста. */
       guides(show = true) {
         if (engine.debug._guides) { engine.debug._guides.removeFromParent(); engine.debug._guides.geometry.dispose(); engine.debug._guides = null; }
