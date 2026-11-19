@@ -4,7 +4,10 @@ const path = require('path');
 (async () => {
   const out = process.argv[2], w = +process.argv[3] || 844, h = +process.argv[4] || 390;
   const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
-  const p = await (await b.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1, hasTouch: true })).newPage();
+  const cx = await b.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1, hasTouch: true });
+  // обзор снимает меню и посты: вступительный ролик и окно «ЧТО НОВОГО» считаем уже просмотренными
+  await cx.addInitScript(() => { try { localStorage.setItem('arta2.intro', '1'); localStorage.setItem('arta2.news', '999'); } catch (e) { /* хранилище недоступно */ } });
+  const p = await cx.newPage();
   p.setDefaultTimeout(180000);
   let errs = 0;
   p.on('pageerror', e => { errs++; console.log('PAGEERROR', e.message); });
