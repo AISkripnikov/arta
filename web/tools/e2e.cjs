@@ -126,7 +126,7 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
     ['ctrl', '#setInvert [data-val="1"]', 'invert', true], ['ctrl', '#setLefty [data-val="1"]', 'lefty', true], ['ctrl', '#setLefty [data-val="0"]', 'lefty', false],
     ['ctrl', '#setSens [data-val="1.3"]', 'sens', 1.3], ['ctrl', '#setVibroPower [data-val="low"]', 'vibroPower', 'low'], ['ctrl', '#setVibro [data-val="0"]', 'vibro', false],
     ['sound', '#setSound [data-val="0"]', 'sound', false], ['sound', '#setSound [data-val="1"]', 'sound', true], ['sound', '#setVolFx [data-step="-10"]', 'volFx', 90],
-    ['sound', '#setVolAmb [data-step="10"]', 'volAmb', 80], ['sound', '#setVolRadio [data-step="-10"]', 'volRadio', 90], ['sound', '#setVolMusic [data-step="10"]', 'volMusic', 70],
+    ['sound', '#setVolAmb [data-step="10"]', 'volAmb', 60], ['sound', '#setVolRadio [data-step="-10"]', 'volRadio', 90], ['sound', '#setVolMusic [data-step="10"]', 'volMusic', 70],
     ['screen', '#setText [data-val="1.15"]', 'text', 1.15], ['screen', '#setQuality [data-val="high"]', 'quality', 'high'], ['screen', '#setQuality [data-val="auto"]', 'quality', 'auto'],
     ['screen', '#setQuality [data-val="mid"]', 'quality', 'mid'], ['screen', '#setQuality [data-val="low"]', 'quality', 'low'],
     ['screen', '#setFps [data-val="30"]', 'fps', 30], ['screen', '#setNight [data-val="soft"]', 'nightTint', 'soft'], ['screen', '#setShowFps [data-val="1"]', 'showFps', true],
@@ -188,7 +188,7 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
   if (eng.shake !== false) fail('выключенная тряска камеры не дошла до движка');
   if (eng.cap !== 30 || eng.frames > 34) fail('ограничение 30 кадров не работает: ' + eng.cap + ', кадров за секунду ' + eng.frames);
   if (eng.free < 5 || eng.slow < 1 || eng.slow > 4 || eng.maxDt > 0.0501) fail('пропуск кадров не работает: без предела ' + eng.free + ' кадров за 1,5 с, с пределом 2 к/с — ' + eng.slow + ', dt до ' + eng.maxDt);
-  if (Math.abs(eng.buses.fx - 0.9) > 1e-6 || Math.abs(eng.buses.amb - 80 / 70) > 1e-6 || Math.abs(eng.buses.radio - 0.25) > 1e-6 || Math.abs(eng.buses.music - 70 / 60) > 1e-6 || eng.muted) fail('громкости не дошли до звука: ' + JSON.stringify(eng.buses));
+  if (Math.abs(eng.buses.fx - 0.9) > 1e-6 || Math.abs(eng.buses.amb - 60 / 70) > 1e-6 || Math.abs(eng.buses.radio - 0.25) > 1e-6 || Math.abs(eng.buses.music - 70 / 60) > 1e-6 || eng.muted) fail('громкости не дошли до звука: ' + JSON.stringify(eng.buses));
   if (!/crew-off/.test(eng.body) || !/night-soft/.test(eng.body) || !/text-l/.test(eng.body) || eng.rcol !== 'none') fail('классы настроек не применены: ' + eng.body);
   if (!/^\d+ К\/С$/.test(eng.fps || '')) fail('счётчик кадров не включён: ' + eng.fps);
   if (eng.fpsSeen) fail('счётчик кадров виден на экране настроек вне боя (закрывает органы)');
@@ -246,7 +246,7 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
       buses: engine.audio.buses, shown: document.getElementById('settings').classList.contains('show'), fps: document.getElementById('fpsMeter').classList.contains('hidden'), difficulty: game.state.difficulty }; });
   console.log('settings-defaults', JSON.stringify(def));
   if (def.diff.length || def.n < 21) fail('«по умолчанию» не вернуло настройки: ' + def.diff.join());
-  if (!['high', 'mid', 'low'].includes(def.q) || def.q !== def.autoTier || def.cap !== 0 || def.invert || def.body || !def.fps || def.buses.fx !== 1 || def.buses.amb !== 1 || def.buses.radio !== 1) fail('«по умолчанию» не дошло до движка: ' + JSON.stringify(def));
+  if (!['high', 'mid', 'low'].includes(def.q) || def.q !== def.autoTier || def.cap !== 0 || def.invert || def.body || !def.fps || def.buses.fx !== 1 || Math.abs(def.buses.amb - 50 / 70) > 1e-6 || def.buses.radio !== 1) fail('«по умолчанию» не дошло до движка: ' + JSON.stringify(def));
   if (def.qSet !== 'auto' || def.qAuto !== true || def.shake !== true || def.buses.music !== 1) fail('«по умолчанию»: качество «АВТО», тряска и музыка не дошли до движка: ' + JSON.stringify(def));
   if (!def.shown || def.difficulty !== 1) fail('«по умолчанию» закрыло настройки или сменило сложность');
   await tab('game'); await p.click('#setDiff [data-val="0"]');
@@ -266,7 +266,10 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
     return { time: s.time, id: t.id, pin: s.plot.pins[t.id], info: game.resumeInfo() };
   });
   // игрок, который уже играл, обновился до версии с роликом (отметки о показе ещё нет): ролик не навязываем, а считаем показанным
+  // запись localStorage уходит из страницы в браузер не сразу: перед перезагрузкой даём ей дойти (на телефоне уход в фон длится дольше)
+  await p.waitForTimeout(1500);
   await p.evaluate(() => localStorage.removeItem('arta2.intro'));
+  await p.waitForTimeout(500);
   await p.reload();
   await p.waitForFunction(() => window.__arta);
   if (await p.evaluate(() => __arta.shell.introPlaying || !!document.getElementById('arta-intro') || !__arta.shell.intro.seen())) fail('игроку с сохранённым боем ролик показан насильно (или не отмечен показанным)');

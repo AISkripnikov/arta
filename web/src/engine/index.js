@@ -485,7 +485,8 @@ export async function createEngine(canvas, opts = {}) {
   const WD_MS = 34;
   function watchdog() {
     wd = 0;
-    if (!running) return;
+    // свёрнутое приложение или уход со страницы: rAF стоит — стоит и логика, как раньше (таймер не тикает в фоне)
+    if (!running || document.hidden) return;
     const drew = tick(performance.now());
     if (running && onDemand && !drew && !wd) wd = setTimeout(watchdog, WD_MS);
   }
