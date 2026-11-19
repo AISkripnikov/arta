@@ -1,5 +1,5 @@
 {
- "version": 29918741,
+ "version": 29918754,
  "minApp": 3,
  "orientation": "landscape",
  "confirm": true,
@@ -11,8 +11,8 @@
   },
   {
    "path": "app.js",
-   "size": 1647721,
-   "sha256": "bfbe48e4e7281fce131174b0077800fde188f269f2a90f78e0536c6a189e1764"
+   "size": 1651978,
+   "sha256": "9a5355713fffe43b415e314622b08618461f46af57a97eb1f577512c0ae6fe2f"
   },
   {
    "path": "index.html",

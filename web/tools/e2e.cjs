@@ -242,7 +242,7 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
   if (!(await p.isVisible('#settings.show'))) fail('после ролика не вернулись в настройки');
   const dataTab = await p.evaluate(() => ({ rows: [...document.querySelectorAll('#setList .set-pane.on .set-row')].filter((e) => e.offsetHeight > 0).map((e) => e.dataset.row).join(), ver: document.getElementById('setVer').textContent,
     wipe: document.getElementById('setWipe').textContent }));
-  if (dataTab.rows !== 'setIntro,setTutorial,setUpReset,setDefaults,setWipe,setVerRow' || dataTab.wipe !== 'СБРОСИТЬ ПРОГРЕСС') fail('вкладка «ДАННЫЕ»: ' + JSON.stringify(dataTab));
+  if (dataTab.rows !== 'setIntro,setTutorial,setUpReset,setDefaults,setWipe,setVerRow,setCredits' || dataTab.wipe !== 'СБРОСИТЬ ПРОГРЕСС') fail('вкладка «ДАННЫЕ»: ' + JSON.stringify(dataTab));
   await p.click('#setDefaults'); await p.click('#dlgBtns .btn:has-text("ВОССТАНОВИТЬ")');
   const def = await p.evaluate(() => { const { game, engine } = __arta, st = game.settings(), D = game.SETTINGS;
     return { diff: Object.keys(D).filter((k) => st[k] !== D[k].def), n: Object.keys(D).length, q: engine.quality.tier, autoTier: engine.debug.stats().autoTier, qAuto: engine.qualityAuto, qSet: st.quality, shake: engine.settings.shake, cap: engine.frameCap, invert: engine.settings.invert, body: document.body.className.trim(),
