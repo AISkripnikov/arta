@@ -9,6 +9,8 @@ import { createAudio } from './audio.js';
 import { createInput } from './input.js';
 import { createRoom, ROOM } from './room.js';
 import { createUI } from './controls/index.js';
+import { createPost } from './post.js';
+import { createFx } from './fx.js';
 
 export { ROOM };
 export const DEFAULT_CAMERA = { position: [0, 1.42, 1.25], target: [0, 1.08, 0], fov: 46 };
@@ -23,40 +25,84 @@ function normPose(pose, base) {
   return { pos: v(p.position, b.position), target: v(p.target, b.target), fov: p.fov || b.fov };
 }
 
-/** Процедурная карта окружения: тёмное помещение с тёплыми лампами (чтобы металл не был чёрным). */
-function buildEnvironment(renderer) {
+/**
+ * Процедурная карта окружения (PMREM): маленькая панорама помещения башни в «широком» диапазоне яркости — тёмный потолок,
+ * горячие пятна плафонов, полоса дневного света из амбразуры, тёмный настил. Координаты — в осях поста (игрок смотрит
+ * в −Z): движок поворачивает карту вместе с рамкой камеры, поэтому блики на каждом посту лежат одинаково и согласованы
+ * с ключевым светом. night — красное боевое освещение: плафоны тёмно-красные, амбразура тёмная.
+ */
+function buildEnvironment(renderer, night) {
   const s = new THREE.Scene();
   const shell = new THREE.Mesh(
-    new THREE.SphereGeometry(6, 24, 16),
+    new THREE.SphereGeometry(6, 32, 20),
     new THREE.ShaderMaterial({
       side: THREE.BackSide,
+      uniforms: { uNight: { value: night ? 1 : 0 } },
       vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
       fragmentShader: [
-        'varying vec3 vP;',
+        'varying vec3 vP; uniform float uNight;',
         'void main(){',
-        '  float h = normalize(vP).y;',
-        '  vec3 lo = vec3(0.012, 0.014, 0.017), mid = vec3(0.055, 0.064, 0.075), hi = vec3(0.10, 0.085, 0.065);',
-        '  vec3 c = h < 0.0 ? mix(mid, lo, clamp(-h * 1.6, 0.0, 1.0)) : mix(mid, hi, clamp(h * 1.3, 0.0, 1.0));',
+        '  vec3 d = normalize(vP); float h = d.y;',
+        '  vec3 lo = vec3(0.010, 0.011, 0.013), mid = vec3(0.050, 0.060, 0.072), top = vec3(0.020, 0.018, 0.016);',
+        '  vec3 c = h < 0.0 ? mix(mid, lo, clamp(-h * 1.8, 0.0, 1.0)) : mix(mid, top, clamp(h * 1.5, 0.0, 1.0));',
+        '  c *= 1.0 + 0.9 * exp(-pow((h - 0.12) * 4.5, 2.0));',                  // пояс стены, освещённый плафонами
+        '  float az = atan(d.x, -d.z);',
+        '  c *= 0.86 + 0.14 * step(0.5, fract(az * 3.8197));',                    // рёбра набора: чередование светлого и тёмного
+        '  c += vec3(0.16, 0.10, 0.05) * exp(-pow(length(d.xz) * 2.4, 2.0)) * step(0.0, -h);',   // тёплое пятно на настиле под плафоном
+        '  c = mix(c, vec3(dot(c, vec3(0.6, 0.3, 0.1))) * vec3(1.25, 0.34, 0.26), uNight) * mix(1.0, 0.55, uNight);',
         '  gl_FragColor = vec4(c, 1.0);',
         '}'].join('\n'),
     }));
   s.add(shell);
   const lampGeo = new THREE.BoxGeometry(1, 1, 1);
-  const lamp = (color, intensity, pos, scale) => {
+  const lamp = (color, intensity, pos, scale, rotY) => {
     const m = new THREE.Mesh(lampGeo, new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(intensity) }));
-    m.position.fromArray(pos); m.scale.fromArray(scale); s.add(m); return m;
+    m.position.fromArray(pos); m.scale.fromArray(scale); if (rotY) m.rotation.y = rotY; s.add(m); return m;
   };
-  lamp('#ffd9a8', 9, [-2.6, 3.2, 2.2], [1.6, 0.3, 1.6]);      // ключ: сверху-слева, из-за спины
-  lamp('#ffe6c4', 5, [3.0, 2.4, 2.8], [1.0, 0.8, 0.3]);       // тёплая лампа справа
-  lamp('#9db8d8', 2.2, [4.5, 0.4, -1.0], [0.3, 2.2, 3.0]);    // холодный отсвет сбоку
-  lamp('#ffcf96', 3.5, [0.0, 4.6, -1.5], [3.2, 0.2, 1.0]);    // полоса над пультом
-  lamp('#ffcf96', 2.5, [-4.2, 1.2, -2.5], [0.3, 1.0, 1.2]);
+  const warm = night ? '#ff3a22' : '#ffd9a8', k = night ? 0.45 : 1;
+  lamp(warm, 16 * k, [-1.7, 3.4, 2.9], [1.2, 0.25, 1.2]);                 // центральный плафон: сверху-слева, из-за спины (как ключевой свет)
+  lamp(night ? '#ff4630' : '#ffcf96', 2.2 * k, [0.4, 5.3, 0.6], [3.4, 0.1, 3.4]);   // отсвет на потолке вокруг него
+  for (let i = 0; i < 8; i++) {                                           // плафоны в решётках по стене, в простенках
+    const th = (i + 0.5) * Math.PI / 4;
+    lamp(night ? '#ff3520' : '#ffdcae', (i === 3 || i === 4 ? 9 : 6) * k, [4.9 * Math.sin(th), 0.75, -4.9 * Math.cos(th)], [0.42, 0.55, 0.42], -th);
+    lamp(night ? '#b02a18' : '#ffb878', 0.9 * k, [5.3 * Math.sin(th), 0.75, -5.3 * Math.cos(th)], [1.9, 2.6, 0.1], -th);   // пятно света на стене
+  }
+  // амбразура: полоса дневного света (ночью — тёмно-синяя)
+  lamp(night ? '#1c2740' : '#cfe2ff', night ? 1.0 : 7.5, [3.1, 0.95, 4.2], [2.8, 0.17, 0.12], -Math.atan2(3.1, 4.2));
+  lamp(night ? '#3a4a66' : '#9db8d8', night ? 0.9 : 2.0, [5.0, 0.3, -1.2], [0.3, 2.0, 2.8]);      // холодный отсвет справа (как контровой)
   const pmrem = new THREE.PMREMGenerator(renderer);
-  const rt = pmrem.fromScene(s, 0.03);
+  const rt = pmrem.fromScene(s, 0.025);
   pmrem.dispose();
   shell.geometry.dispose(); shell.material.dispose(); lampGeo.dispose();
   s.traverse(o => { if (o.isMesh && o.material !== shell.material) o.material.dispose(); });
   return rt;
+}
+
+/**
+ * Мягкая тень дешевле штатной: 9 выборок карты (3×3, веса 1-2-1) вместо 17 у PCFShadowMap из three. На телефоне тень
+ * считается в каждом освещённом пикселе, поэтому число выборок — главное в её цене. Не нашли место вставки — остаётся штатная.
+ */
+function patchShadowChunk() {
+  const key = 'shadowmap_pars_fragment', src = THREE.ShaderChunk[key];
+  if (!src || src.includes('ARTA_PCF9')) return;
+  const a = src.indexOf('#if defined( SHADOWMAP_TYPE_PCF )'), b = src.indexOf('#elif defined( SHADOWMAP_TYPE_PCF_SOFT )');
+  if (a < 0 || b < a) return;
+  THREE.ShaderChunk[key] = src.slice(0, a) + [
+    '#if defined( SHADOWMAP_TYPE_PCF ) // ARTA_PCF9',
+    '			vec2 ts = vec2( shadowRadius ) / shadowMapSize;',
+    '			shadow = (',
+    '				texture2DCompare( shadowMap, shadowCoord.xy + vec2( - ts.x, - ts.y ), shadowCoord.z ) +',
+    '				texture2DCompare( shadowMap, shadowCoord.xy + vec2( ts.x, - ts.y ), shadowCoord.z ) +',
+    '				texture2DCompare( shadowMap, shadowCoord.xy + vec2( - ts.x, ts.y ), shadowCoord.z ) +',
+    '				texture2DCompare( shadowMap, shadowCoord.xy + vec2( ts.x, ts.y ), shadowCoord.z ) +',
+    '				2.0 * ( texture2DCompare( shadowMap, shadowCoord.xy + vec2( - ts.x, 0.0 ), shadowCoord.z ) +',
+    '					texture2DCompare( shadowMap, shadowCoord.xy + vec2( ts.x, 0.0 ), shadowCoord.z ) +',
+    '					texture2DCompare( shadowMap, shadowCoord.xy + vec2( 0.0, - ts.y ), shadowCoord.z ) +',
+    '					texture2DCompare( shadowMap, shadowCoord.xy + vec2( 0.0, ts.y ), shadowCoord.z ) ) +',
+    '				4.0 * texture2DCompare( shadowMap, shadowCoord.xy, shadowCoord.z )',
+    '			) * ( 1.0 / 16.0 );',
+    '		',
+  ].join('\n') + src.slice(b);
 }
 
 /**
@@ -65,6 +111,7 @@ function buildEnvironment(renderer) {
  */
 export async function createEngine(canvas, opts = {}) {
   await loadFonts();
+  patchShadowChunk();
 
   const renderer = new THREE.WebGLRenderer({
     canvas, antialias: opts.antialias !== false, alpha: false, stencil: false, powerPreference: 'high-performance',
@@ -72,33 +119,167 @@ export async function createEngine(canvas, opts = {}) {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = opts.exposure || 1.0;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.shadowMap.enabled = false;
+  // тени: одна карта от ключевого света; перерисовывается только когда что-то сдвинулось (см. updateShadows)
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.shadowMap.autoUpdate = false;
   setMaxAnisotropy(renderer.capabilities.getMaxAnisotropy());
-  // качество графики (настройка игрока): предел плотности пикселей и размер текстур-видов (щель, окуляр)
+  // качество графики (настройка игрока): предел плотности пикселей, размер текстур-видов (щель, окуляр) и «дорогие» эффекты:
+  //   shadow — сторона карты теней (0 — теней нет); postfx — цепочка постобработки; bloom — 2: свечение в ½ + ¼ разрешения,
+  //   1: только ¼, 0: нет; grain — зерно; particles — доля частиц engine.fx (0 — частиц нет).
   const QUALITY = {
-    high: { tier: 'high', pixelRatio: opts.maxPixelRatio || 2, rtScale: 1, samples: 4 },
-    mid: { tier: 'mid', pixelRatio: Math.min(opts.maxPixelRatio || 2, 1.5), rtScale: 0.75, samples: 4 },
-    low: { tier: 'low', pixelRatio: 1, rtScale: 0.5, samples: 0 },
+    high: { tier: 'high', pixelRatio: opts.maxPixelRatio || 2, rtScale: 1, samples: 4, shadow: 1024, postfx: true, bloom: 2, grain: true, particles: 1 },
+    mid: { tier: 'mid', pixelRatio: Math.min(opts.maxPixelRatio || 2, 1.5), rtScale: 0.75, samples: 4, shadow: 512, postfx: true, bloom: 1, grain: false, particles: 0.5 },
+    low: { tier: 'low', pixelRatio: 1, rtScale: 0.5, samples: 0, shadow: 0, postfx: false, bloom: 0, grain: false, particles: 0 },
   };
+  const TIERS = ['low', 'mid', 'high'];
   let quality = QUALITY.high, maxPixelRatio = quality.pixelRatio;
+  const post = createPost(renderer);
   let frameCap = 0;                              // 0 — без ограничения; 30 — «экономия батареи»
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x050607);
-  const envRT = buildEnvironment(renderer);
-  scene.environment = envRT.texture;
-  scene.environmentIntensity = 0.5;
+  const envRTs = { day: buildEnvironment(renderer, false), night: null };      // ночная карта строится при первом ночном бое
+  scene.environment = envRTs.day.texture;
+  scene.environmentIntensity = 0.55;
 
   const camera = new THREE.PerspectiveCamera(DEFAULT_CAMERA.fov, 2, 0.05, 30);
   scene.add(camera);
 
-  // --- свет (§3): полусферический + ключевой у текущего поста + два заполняющих. Теней нет. ---
-  const hemi = new THREE.HemisphereLight(0xaab6c4, 0x1c1e22, 0.55);
-  const keyLight = new THREE.PointLight(0xffe9cf, 7.5, 9, 1.7);
-  const fillCeil = new THREE.PointLight(0xffc98f, 4.3, 9, 1.6);    // центральный плафон
-  const fillCool = new THREE.PointLight(0x7f9cc0, 2.4, 7, 1.8);    // холодный контровой снизу-справа
+  // --- свет (§3): тёплый ключевой прожектор от плафона (единственный с тенью), холодное небо полусферы как заполнение,
+  //     тёплый плафон в центре потолка и холодный контровой сбоку. Все идут за рамкой камеры; посты света не добавляют. ---
+  const LIGHT = {
+    day: { hemiSky: new THREE.Color(0x9fb2cc), hemiGround: new THREE.Color(0x2a2119), hemi: 0.46, key: new THREE.Color(0xffe2bd), keyI: 13.5,
+      ceil: new THREE.Color(0xffc98f), rim: new THREE.Color(0x86a8dc), rimI: 3.4 },
+    night: { hemiSky: new THREE.Color(0x9a7f88), hemiGround: new THREE.Color(0x21130e), hemi: 0.4, key: new THREE.Color(0xff8260), keyI: 13,
+      ceil: new THREE.Color(0xff6a45), rim: new THREE.Color(0x6f86b8), rimI: 2.2 },
+  };
+  const hemi = new THREE.HemisphereLight(LIGHT.day.hemiSky, LIGHT.day.hemiGround, LIGHT.day.hemi);
+  const keyLight = new THREE.SpotLight(LIGHT.day.key, LIGHT.day.keyI, 9, 0.9, 0.75, 1.6);
+  const fillCeil = new THREE.PointLight(LIGHT.day.ceil, 4.3, 9, 1.6);      // центральный плафон
+  const fillCool = new THREE.PointLight(LIGHT.day.rim, LIGHT.day.rimI, 7, 1.8);   // холодный контровой: справа, почти в плоскости пульта
   fillCeil.position.set(0, 2.25, 0);
-  scene.add(hemi, keyLight, fillCeil, fillCool);
+  const fillCeil0 = fillCeil.intensity;
+  keyLight.shadow.mapSize.set(quality.shadow || 512, quality.shadow || 512);
+  keyLight.shadow.camera.near = 0.5; keyLight.shadow.camera.far = 7;
+  keyLight.shadow.bias = -0.0007; keyLight.shadow.normalBias = 0.012;
+  keyLight.shadow.radius = 1.4;
+  keyLight.shadow.intensity = 0.6;                 // тень не глубже 60 %: подписи под маховиками остаются читаемыми
+  keyLight.castShadow = quality.shadow > 0;
+  scene.add(hemi, keyLight, keyLight.target, fillCeil, fillCool);
+  const light = {
+    night: 0, nightTarget: 0, nightAmount: 1, applied: -1,
+    flashT: 0, flashDur: 0, flashI: 0, flashColor: new THREE.Color(), flashPos: new THREE.Vector3(), flashAt: false,
+    rimColor: new THREE.Color(), rimI: LIGHT.day.rimI, keyI: LIGHT.day.keyI,
+  };
+  const _c = new THREE.Color();
+  function applyMood(k) {
+    const a = LIGHT.day, b = LIGHT.night;
+    hemi.color.copy(a.hemiSky).lerp(b.hemiSky, k); hemi.groundColor.copy(a.hemiGround).lerp(b.hemiGround, k);
+    hemi.intensity = a.hemi + (b.hemi - a.hemi) * k;
+    keyLight.color.copy(a.key).lerp(b.key, k); light.keyI = a.keyI + (b.keyI - a.keyI) * k;
+    fillCeil.color.copy(a.ceil).lerp(b.ceil, k);
+    light.rimColor.copy(a.rim).lerp(b.rim, k); light.rimI = a.rimI + (b.rimI - a.rimI) * k;
+    const want = k > 0.5 ? 'night' : 'day';
+    if (!envRTs[want]) envRTs[want] = buildEnvironment(renderer, want === 'night');
+    if (scene.environment !== envRTs[want].texture) scene.environment = envRTs[want].texture;
+  }
+  applyMood(0);
+  /** Свет за кадр: смена дня/ночи, мигание ламп (идёт от room.flicker / setLampLevel), вспышка engine.fx.flash. */
+  function updateLights(dt) {
+    if (light.night !== light.nightTarget) {
+      const d = light.nightTarget - light.night, stepK = dt / 0.8;
+      light.night = Math.abs(d) <= stepK || dt === 0 ? light.nightTarget : light.night + Math.sign(d) * stepK;
+    }
+    if (light.night !== light.applied) { applyMood(light.night); light.applied = light.night; }
+    post.night = light.night * light.nightAmount;
+    // яркость ламп помещения 0…1 читаем по центральному плафону (её ведёт room: мигание при сотрясении, аварийный свет)
+    const lamp = Math.max(0, Math.min(1.2, (fillCeil.intensity / fillCeil0 - 0.35) / 0.65));
+    let key = light.keyI * (0.22 + 0.78 * lamp), rimI = light.rimI;
+    fillCool.color.copy(light.rimColor);
+    if (light.flashT < light.flashDur) {
+      light.flashT += dt;
+      const f = Math.max(0, 1 - light.flashT / light.flashDur), ff = f * f;
+      if (light.flashAt) {
+        fillCool.position.copy(light.flashPos);
+        fillCool.color.lerp(light.flashColor, Math.min(1, ff * 3));
+        rimI = rimI * (1 - ff) + light.flashI * 9 * ff;
+      } else key *= 1 + light.flashI * ff;
+    }
+    keyLight.intensity = key; fillCool.intensity = rimI;
+  }
+  function flashLight(color, intensity, seconds, worldPos) {
+    // более слабая вспышка не перебивает ещё не погасшую сильную
+    const left = light.flashT < light.flashDur ? light.flashI * Math.pow(1 - light.flashT / light.flashDur, 2) : 0;
+    if (intensity < left) return;
+    light.flashColor.set(color); light.flashI = intensity; light.flashDur = Math.max(0.03, seconds); light.flashT = 0;
+    light.flashAt = !!worldPos;
+    if (worldPos) light.flashPos.copy(worldPos);
+  }
+
+  // --- тени: кто отбрасывает и кто принимает (правило — в README, раздел «Свет и тени») ---
+  const casters = new WeakMap();                  // пост → [меши, отбрасывающие тень]
+  const SHADOW_MIN = 0.03;                        // мельче 3 см тень не отбрасывают (стрелки, винты, заклёпки)
+  function flagShadows(root, list) {
+    const out = list || [];
+    const walk = (o, noShadow, noCast) => {
+      const ud = o.userData || {};
+      noShadow = noShadow || ud.noShadow === true; noCast = noCast || ud.noCast === true;
+      if (o.isMesh) {
+        const m = Array.isArray(o.material) ? o.material[0] : o.material;
+        const lit = !!m && (m.isMeshStandardMaterial || m.isMeshPhongMaterial || m.isMeshLambertMaterial) && !m.transparent && m.visible !== false;
+        const recv = lit && !noShadow;
+        let cast = recv && !noCast && !o.isInstancedMesh;
+        if (cast && ud.castShadow !== true) {
+          const g = o.geometry;
+          if (g && !g.boundingSphere) g.computeBoundingSphere();
+          const r = g && g.boundingSphere ? g.boundingSphere.radius * Math.max(Math.abs(o.scale.x), Math.abs(o.scale.y), Math.abs(o.scale.z)) : 0;
+          if (!(r >= SHADOW_MIN)) cast = false;
+        }
+        o.receiveShadow = recv; o.castShadow = cast;
+        if (cast) out.push(o);
+      }
+      for (const ch of o.children) walk(ch, noShadow, noCast);
+    };
+    walk(root, false, false);
+    return out;
+  }
+  let shDirty = true, shLast = -1, shSum = NaN;
+  const shStats = { calls: 0, updates: 0 };
+  function shadowSum() {
+    const p = keyLight.position;
+    let s = p.x * 1.37 + p.y * 0.77 + p.z * 2.11;
+    const list = entered && casters.get(entered);
+    if (list) {
+      for (let i = 0; i < list.length; i++) {
+        const o = list[i], e = o.matrixWorld.elements;
+        s += (e[0] + e[1] * 1.3 + e[5] * 1.7 + e[6] * 1.9 + e[10] * 2.3 + e[12] * 3.1 + e[13] * 3.7 + e[14] * 4.1) * (1 + (i % 17) * 0.13)
+          + (o.visible && (!o.parent || o.parent.visible) ? 0 : 7.7);
+      }
+    }
+    return s;
+  }
+  /** Перед основным проходом: карта теней перерисовывается не чаще 15 раз в секунду и только если что-то сдвинулось. */
+  function updateShadows() {
+    if (!keyLight.castShadow) return;
+    if (engine.input && engine.input.busy) shDirty = true;
+    if (time - shLast < 1 / 15 && shLast >= 0 && time >= shLast) return;
+    const sum = shadowSum();
+    if (sum !== shSum) { shSum = sum; shDirty = true; }
+    if (!shDirty) return;
+    shDirty = false; shLast = time;
+    renderer.shadowMap.needsUpdate = true;
+  }
+  {
+    // счётчик вызовов прохода теней: three рисует карту внутри renderer.render и обнуляет renderer.info уже после неё
+    const sm = renderer.shadowMap, render0 = sm.render;
+    sm.render = function (lights, sc, cam) {
+      const will = sm.needsUpdate && sc === scene && lights.length > 0;
+      const c0 = renderer.info.render.calls;
+      render0.call(sm, lights, sc, cam);
+      if (will) { shStats.calls = renderer.info.render.calls - c0; shStats.updates++; shStats.fresh = true; }
+    };
+  }
 
   const listeners = new Map();
   const frameFns = new Set();
@@ -179,9 +360,12 @@ export async function createEngine(canvas, opts = {}) {
     }
     camera.updateMatrixWorld();
 
-    // свет держится у текущей рамки
-    localToWorld(rig.angle, _tgt.set(-0.7, 2.05, 1.05), keyLight.position);
-    localToWorld(rig.angle, _tgt.set(1.5, 0.75, 1.5), fillCool.position);
+    // свет держится у текущей рамки; карта окружения поворачивается вместе с ней
+    localToWorld(rig.angle, _tgt.set(-0.78, 2.32, 1.2), keyLight.position);
+    localToWorld(rig.angle, _tgt.set(0.2, 1.02, -0.2), keyLight.target.position);
+    keyLight.target.updateMatrixWorld();
+    localToWorld(rig.angle, _tgt.set(1.6, 1.72, 0.34), fillCool.position);
+    scene.environmentRotation.y = -rig.angle;
 
     // видимость постов: текущий и соседние по кольцу (по углу рамки — корректно и во время перелёта)
     for (const st of stations) {
@@ -220,6 +404,7 @@ export async function createEngine(canvas, opts = {}) {
       width = w; height = h; pixelRatio = pr;
       renderer.setPixelRatio(pr);
       renderer.setSize(w, h, false);
+      post.setSize(Math.floor(w * pr), Math.floor(h * pr));
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       emit('resize', w, h);
@@ -227,8 +412,15 @@ export async function createEngine(canvas, opts = {}) {
   }
 
   // --- кадр ---
-  const stats = { calls: 0, triangles: 0, frameMs: 0, fps: 0, frames: 0 };
-  let fpsT = 0, fpsN = 0;
+  const stats = { calls: 0, triangles: 0, frameMs: 0, fps: 0, frames: 0, shadowCalls: 0, postCalls: 0, postPasses: 0 };
+  let fpsT = 0, fpsN = 0, mainC0 = 0, mainT0 = 0;
+  const grabStats = () => {                       // сразу после основного прохода: дальше renderer.info затрут проходы обработки
+    stats.shadowCalls = shStats.fresh ? shStats.calls : 0; shStats.fresh = false;
+    // с выключенным автосбросом (замер tools/perf.cjs) счётчик three накопительный: берём прирост и вычитаем проход теней
+    const acc = !renderer.info.autoReset;
+    stats.calls = renderer.info.render.calls - (acc ? mainC0 + stats.shadowCalls : 0);
+    stats.triangles = renderer.info.render.triangles - (acc ? mainT0 : 0);
+  };
   function step(dt, render = true) {
     const t0 = performance.now();
     time += dt;
@@ -237,11 +429,21 @@ export async function createEngine(canvas, opts = {}) {
       try { fn(dt, time); } catch (e) { console.error('[engine] ошибка в onFrame:', e); }
     }
     updateRig(dt);
+    updateLights(dt);
     for (const st of stations) if (st.group.visible) safeCall(st, 'update', dt, time);
+    engine.fx._resize(height * pixelRatio, camera.fov);
+    engine.fx._update(dt, time);
     if (render) {
-      renderer.render(scene, camera);
-      stats.calls = renderer.info.render.calls;
-      stats.triangles = renderer.info.render.triangles;
+      updateShadows();
+      mainC0 = renderer.info.render.calls; mainT0 = renderer.info.render.triangles;
+      if (post.active) {
+        post.render(scene, camera, time, grabStats);
+        stats.postCalls = post.info.calls; stats.postPasses = post.info.passes;
+      } else {
+        renderer.render(scene, camera);
+        grabStats();
+        stats.postCalls = 0; stats.postPasses = 0;
+      }
     } else scene.updateMatrixWorld();
     const ms = performance.now() - t0;
     stats.frameMs += (ms - stats.frameMs) * (stats.frames < 5 ? 1 : 0.08);
@@ -253,9 +455,60 @@ export async function createEngine(canvas, opts = {}) {
     // ограничение кадров: лишние кадры пропускаем целиком, dt следующего — полное время с прошлого отрисованного
     if (frameCap && lastT && now - lastT < 1000 / frameCap - 3) return;
     const dt = lastT ? Math.min(0.05, Math.max(0, (now - lastT) / 1000)) : 0;
-    if (lastT) { fpsT += now - lastT; fpsN++; if (fpsT >= 500) { stats.fps = fpsN * 1000 / fpsT; fpsT = 0; fpsN = 0; } }
+    if (lastT) { fpsT += now - lastT; fpsN++; if (fpsT >= 500) { stats.fps = fpsN * 1000 / fpsT; fpsT = 0; fpsN = 0; } autoSample(now - lastT); }
     lastT = now;
     step(dt);
+  }
+
+  // --- качество ---
+  function applyQuality(q) {
+    if (q === quality) return q;
+    quality = q; maxPixelRatio = q.pixelRatio;
+    const sh = keyLight.shadow;
+    keyLight.castShadow = q.shadow > 0;
+    if (q.shadow > 0 && sh.mapSize.x !== q.shadow) {
+      sh.mapSize.set(q.shadow, q.shadow);
+      if (sh.map) { sh.map.dispose(); sh.map = null; }
+    }
+    shDirty = true; shLast = -1;
+    post.configure(q);
+    engine.fx._setQuality(q);
+    checkResize(false);
+    AQ.hold = Math.max(AQ.hold, 1.5); AQ.slow = 0; AQ.good = 0; AQ.acc = 0; AQ.n = 0;
+    emit('quality', q);
+    return q;
+  }
+  // «АВТО»: средний интервал между кадрами по окнам в 1 с. Четыре медленных окна подряд (> ~24 мс) — уровень ниже;
+  // 30 с подряд с запасом — один раз за запуск вернуться на уровень выше. Подобранный уровень запоминается до следующего запуска.
+  const AQ = { tier: 'high', acc: 0, n: 0, slow: 0, good: 0, ups: 0, downs: 0, hold: 2, last: 0 };
+  try { const v = localStorage.getItem('arta2.autoTier'); if (QUALITY[v]) AQ.tier = v; } catch (e) { /* хранилище недоступно */ }
+  function autoStep(dir) {
+    const i = TIERS.indexOf(AQ.tier) + dir;
+    if (i < 0 || i >= TIERS.length) return false;
+    AQ.tier = TIERS[i];
+    try { localStorage.setItem('arta2.autoTier', AQ.tier); } catch (e) { /* хранилище недоступно */ }
+    if (dir > 0) AQ.ups++; else AQ.downs++;
+    applyQuality(QUALITY[AQ.tier]);
+    return true;
+  }
+  function autoSample(ms) {
+    if (!engine.qualityAuto) return;
+    if (!(ms > 0) || ms > 1000 || document.hidden) return;      // пауза, свёрнутое приложение — не замер
+    if (AQ.hold > 0) { AQ.hold -= ms / 1000; return; }           // первые секунды и смена уровня: компиляция шейдеров
+    AQ.acc += ms; AQ.n++;
+    if (AQ.acc < 1000) return;
+    const avg = AQ.acc / AQ.n, cap = frameCap ? 1000 / frameCap : 0;
+    AQ.acc = 0; AQ.n = 0; AQ.last = avg;
+    if (avg > Math.max(24, cap + 8)) { AQ.slow++; AQ.good = 0; }
+    else { AQ.slow = 0; AQ.good = avg <= Math.max(18, cap + 2) && stats.frameMs < 9 ? AQ.good + 1 : 0; }
+    if (AQ.slow >= 4) { AQ.slow = 0; autoStep(-1); }
+    else if (AQ.good >= 30 && AQ.ups < 1) { AQ.good = 0; if (!autoStep(1)) AQ.ups = 1; }
+  }
+
+  function kick(amount, seconds) {
+    if (engine.settings.shake === false) return;
+    rig.shakeAmp = Math.max(amount, rig.shakeT < rig.shakeDur ? rig.shakeAmp * (1 - rig.shakeT / rig.shakeDur) : 0);
+    rig.shakeDur = Math.max(0.05, seconds); rig.shakeT = 0; rig.shakeSeed = Math.random() * 100;
   }
 
   const engine = {
@@ -263,7 +516,7 @@ export async function createEngine(canvas, opts = {}) {
     /** Помощники для авторов постов: geom (slab, lathe, merge, boxUV…), textures (canvasTexture, drawLabel…). */
     geom, textures,
     fonts: fontState,
-    lights: { hemi, key: keyLight, fillCeil, fillCool },
+    lights: { hemi, key: keyLight, fillCeil, fillCool, rim: fillCool },
 
     get current() { return current; },
     /** Объект текущего поста. */
@@ -288,6 +541,7 @@ export async function createEngine(canvas, opts = {}) {
       station.group.rotation.set(0, -angle, 0);
       scene.add(station.group);
       stations.push(station); byId.set(station.id, station);
+      casters.set(station, flagShadows(station.group));
       if (!current) {                             // первый пост — текущий (onEnter придёт в start()/gotoStation)
         current = station.id;
         rig.angle = angle; rig.pose = normPose(station.camera);
@@ -308,6 +562,10 @@ export async function createEngine(canvas, opts = {}) {
         if (prev) safeCall(prev, 'onLeave');
         entered = st; current = id;
         safeCall(st, 'onEnter');
+        casters.set(st, flagShadows(st.group));     // пост мог достроить себя после addStation
+        shDirty = true; shLast = -1;
+        post.bloom = st.post && st.post.bloom != null ? st.post.bloom : 1;
+        AQ.hold = Math.max(AQ.hold, 0.8);
         emit('station', id);
       }
       const steps = Math.round(Math.abs(wrapPi(st.angle - rig.angle)) / (TAU / ROOM.slots));
@@ -347,27 +605,52 @@ export async function createEngine(canvas, opts = {}) {
     },
     stop() { running = false; cancelAnimationFrame(raf); },
 
-    /** Тряска камеры: amount ~0..1 (1 — выстрел главного калибра), seconds — длительность затухания. */
+    /** Тряска камеры: amount ~0..1 (1 — выстрел главного калибра), seconds — длительность затухания.
+     *  Настройка игрока engine.settings.shake = false камеру не трогает (лампы помещения мигают по-прежнему). */
     shake(amount = 1, seconds = 0.6) {
-      rig.shakeAmp = Math.max(amount, rig.shakeT < rig.shakeDur ? rig.shakeAmp * (1 - rig.shakeT / rig.shakeDur) : 0);
-      rig.shakeDur = Math.max(0.05, seconds); rig.shakeT = 0; rig.shakeSeed = Math.random() * 100;
+      kick(amount, seconds);
       if (engine.room) engine.room.flicker(Math.min(1, amount), seconds);
     },
 
+    /** Карту теней нужно перерисовать (что-то сдвинулось без участия ввода). Движок и сам следит за мешами текущего поста. */
+    shadowsDirty() { shDirty = true; },
+    /** Расставить castShadow/receiveShadow в поддереве (пост достроил себя после addStation). Правило — в README. */
+    flagShadows(object3D) {
+      const st = entered || byId.get(current);
+      if (st && casters.get(st)) {
+        let inside = false;
+        for (let o = object3D; o; o = o.parent) if (o === st.group) { inside = true; break; }
+        if (inside) { casters.set(st, flagShadows(st.group)); shDirty = true; return; }
+      }
+      flagShadows(object3D); shDirty = true;
+    },
+    /**
+     * Ночной бой: красное боевое освещение (цвет ламп, ночная карта окружения, красная коррекция кадра на уровнях с
+     * постобработкой). amount 0…1 — сила красной коррекции (настройка игрока «красный свет ночью»).
+     */
+    setNight(on, amount = 1) { light.nightTarget = on ? 1 : 0; light.nightAmount = Math.max(0, Math.min(1, amount)); },
+    get night() { return light.nightTarget > 0; },
+    /** Постобработка: { active, bloom, threshold, vignette, grade, contrast, grain, night, info } — см. post.js. */
+    post,
+
     /**
      * Качество графики: 'high' | 'mid' | 'low' → предел плотности пикселей 2 / 1.5 / 1, масштаб текстур-видов 1 / 0.75 / 0.5,
-     * сглаживание этих текстур (на 'low' выключено). Шлёт 'quality'(engine.quality) — посты меняют размер своих текстур.
+     * тени 1024 / 512 / нет, постобработка (свечение, виньетка, коррекция; зерно — только high) / нет, частицы.
+     * Шлёт 'quality'(engine.quality) — посты меняют размер своих текстур.
+     * 'auto' — движок сам подбирает уровень под телефон: engine.qualityAuto = true, уровень снижается, когда кадры
+     * идут медленнее ~24 мс около 4 с подряд, и один раз за запуск возвращается на ступень выше после 30 с с запасом.
+     * Повторный setQuality('auto') подобранный уровень не сбрасывает.
      */
     setQuality(tier) {
-      const q = QUALITY[tier] || QUALITY.high;
-      if (q === quality) return q;
-      quality = q; maxPixelRatio = q.pixelRatio;
-      checkResize(false);
-      emit('quality', q);
-      return q;
+      const auto = tier === 'auto';
+      if (auto && !engine.qualityAuto) { AQ.slow = 0; AQ.good = 0; AQ.acc = 0; AQ.n = 0; }
+      engine.qualityAuto = auto;
+      return applyQuality(QUALITY[auto ? AQ.tier : tier] || QUALITY.high);
     },
-    /** { tier, pixelRatio, rtScale, samples } — текущее качество (только чтение). */
+    /** { tier, pixelRatio, rtScale, samples, shadow, postfx, bloom, grain, particles } — текущее качество (только чтение). При 'auto' здесь уровень, действующий сейчас. */
     get quality() { return quality; },
+    /** true — игрок выбрал качество «АВТО» (setQuality('auto')): уровень подбирает движок. */
+    qualityAuto: false,
     /** Текущая плотность пикселей рендера (после ограничения качеством). */
     get pixelRatio() { return pixelRatio; },
     /** Ограничение кадров: 30 — рисовать не чаще 30 раз в секунду; 0 или 60 — без ограничения. */
@@ -383,10 +666,15 @@ export async function createEngine(canvas, opts = {}) {
 
     debug: {
       enabled: !!opts.debug,
-      /** { calls, triangles, frameMs (CPU, сглаж.), fps, geometries, textures, programs } */
+      /** { calls (основной проход), triangles, frameMs (CPU, сглаж.), fps, geometries, textures, programs,
+       *    tier, auto, autoMs (средний интервал кадров последнего окна «АВТО»), shadowCalls (вызовы прохода теней в последнем
+       *    кадре, 0 — карта не перерисовывалась), shadowUpdates (сколько раз перерисована), postCalls, postPasses, particles } */
       stats() {
         return {
           calls: stats.calls, triangles: stats.triangles, frameMs: +stats.frameMs.toFixed(2), fps: +stats.fps.toFixed(1),
+          tier: quality.tier, auto: !!engine.qualityAuto, autoMs: +AQ.last.toFixed(1),
+          shadowCalls: stats.shadowCalls, shadowUpdates: shStats.updates, postCalls: stats.postCalls, postPasses: stats.postPasses,
+          particles: engine.fx ? engine.fx.particles : 0,
           geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures,
           programs: renderer.info.programs ? renderer.info.programs.length : 0,
         };
@@ -422,15 +710,18 @@ export async function createEngine(canvas, opts = {}) {
       window.removeEventListener('touchend', unlock, true);
       document.removeEventListener('visibilitychange', onVisibility);
       if (overlay) overlay.remove();
-      envRT.dispose();
+      if (envRTs.day) envRTs.day.dispose();
+      if (envRTs.night) envRTs.night.dispose();
+      engine.fx.dispose(); post.dispose();
+      if (keyLight.shadow.map) keyLight.shadow.map.dispose();
       engine.mat.dispose();
       renderer.dispose();
     },
   };
 
   /** Настройки игрока, которые читают органы управления: sens — чувствительность маховиков и рычагов привода (0.6…1.6, 1 — ход 1:1);
-   *  invert — маховики крутят в обратную сторону. */
-  engine.settings = { sens: 1, invert: false };
+   *  invert — маховики крутят в обратную сторону; shake — тряска камеры (engine.shake) разрешена. */
+  engine.settings = { sens: 1, invert: false, shake: true };
   /** Перехватчики действий постов (ставит оболочка). guards.fire(proceed) — пост ОГОНЬ вызывает его вместо game.fire();
    *  оболочка либо сразу зовёт proceed(), либо сперва спрашивает игрока. null — перехвата нет. */
   engine.guards = { fire: null };
@@ -440,6 +731,15 @@ export async function createEngine(canvas, opts = {}) {
   engine.ui = createUI(engine);
   engine.room = createRoom(engine);
   scene.add(engine.room.group);
+  engine.room.group.userData.noCast = true;       // помещение тени принимает, но не отбрасывает (стена — один большой меш)
+  flagShadows(engine.room.group);
+  /** Эффекты: shake, flash, flicker, dust, puff, sparks, clear — см. fx.js и README. */
+  engine.fx = createFx(engine, {
+    kick, flashLight, post,
+    lampFlicker(amount, seconds) { if (engine.room) engine.room.flicker(Math.min(1, amount), seconds); },
+  });
+  engine.fx._setQuality(quality);
+  post.configure(quality);
 
   // звук — после первого жеста пользователя
   function unlock() { engine.audio.unlock(); }
@@ -461,7 +761,7 @@ export async function createEngine(canvas, opts = {}) {
     engine.onFrame(dt => {
       acc += dt; if (acc < 0.5) return; acc = 0;
       const s = engine.debug.stats();
-      overlay.textContent = (current || '—') + '  ' + s.fps + ' к/с  ' + s.frameMs + ' мс  ' + s.calls + ' выз.  ' + (s.triangles / 1000).toFixed(1) + 'к тр.';
+      overlay.textContent = (current || '—') + '  ' + s.tier + (s.auto ? '*' : '') + '  ' + s.fps + ' к/с  ' + s.frameMs + ' мс  ' + s.calls + ' выз.  ' + (s.triangles / 1000).toFixed(1) + 'к тр.';
     });
   }
 

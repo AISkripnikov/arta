@@ -1,12 +1,13 @@
 // Экран «НАСТРОЙКИ» (пять вкладок) и применение настроек. Логика их только хранит и проверяет (game.settings(),
 // game.setSetting) и сама применяет лишь autosave и speed; всё остальное применяет этот модуль и оболочка:
 //   sens, invert   → engine.settings (маховики и рычаги привода)
+//   shake          → engine.settings.shake (тряска камеры: engine.shake)
 //   text           → CSS-переменные --ts (полный масштаб), --tsc (не больше 1.15: кнопки, меню), --tsb (панели HUD) на <html>
 //   lefty          → класс body.lefty (зеркалит обвязку HUD; 3D-посты не трогает)
 //   crewPanel      → классы body.crew-compact / body.crew-off (столбик расчёта)
 //   nightTint      → класс body.night-soft (красный фильтр ночного боя слабее)
-//   volFx/Amb/Radio→ engine.audio.setBus (эффекты, фон башни, радио); общий звук — game.setMuted + audio.setMuted
-//   quality, fps   → engine.setQuality, engine.setFrameCap
+//   volFx/Amb/Radio/Music → engine.audio.setBus (эффекты, фон башни, радио, музыка); общий звук — game.setMuted + audio.setMuted
+//   quality, fps   → engine.setQuality ('auto' | 'high' | 'mid' | 'low'), engine.setFrameCap; qualityChosen ставит сама логика
 //   showFps        → плашка #fpsMeter
 //   vibro, vibroPower → vibrate(kind)
 //   hints ('new' | 'all' | 'off') → учитывает логика (game.hint()); confirmFriendly → читает оболочка (вопрос «СВОИ В ЗОНЕ. ОГОНЬ?»)
@@ -51,13 +52,15 @@ const ROWS = {
     { id: 'setVolFx', key: 'volFx', type: 'vol', label: 'ГРОМКОСТЬ ЭФФЕКТОВ', note: 'Выстрел, механизмы, разрывы, тревога.', needs: 'sound' },
     { id: 'setVolAmb', key: 'volAmb', type: 'vol', label: 'ГРОМКОСТЬ ФОНА БАШНИ', note: 'Гул вентиляции и трансформаторов в бою.', needs: 'sound' },
     { id: 'setVolRadio', key: 'volRadio', type: 'vol', label: 'ГРОМКОСТЬ РАДИО', note: 'Вызов радиста: донесения, доклады, команды штаба.', needs: 'sound' },
+    { id: 'setVolMusic', key: 'volMusic', type: 'vol', label: 'ГРОМКОСТЬ МУЗЫКИ', note: 'Музыка в меню и в бою.', needs: 'sound' },
   ],
   screen: [
     { id: 'setText', key: 'text', type: 'num', label: 'РАЗМЕР НАДПИСЕЙ', items: TEXT, note: 'Радио, подсказки, блокнот, окна.' },
-    { id: 'setQuality', key: 'quality', type: 'str', label: 'КАЧЕСТВО ГРАФИКИ', items: [['high', 'ВЫСОКОЕ'], ['mid', 'СРЕДНЕЕ'], ['low', 'ЭКОНОМНОЕ']],
-      note: 'Чёткость картинки и видов в смотровой щели и окуляре. Ниже качество — меньше греется телефон.' },
+    { id: 'setQuality', key: 'quality', type: 'str', label: 'КАЧЕСТВО ГРАФИКИ', items: [['auto', 'АВТО'], ['high', 'ВЫСОКОЕ'], ['mid', 'СРЕДНЕЕ'], ['low', 'ЭКОНОМНОЕ']],
+      note: 'АВТО само снижает качество, если телефон не успевает. Ниже качество — меньше греется телефон.' },
     { id: 'setFps', key: 'fps', type: 'num', label: 'ОГРАНИЧЕНИЕ КАДРОВ', items: [[60, '60'], [30, '30']], note: '30 кадров в секунду берегут батарею.' },
     { id: 'setNight', key: 'nightTint', type: 'str', label: 'КРАСНЫЙ СВЕТ НОЧЬЮ', items: [['normal', 'ОБЫЧНЫЙ'], ['soft', 'СЛАБЫЙ']], note: 'Яркость красного фильтра в ночных боях.' },
+    { id: 'setShake', key: 'shake', type: 'bool', label: 'ТРЯСКА КАМЕРЫ ПРИ ВЫСТРЕЛЕ', note: 'Камера вздрагивает от выстрела башни и от близких разрывов.' },
     { id: 'setShowFps', key: 'showFps', type: 'bool', label: 'СЧЁТЧИК КАДРОВ', note: 'Число кадров в секунду — в бою, слева внизу над полосой постов.' },
   ],
   data: [
@@ -78,7 +81,7 @@ const ALL = [].concat(...TABS.map(([t]) => ROWS[t]));
 export function createSettings({ game, engine, show, sfx, dialog, hooks = {} }) {
   let back = null, battle = false, tab = 'game', built = false, ambTimer = 0, fpsTimer = 0, version = '';
   let cur = { sens: 1, invert: false, lefty: false, vibro: true, vibroPower: 'high', hints: 'new', autosave: true, speed: 1, confirmFriendly: true, crewPanel: 'full',
-    volFx: 100, volAmb: 70, volRadio: 100, text: 1, quality: 'high', fps: 60, nightTint: 'normal', showFps: false };
+    volFx: 100, volAmb: 70, volRadio: 100, volMusic: 60, text: 1, quality: 'auto', qualityChosen: false, fps: 60, nightTint: 'normal', showFps: false, shake: true };
   const read = () => { try { cur = Object.assign(cur, game.settings()); } catch (e) { /* старая логика без настроек */ } return cur; };
   const call = (obj, name, ...a) => { try { if (obj && typeof obj[name] === 'function') return obj[name](...a); } catch (e) { /* не критично */ } return undefined; };
   /** Значение строки: настройки + два «чужих» ключа (сложность и общий звук хранятся в сохранении отдельно). */
@@ -86,7 +89,7 @@ export function createSettings({ game, engine, show, sfx, dialog, hooks = {} }) 
 
   function apply() {
     const st = read(), root = document.documentElement, body = document.body;
-    if (engine.settings) { engine.settings.sens = st.sens; engine.settings.invert = !!st.invert; }
+    if (engine.settings) { engine.settings.sens = st.sens; engine.settings.invert = !!st.invert; engine.settings.shake = st.shake !== false; }
     root.style.setProperty('--ts', String(st.text));
     root.style.setProperty('--tsc', String(Math.min(st.text, 1.15)));
     root.style.setProperty('--tsb', String(BAR[st.text] || 1));
@@ -96,10 +99,11 @@ export function createSettings({ game, engine, show, sfx, dialog, hooks = {} }) 
     body.classList.toggle('crew-compact', st.crewPanel === 'compact');
     body.classList.toggle('crew-off', st.crewPanel === 'off');
     body.classList.toggle('night-soft', st.nightTint === 'soft');
-    // громкости: 100 % эффектов и радио и 70 % фона — уровни, на которых звук был записан
+    // громкости: 100 % эффектов и радио, 70 % фона и 60 % музыки — уровни, на которых звук был записан (шина = 1)
     call(engine.audio, 'setBus', 'fx', st.volFx / 100);
     call(engine.audio, 'setBus', 'amb', st.volAmb / 70);
     call(engine.audio, 'setBus', 'radio', st.volRadio / 100);
+    call(engine.audio, 'setBus', 'music', st.volMusic / 60);
     call(engine, 'setQuality', st.quality);
     call(engine, 'setFrameCap', st.fps === 30 ? 30 : 0);
     const fm = $('fpsMeter');

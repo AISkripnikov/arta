@@ -7,7 +7,8 @@ import { RAD, tick, noWind, start } from './bot.js';
 const mem = (init) => { const m = {}; if (init) m['arta2.save'] = JSON.stringify(init); return { mem: m, get: (k) => m[k] || null, set: (k, v) => { m[k] = v; } }; };
 const stored = (st) => JSON.parse(st.mem['arta2.save']);
 const DEF = { sens: 1, invert: false, lefty: false, vibro: true, vibroPower: 'high', hints: 'new', autosave: true, speed: 1, confirmFriendly: true,
-  crewPanel: 'full', volFx: 100, volAmb: 70, volRadio: 100, text: 1, quality: 'high', fps: 60, nightTint: 'normal', showFps: false };
+  crewPanel: 'full', volFx: 100, volAmb: 70, volRadio: 100, volMusic: 60, text: 1, quality: 'auto', qualityChosen: false, fps: 60, nightTint: 'normal', showFps: false,
+  shake: true };
 /** Сохранение с прогрессом во всех полях. */
 const rich = (extra) => ({ unlocked: 12, stars: [3, 2, 1, 3, 3, 3, 3, 3, 3, 3, 3], records: [{ stars: 3, shots: 2, time: 50, integrity: 100, difficulty: 0 }],
   difficulty: 1, muted: true, xp: 2400, survivalBest: { waves: 5, kills: 14 }, upgrades: { hoist: 2, armor: 1 },
@@ -20,12 +21,12 @@ test('настройки: полный набор по умолчанию и о�
   for (const k of Object.keys(DEF)) assert.deepEqual(g.SETTINGS[k].def, DEF[k], k);
   const good = { sens: [0.6, 1.6, 1.2], invert: [true, false], lefty: [true, false], vibro: [false, true], vibroPower: ['low', 'high'],
     hints: ['all', 'off', 'new'], autosave: [false, true], speed: [2, 1], confirmFriendly: [false, true], crewPanel: ['compact', 'off', 'full'],
-    volFx: [0, 100, 35], volAmb: [0, 100, 35], volRadio: [0, 100, 35], text: [1.15, 1.3, 1], quality: ['mid', 'low', 'high'], fps: [30, 60],
-    nightTint: ['soft', 'normal'], showFps: [true, false] };
+    volFx: [0, 100, 35], volAmb: [0, 100, 35], volRadio: [0, 100, 35], volMusic: [0, 100, 35], text: [1.15, 1.3, 1], quality: ['mid', 'low', 'high', 'auto'],
+    qualityChosen: [false, true], fps: [30, 60], nightTint: ['soft', 'normal'], showFps: [true, false], shake: [false, true] };
   const bad = { sens: ['1', NaN, null], invert: [1, 'да', null], lefty: [1, 0], vibro: ['1', undefined], vibroPower: ['mid', true, 1],
     hints: [0, true, false, 'on', null], autosave: [1, null], speed: [3, 0, '2', 1.5], confirmFriendly: ['true', 2], crewPanel: ['hidden', true, 0],
-    volFx: [-1, 101, '50', NaN, null], volAmb: [-0.5, 100.5, Infinity], volRadio: [1000, 'громко'], text: [1.2, '1', 2], quality: ['ultra', 2, null],
-    fps: [45, '30', 120], nightTint: ['off', true], showFps: [1, 'да'] };
+    volFx: [-1, 101, '50', NaN, null], volAmb: [-0.5, 100.5, Infinity], volRadio: [1000, 'громко'], volMusic: [-1, 100.5, '60', NaN, null], text: [1.2, '1', 2],
+    quality: ['ultra', 'AUTO', 2, true, null], qualityChosen: [1, 'да', null], fps: [45, '30', 120], nightTint: ['off', true], showFps: [1, 'да'], shake: [0, 1, 'нет', null] };
   assert.deepEqual(Object.keys(good).sort(), Object.keys(DEF).sort()); assert.deepEqual(Object.keys(bad).sort(), Object.keys(DEF).sort());
   for (const k of Object.keys(DEF)) {
     for (const v of good[k]) { assert.equal(g.setSetting(k, v).ok, true, k + '=' + v); assert.equal(g.settings()[k], v, k); }
@@ -34,6 +35,9 @@ test('настройки: полный набор по умолчанию и о�
   }
   // громкость округляется до целого
   assert.ok(g.setSetting('volFx', 49.6).ok); assert.equal(g.settings().volFx, 50);
+  assert.ok(g.setSetting('volMusic', 12.4).ok); assert.equal(g.settings().volMusic, 12);
+  // области значений для интерфейса: качество — в том порядке, в каком его показывает экран настроек
+  assert.deepEqual(g.SETTINGS.quality.list, ['auto', 'high', 'mid', 'low']);
 });
 
 test('настройки: неизвестный ключ — отказ с событием denied, без события settings и без записи', () => {
@@ -50,13 +54,61 @@ test('настройки: сохраняются между запусками; 
   const st = mem(); const g = createGame({ storage: st });
   const ev = []; g.on('settings', (e) => ev.push(e));
   const want = { invert: true, vibroPower: 'low', hints: 'off', autosave: false, speed: 2, confirmFriendly: false, crewPanel: 'compact', volFx: 40, volAmb: 0,
-    volRadio: 55, quality: 'low', fps: 30, nightTint: 'soft', showFps: true };
+    volRadio: 55, volMusic: 25, quality: 'low', fps: 30, nightTint: 'soft', showFps: true, shake: false };
   for (const k of Object.keys(want)) assert.ok(g.setSetting(k, want[k]).ok);
   assert.equal(ev.length, Object.keys(want).length);
-  assert.deepEqual(ev[ev.length - 1], { ...DEF, ...want });
+  const all = { ...DEF, ...want, qualityChosen: true };      // выбор качества помечается сам
+  assert.deepEqual(ev[ev.length - 1], all);
   ev[0].quality = 'сломано'; assert.equal(g.settings().quality, 'low', 'событие отдаёт копию');
-  assert.deepEqual(stored(st).settings, { ...DEF, ...want });
-  assert.deepEqual(createGame({ storage: st }).settings(), { ...DEF, ...want });
+  assert.deepEqual(stored(st).settings, all);
+  assert.deepEqual(createGame({ storage: st }).settings(), all);
+});
+
+test('качество графики: «авто» по умолчанию; прежнее «высокое» без отметки о выборе один раз становится «авто»', () => {
+  // новая игра
+  const g0 = createGame({ storage: mem() });
+  assert.equal(g0.settings().quality, 'auto'); assert.equal(g0.settings().qualityChosen, false);
+  // сохранение прежней версии: 'high' было умолчанием — игрок его не выбирал
+  const st = mem(rich({ settings: { sens: 1.4, quality: 'high', volFx: 10 } }));
+  const g = createGame({ storage: st });
+  assert.deepEqual(g.settings(), { ...DEF, sens: 1.4, volFx: 10 });
+  assert.equal(g.settings().quality, 'auto'); assert.equal(g.settings().qualityChosen, false);
+  // пока ничего не записано, повторная загрузка даёт то же самое; запись сохраняет уже 'auto'
+  assert.equal(createGame({ storage: st }).settings().quality, 'auto');
+  assert.ok(g.setSetting('volFx', 20).ok);
+  assert.equal(stored(st).settings.quality, 'auto'); assert.equal(stored(st).settings.qualityChosen, false);
+  // игрок сам выбирает «ВЫСОКОЕ» — выбор помечается и переживает перезапуск (перенос одноразовый)
+  const ev = []; g.on('settings', (e) => ev.push(e));
+  assert.ok(g.setSetting('quality', 'high').ok);
+  assert.equal(ev.length, 1); assert.equal(ev[0].quality, 'high'); assert.equal(ev[0].qualityChosen, true);
+  assert.equal(stored(st).settings.quality, 'high'); assert.equal(stored(st).settings.qualityChosen, true);
+  const again = createGame({ storage: st });
+  assert.equal(again.settings().quality, 'high'); assert.equal(again.settings().qualityChosen, true);
+  assert.equal(createGame({ storage: st }).settings().quality, 'high', 'и при следующих запусках');
+  // выбор «АВТО» — тоже выбор; отказ (негодное значение) отметку не ставит
+  const g2 = createGame({ storage: mem() });
+  assert.equal(g2.setSetting('quality', 'ultra').ok, false); assert.equal(g2.settings().qualityChosen, false);
+  assert.ok(g2.setSetting('quality', 'auto').ok); assert.equal(g2.settings().quality, 'auto'); assert.equal(g2.settings().qualityChosen, true);
+  // 'mid' и 'low' из прежних сохранений не трогаются (отметки нет — и не появляется)
+  for (const q of ['mid', 'low']) {
+    const s = createGame({ storage: mem(rich({ settings: { quality: q } })) }).settings();
+    assert.equal(s.quality, q); assert.equal(s.qualityChosen, false);
+  }
+  // отметка — только настоящее true: «что-то истинное» выбором не считается
+  for (const flag of [1, 'true', null, {}]) {
+    const s = createGame({ storage: mem({ settings: { quality: 'high', qualityChosen: flag } }) }).settings();
+    assert.equal(s.quality, 'auto', String(flag)); assert.equal(s.qualityChosen, false, String(flag));
+  }
+  assert.equal(createGame({ storage: mem({ settings: { quality: 'high', qualityChosen: true } }) }).settings().quality, 'high');
+  // совсем старое сохранение без настроек — 'auto'
+  assert.equal(createGame({ storage: mem({ unlocked: 3, stars: [1, 1] }) }).settings().quality, 'auto');
+  // «по умолчанию» и сброс прогресса с настройками возвращают 'auto' и снимают отметку
+  assert.ok(again.resetSettings().ok);
+  assert.equal(again.settings().quality, 'auto'); assert.equal(again.settings().qualityChosen, false);
+  assert.equal(createGame({ storage: st }).settings().quality, 'auto');
+  const g3 = createGame({ storage: mem(rich({ settings: { quality: 'high', qualityChosen: true } })) });
+  assert.ok(g3.resetProgress().ok); assert.equal(g3.settings().quality, 'high', 'сброс прогресса без настроек выбор не трогает');
+  assert.ok(g3.resetProgress({ settings: true }).ok); assert.equal(g3.settings().quality, 'auto'); assert.equal(g3.settings().qualityChosen, false);
 });
 
 test('старые сохранения: четыре прежние настройки целы, новые — по умолчанию; мусор отбрасывается', () => {

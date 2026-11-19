@@ -3,9 +3,13 @@
 //   node build.mjs --dev <name>  — стенд разработки: src/dev/<name>.js → .dev/<name>/ (app.js + index.html)
 //   node build.mjs --publish     — выпустить обновление: скопировать собранную игру в ../ota (оттуда её
 //                                  скачивают установленные приложения после git push)
+//   node build.mjs --out <dir>   — личная полная сборка игры в <dir> (та же, что боевая: src/main.js + static). Каталог
+//                                  приложения (assets/www), ../ota и номер версии не трогает и version.json не пишет —
+//                                  такую сборку нельзя опубликовать. Нужна, когда игру собирают несколько человек сразу:
+//                                  ARTA_WWW=<dir> node tools/e2e.cjs · node tools/tour.cjs <снимки> --www <dir> · node tools/shot.cjs <dir> <png>
 import { build } from 'esbuild';
 import { cpSync, mkdirSync, writeFileSync, existsSync, rmSync, readdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve, relative, isAbsolute, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeManifest, readManifest, matches, describe } from './tools/manifest.mjs';
 
@@ -15,6 +19,9 @@ const devIdx = args.indexOf('--dev');
 const dev = devIdx >= 0 ? args[devIdx + 1] : null;
 const www = join(root, '..', 'app', 'src', 'main', 'assets', 'www');
 const ota = join(root, '..', 'ota');
+const outIdx = args.indexOf('--out');
+const outDir = outIdx >= 0 ? args[outIdx + 1] : null;
+const inside = (dir, parent) => { const r = relative(parent, dir); return r === '' || (!r.startsWith('..') && !isAbsolute(r)); };
 
 const common = {
   bundle: true,
@@ -34,6 +41,29 @@ if (dev) {
     '<style>html,body{margin:0;height:100%;background:#000;overflow:hidden;touch-action:none}#stage{width:100%;height:100%;display:block}</style>' +
     '</head><body><canvas id="stage"></canvas><script src="app.js"></script></body></html>');
   console.log('dev build →', out);
+} else if (outIdx >= 0) {
+  // Личная полная сборка: ровно то же, что боевая, но в свой каталог и без манифеста версии.
+  if (!outDir || outDir.startsWith('--')) throw new Error('Укажите каталог: node build.mjs --out <dir>');
+  if (args.includes('--publish')) throw new Error('--out и --publish вместе не работают: личную сборку не публикуют');
+  const out = resolve(outDir);
+  const repo = join(root, '..');
+  for (const [dir, name] of [[www, 'каталог приложения assets/www'], [ota, 'канал обновлений ota/'], [join(repo, 'app'), 'проект приложения app/'], [join(repo, 'dist'), 'dist/']]) {
+    if (inside(out, dir)) throw new Error(`--out: ${out} — это ${name}; личную сборку кладут в другое место (например, web/.dev/full-<имя>)`);
+  }
+  for (const dir of [join(root, 'src'), join(root, 'static'), join(root, 'tools'), join(root, 'test'), join(root, 'node_modules')]) {
+    if (inside(out, dir) || inside(dir, out)) throw new Error(`--out: ${out} пересекается с исходниками (${dir})`);
+  }
+  if (dirname(out) === join(root, '.dev') && existsSync(join(root, 'src', 'dev', basename(out) + '.js'))) throw new Error(`--out: ${out} — каталог стенда «${basename(out)}» (node build.mjs --dev ${basename(out)}); возьмите другое имя`);
+  // каталог пересоздаём, только если он пуст или в нём прежняя полная сборка (index.html + app.js + style.css): чужое не стираем
+  if (existsSync(out)) {
+    const names = readdirSync(out);
+    if (names.length && !['index.html', 'app.js', 'style.css'].every((n) => names.includes(n))) throw new Error(`--out: в ${out} лежит не сборка игры — укажите пустой или новый каталог`);
+    rmSync(out, { recursive: true });
+  }
+  mkdirSync(out, { recursive: true });
+  await build({ ...common, entryPoints: [join(root, 'src/main.js')], outfile: join(out, 'app.js'), minify: true, legalComments: 'none' });
+  cpSync(join(root, 'static'), out, { recursive: true });
+  console.log('личная сборка (без версии, не для публикации) →', out);
 } else if (args.includes('--publish')) {
   // Канал обновлений: ota/version.json (единственный изменяемый файл) + ota/v<версия>/… (неизменяемые файлы).
   const m = readManifest(www);

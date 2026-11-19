@@ -3,6 +3,7 @@ import { createEngine } from './engine/index.js';
 import { createGame } from './game/index.js';
 import { createShell } from './ui/shell.js';
 import { createIntro } from './ui/intro.js';
+import { createVfx } from './ui/vfx.js';
 import { createPlotStation } from './stations/plot.js';
 import { createComputerStation } from './stations/computer.js';
 import { createLoadingStation } from './stations/loading.js';
@@ -34,6 +35,7 @@ const storage = {
     let intro = null;
     try { intro = createIntro({ engine, audio: engine.audio }); } catch (e) { console.error('[main] вступительный ролик недоступен:', e); }
     const shell = createShell({ engine, game, stations, intro });
+    try { createVfx({ engine, game }); } catch (e) { console.error('[main] эффекты боя недоступны:', e); }
     engine.start();
     window.__arta = { engine, game, shell };
     // Сообщаем приложению, что эта версия игры запустилась: иначе после двух неудач оно вернёт прежнюю.

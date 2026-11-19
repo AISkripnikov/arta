@@ -72,6 +72,7 @@ const TEXT_SIZES = [1, 1.15, 1.3];
 const DETECT_FLASH = 8;       // с: батарею засекают в момент первого своего разрыва, но не позже этого после первого выстрела
 const HARASS_MIN = 0.6, HARASS_MAX = 2.5;      // км: куда ложатся снаряды беспокоящего огня (пока батарея не засечена)
 const HINT_MODES = ['new', 'all', 'off'];
+const QUALITY_TIERS = ['auto', 'high', 'mid', 'low'];
 const FRIEND_ZONE = 0.4;      // км: свои ближе этого к точке прицеливания — «в зоне поражения»
 /** Настройки: значение по умолчанию и область допустимых значений. Логика их хранит и проверяет; применяет — интерфейс
  *  (кроме autosave и speed — их учитывает сама логика). */
@@ -85,9 +86,11 @@ const SETTINGS = {
   // игра
   hints: oneOf('new', HINT_MODES), autosave: bool(true), speed: oneOf(1, [1, 2]), confirmFriendly: bool(true), crewPanel: oneOf('full', ['full', 'compact', 'off']),
   // звук
-  volFx: vol(100), volAmb: vol(70), volRadio: vol(100),
-  // экран
-  text: oneOf(1, TEXT_SIZES), quality: oneOf('high', ['high', 'mid', 'low']), fps: oneOf(60, [60, 30]), nightTint: oneOf('normal', ['normal', 'soft']), showFps: bool(false),
+  volFx: vol(100), volAmb: vol(70), volRadio: vol(100), volMusic: vol(60),
+  // экран: quality 'auto' — движок сам снижает качество, если телефон не успевает; qualityChosen — качество выбрано игроком
+  // (ставит setSetting('quality', …); без этого флага прежнее 'high' из старого сохранения при загрузке становится 'auto')
+  text: oneOf(1, TEXT_SIZES), quality: oneOf('auto', QUALITY_TIERS), qualityChosen: bool(false), fps: oneOf(60, [60, 30]), nightTint: oneOf('normal', ['normal', 'soft']), showFps: bool(false),
+  shake: bool(true),
 };
 const SETTING_KEYS = Object.keys(SETTINGS);
 const settingDefaults = () => { const o = {}; for (const k of SETTING_KEYS) o[k] = SETTINGS[k].def; return o; };
@@ -149,6 +152,8 @@ export function createGame(opts = {}) {
     if ('vibro' in st) st.vibro = st.vibro !== false;
     // «подсказки обучения» были выключателем: вкл → «только новое», выкл → «нет»
     if (st.hints === true) st.hints = 'new'; else if (st.hints === false) st.hints = 'off';
+    // качество графики: прежде умолчанием было 'high'. Если игрок сам его не выбирал (флага qualityChosen нет) — теперь 'auto'
+    if (st.quality === 'high' && st.qualityChosen !== true) st.quality = 'auto';
     save.settings = loadSettings(st);
     if (!save.daily || typeof save.daily !== 'object' || !save.daily.date) save.daily = null;
     if (!save.resume || typeof save.resume !== 'object' || !save.resume.snap) save.resume = null;
@@ -1704,7 +1709,8 @@ export function createGame(opts = {}) {
   // ---------- настройки ----------
   const settings = () => ({ ...save.settings });
   /** Изменить одну настройку. Неизвестный ключ или значение вне области — отказ, ничего не меняется.
-   *  Исключение: sens вне 0.6…1.6 обрезается до границы (маховик настройки может «перелететь»). */
+   *  Исключение: sens вне 0.6…1.6 обрезается до границы (маховик настройки может «перелететь»).
+   *  Любой выбор качества (quality), в том числе 'auto', заодно ставит qualityChosen = true. */
   function setSetting(key, value) {
     const d = Object.prototype.hasOwnProperty.call(SETTINGS, key) ? SETTINGS[key] : null;
     if (!d) return deny('setSetting', 'Нет такой настройки');
@@ -1712,6 +1718,7 @@ export function createGame(opts = {}) {
     if (key === 'sens') { if (typeof v !== 'number' || !isFinite(v)) return deny('setSetting', 'Неверное значение'); v = clamp(v, 0.6, 1.6); }
     if (!d.ok(v)) return deny('setSetting', 'Неверное значение');
     save.settings[key] = d.fix ? d.fix(v) : v;
+    if (key === 'quality') save.settings.qualityChosen = true;
     persist(); emit('settings', settings());
     return ok();
   }

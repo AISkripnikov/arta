@@ -173,7 +173,7 @@ topic: null | { id, since (time), shown (с настоящего времени)
   Налёт добавлен в три старых задания: 19 «Танкеры», 23 «Генеральное сражение», 26 «Штормовая дуэль».
 - `game.save` = `{ unlocked, stars[], records[], difficulty, muted, xp, survivalBest,`
   `upgrades: { hoist, range, spotter, armor, magazine, repair } (0…3), points (производное, пересчитывается),`
-  `settings: { …18 ключей, раздел 8 }, daily: null | { date, score, stars }, resume: null | { snap, title, savedAt, kind, integrity },`
+  `settings: { …21 ключ, раздел 8 }, daily: null | { date, score, stars }, resume: null | { snap, title, savedAt, kind, integrity },`
   `learned: { [topicId]: true } }` — изученные темы подсказок (раздел 10).
   Старые сохранения загружаются: чего нет — по умолчанию; мусор в новых полях заменяется значениями по умолчанию.
 
@@ -314,7 +314,7 @@ transport, landing, destroyer, cruiser, minelayer, howitzer, radar, fort, submar
 (местная дата устройства, `'YYYY-MM-DD'`).
 
 ### 8. Настройки и сохранение боя
-- `save.settings` — 18 ключей. Логика их хранит и проверяет; применяет интерфейс (кроме `autosave`, `speed` и `hints`).
+- `save.settings` — 21 ключ. Логика их хранит и проверяет; применяет интерфейс (кроме `autosave`, `speed` и `hints`).
   Типы строгие: булевы — только `true/false`, числа — только числа (строка `'30'` — отказ).
 
   | Ключ | Область | По умолчанию | Смысл |
@@ -329,16 +329,20 @@ transport, landing, destroyer, cruiser, minelayer, howitzer, radar, fort, submar
   | `speed` | 1 \| 2 | 1 | скорость боя по умолчанию: ставится в `begin()` и `restore()` |
   | `confirmFriendly` | bool | true | спрашивать «СВОИ В ЗОНЕ. ОГОНЬ?» (спрашивает интерфейс, `fire()` не блокируется) |
   | `crewPanel` | `'full'` \| `'compact'` \| `'off'` | `'full'` | плашки расчёта |
-  | `volFx`, `volAmb`, `volRadio` | число 0…100 (округляется до целого) | 100, 70, 100 | громкость эффектов / фона башни / радио |
+  | `volFx`, `volAmb`, `volRadio`, `volMusic` | число 0…100 (округляется до целого) | 100, 70, 100, 60 | громкость эффектов / фона башни / радио / музыки |
   | `text` | 1 \| 1.15 \| 1.3 | 1 | размер надписей |
-  | `quality` | `'high'` \| `'mid'` \| `'low'` | `'high'` | качество графики |
+  | `quality` | `'auto'` \| `'high'` \| `'mid'` \| `'low'` | `'auto'` | качество графики; `'auto'` — движок сам снижает качество, если телефон не успевает |
+  | `qualityChosen` | bool | false | игрок сам выбрал качество: `setSetting('quality', …)` (любое значение, и `'auto'`) ставит `true`; строки в настройках у флага нет |
   | `fps` | 60 \| 30 | 60 | ограничение кадров |
   | `nightTint` | `'normal'` \| `'soft'` | `'normal'` | яркость ночного красного фильтра |
   | `showFps` | bool | false | счётчик кадров |
+  | `shake` | bool | true | тряска камеры при выстреле и близких разрывах (применяет интерфейс: `engine.settings.shake`) |
 
   Общий звук вкл/выкл — по-прежнему `save.muted` / `setMuted(b)` (не в `settings`; события не шлёт). Сложность — `save.difficulty` / `setDifficulty`.
   Старое сохранение: недостающие и негодные значения — по умолчанию, лишние ключи отбрасываются; прежний выключатель
-  `hints: true/false` читается как `'new'` / `'off'`.
+  `hints: true/false` читается как `'new'` / `'off'`. Качество: прежним умолчанием было `'high'`, поэтому сохранение с
+  `quality: 'high'` без `qualityChosen: true` при загрузке становится `'auto'` (один раз: выбранное потом «ВЫСОКОЕ» уже с флагом
+  и остаётся); `'mid'` и `'low'` не трогаются. `resetSettings()` возвращает `'auto'` и снимает флаг.
   Смена `speed` посреди боя текущую скорость не трогает (её меняет `setSpeed`); `setSpeed` принимает 1, 2, 3.
 - `resetSettings()` — `save.settings` по умолчанию, `save.muted = false`. Сложность не трогает.
 - `resetProgress({ settings })` — `unlocked: 1`, `stars: []`, `records: []`, `xp: 0`, `survivalBest: null`, `upgrades` — все 0, `points: 0`,

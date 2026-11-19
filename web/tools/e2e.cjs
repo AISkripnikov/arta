@@ -15,9 +15,14 @@
 //  8) подсказки и засечка (чистое хранилище, открытая кампания): задание 1 — по шагам; задание 4 — пусто, пока не встретилось
 //      новое, затем «НОВОЕ ·» с объяснением в строке радио и кольцом, гаснет после действия; касание строки показывает объяснение снова; «ПО ШАГАМ» и «ВЫКЛ»; блок «НОВОЕ В ЭТОМ
 //      ЗАДАНИИ»; органы управления тем существуют на постах; плашка «НАС НЕ ВИДЯТ» → выстрел → «ЗАСЕЧЕНЫ».
-//   node tools/e2e.cjs [итог.png]   (рядом кладутся <итог>-debrief.png и <итог>-survival.png)
+//   node tools/e2e.cjs [итог.png] [--www <каталог сборки>]   (рядом кладутся <итог>-debrief.png и <итог>-survival.png)
+// Какая сборка проверяется: --www <dir> или переменная ARTA_WWW=<dir> (личная сборка: node build.mjs --out <dir>);
+// без них — боевая, app/src/main/assets/www.
 const { chromium } = require('playwright');
 const path = require('path');
+{ const i = process.argv.indexOf('--www'); if (i >= 0) { process.env.ARTA_WWW = process.argv[i + 1] || ''; process.argv.splice(i, 2); } }
+const WWW = path.join(path.resolve(process.env.ARTA_WWW || path.join(__dirname, '../../app/src/main/assets/www')), 'index.html');
+if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WWW + ' (node build.mjs или node build.mjs --out <dir>)'); process.exit(1); }
 (async () => {
   const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   const p = await (await b.newContext({ viewport: { width: 844, height: 390 }, hasTouch: true })).newPage();
@@ -34,7 +39,7 @@ const path = require('path');
   p.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') { errs++; console.log('CONSOLE', m.text()); } });
   // приложение ждёт ArtaNative.ready() — подтверждение, что версия игры запустилась; ролик не должен его задерживать
   await p.addInitScript(() => { window.__ready = 0; window.ArtaNative = { ready() { window.__ready++; }, applyUpdate() {} }; });
-  await p.goto('file://' + path.resolve(__dirname, '../../app/src/main/assets/www/index.html'));
+  await p.goto('file://' + WWW);
   await p.waitForFunction(() => window.__arta);
   // самый первый запуск: до меню идёт вступительный ролик; запуск подтверждается, пока он ещё на экране
   const boot = await p.evaluate(() => ({ intro: !!__arta.shell.intro, playing: __arta.shell.introPlaying, el: !!document.getElementById('arta-intro'), skip: !!document.querySelector('#arta-intro [data-ai=skip]') }));
@@ -115,10 +120,27 @@ const path = require('path');
     ['ctrl', '#setInvert [data-val="1"]', 'invert', true], ['ctrl', '#setLefty [data-val="1"]', 'lefty', true], ['ctrl', '#setLefty [data-val="0"]', 'lefty', false],
     ['ctrl', '#setSens [data-val="1.3"]', 'sens', 1.3], ['ctrl', '#setVibroPower [data-val="low"]', 'vibroPower', 'low'], ['ctrl', '#setVibro [data-val="0"]', 'vibro', false],
     ['sound', '#setSound [data-val="0"]', 'sound', false], ['sound', '#setSound [data-val="1"]', 'sound', true], ['sound', '#setVolFx [data-step="-10"]', 'volFx', 90],
-    ['sound', '#setVolAmb [data-step="10"]', 'volAmb', 80], ['sound', '#setVolRadio [data-step="-10"]', 'volRadio', 90],
-    ['screen', '#setText [data-val="1.15"]', 'text', 1.15], ['screen', '#setQuality [data-val="mid"]', 'quality', 'mid'], ['screen', '#setQuality [data-val="low"]', 'quality', 'low'],
+    ['sound', '#setVolAmb [data-step="10"]', 'volAmb', 80], ['sound', '#setVolRadio [data-step="-10"]', 'volRadio', 90], ['sound', '#setVolMusic [data-step="10"]', 'volMusic', 70],
+    ['screen', '#setText [data-val="1.15"]', 'text', 1.15], ['screen', '#setQuality [data-val="high"]', 'quality', 'high'], ['screen', '#setQuality [data-val="auto"]', 'quality', 'auto'],
+    ['screen', '#setQuality [data-val="mid"]', 'quality', 'mid'], ['screen', '#setQuality [data-val="low"]', 'quality', 'low'],
     ['screen', '#setFps [data-val="30"]', 'fps', 30], ['screen', '#setNight [data-val="soft"]', 'nightTint', 'soft'], ['screen', '#setShowFps [data-val="1"]', 'showFps', true],
+    ['screen', '#setShake [data-val="0"]', 'shake', false],
   ];
+  // качество: «АВТО» — по умолчанию и подсвечено; порядок кнопок; выбор в меню помечается (qualityChosen); 'auto' доходит до движка
+  await tab('screen');
+  const q0 = await p.evaluate(() => { const { game, engine } = __arta; return { set: game.settings().quality, chosen: game.settings().qualityChosen, auto: engine.qualityAuto, tier: engine.quality.tier,
+    seg: [...document.querySelectorAll('#setQuality button')].map((x) => x.textContent).join('/'), on: (document.querySelector('#setQuality button.on') || {}).textContent,
+    note: document.querySelector('[data-row="setQuality"] small').textContent, shake: engine.settings.shake, music: engine.audio.buses.music,
+    labels: ['setVolMusic', 'setShake'].map((id) => document.querySelector('[data-row="' + id + '"] b').textContent).join('|'),
+    panes: ['setVolMusic', 'setShake'].map((id) => document.querySelector('[data-row="' + id + '"]').parentNode.dataset.pane).join() }; });
+  if (q0.set !== 'auto' || q0.chosen !== false || q0.auto !== true || q0.tier !== 'high' || q0.on !== 'АВТО') fail('качество по умолчанию не «АВТО»: ' + JSON.stringify(q0));
+  if (q0.seg !== 'АВТО/ВЫСОКОЕ/СРЕДНЕЕ/ЭКОНОМНОЕ' || !q0.note.startsWith('АВТО само снижает качество, если телефон не успевает')) fail('строка качества: ' + q0.seg + ' · ' + q0.note);
+  if (q0.shake !== true || q0.music !== 1 || q0.labels !== 'ГРОМКОСТЬ МУЗЫКИ|ТРЯСКА КАМЕРЫ ПРИ ВЫСТРЕЛЕ' || q0.panes !== 'sound,screen') fail('музыка и тряска по умолчанию: ' + JSON.stringify(q0));
+  await p.click('#setQuality [data-val="high"]');
+  const q1 = await p.evaluate(() => ({ chosen: __arta.game.settings().qualityChosen, auto: __arta.engine.qualityAuto, tier: __arta.engine.quality.tier }));
+  if (q1.chosen !== true || q1.auto !== false || q1.tier !== 'high') fail('выбор «ВЫСОКОЕ» не помечен или не дошёл до движка: ' + JSON.stringify(q1));
+  await p.click('#setQuality [data-val="auto"]');
+  if (await p.evaluate(() => __arta.engine.qualityAuto !== true || __arta.engine.quality.tier !== 'high' || __arta.game.settings().qualityChosen !== true)) fail('выбор «АВТО» не дошёл до движка');
   const setBad = [];
   for (const [t, sel, key, want] of CASES) {
     await tab(t); await p.click(sel);
@@ -145,7 +167,7 @@ const path = require('path');
     let rtW = 0; engine.getStation('observe').group.traverse((o) => { const m = o.material && o.material.map; if (m && m.isRenderTargetTexture) rtW = m.image.width; });
     return { volRadio: st.volRadio, bar: document.querySelector('#setVolRadio .sld-bar i').style.width, label: document.querySelector('#setVolRadio .sld-bar b').textContent,
       powerOff: [...document.querySelectorAll('#setVibroPower button')].every((x) => x.disabled),
-      invert: engine.settings.invert, sens: engine.settings.sens, q: engine.quality, cap: engine.frameCap, frames, free, slow, maxDt, rtW, buses: engine.audio.buses, muted: engine.audio.muted,
+      invert: engine.settings.invert, sens: engine.settings.sens, shake: engine.settings.shake, qAuto: engine.qualityAuto, q: engine.quality, cap: engine.frameCap, frames, free, slow, maxDt, rtW, buses: engine.audio.buses, muted: engine.audio.muted,
       body: document.body.className, fps: !fm.classList.contains('hidden') && fm.textContent, fpsSeen: fm.offsetWidth > 0, night: getComputedStyle(document.getElementById('night')).transitionProperty,
       rcol: getComputedStyle(document.querySelector('#crew .crew-chip')).display };
   });
@@ -153,10 +175,11 @@ const path = require('path');
   if (eng.volRadio !== 25 || eng.bar !== '25%' || eng.label !== '25') fail('ползунок громкости радио не встал на 25: ' + eng.volRadio + ' ' + eng.bar);
   if (!eng.powerOff) fail('сила вибрации доступна при выключенной вибрации');
   if (eng.invert !== true || eng.sens !== 1.3) fail('инверсия или чувствительность не дошли до движка');
-  if (eng.q.tier !== 'low' || eng.q.pixelRatio !== 1 || eng.q.rtScale !== 0.5 || eng.rtW !== 256) fail('качество «экономное» не дошло до движка: ' + JSON.stringify(eng.q) + ' окуляр ' + eng.rtW);
+  if (eng.q.tier !== 'low' || eng.q.pixelRatio !== 1 || eng.q.rtScale !== 0.5 || eng.rtW !== 256 || eng.qAuto !== false) fail('качество «экономное» не дошло до движка: ' + JSON.stringify(eng.q) + ' окуляр ' + eng.rtW);
+  if (eng.shake !== false) fail('выключенная тряска камеры не дошла до движка');
   if (eng.cap !== 30 || eng.frames > 34) fail('ограничение 30 кадров не работает: ' + eng.cap + ', кадров за секунду ' + eng.frames);
   if (eng.free < 5 || eng.slow < 1 || eng.slow > 4 || eng.maxDt > 0.0501) fail('пропуск кадров не работает: без предела ' + eng.free + ' кадров за 1,5 с, с пределом 2 к/с — ' + eng.slow + ', dt до ' + eng.maxDt);
-  if (Math.abs(eng.buses.fx - 0.9) > 1e-6 || Math.abs(eng.buses.amb - 80 / 70) > 1e-6 || Math.abs(eng.buses.radio - 0.25) > 1e-6 || eng.muted) fail('громкости не дошли до звука: ' + JSON.stringify(eng.buses));
+  if (Math.abs(eng.buses.fx - 0.9) > 1e-6 || Math.abs(eng.buses.amb - 80 / 70) > 1e-6 || Math.abs(eng.buses.radio - 0.25) > 1e-6 || Math.abs(eng.buses.music - 70 / 60) > 1e-6 || eng.muted) fail('громкости не дошли до звука: ' + JSON.stringify(eng.buses));
   if (!/crew-off/.test(eng.body) || !/night-soft/.test(eng.body) || !/text-l/.test(eng.body) || eng.rcol !== 'none') fail('классы настроек не применены: ' + eng.body);
   if (!/^\d+ К\/С$/.test(eng.fps || '')) fail('счётчик кадров не включён: ' + eng.fps);
   if (eng.fpsSeen) fail('счётчик кадров виден на экране настроек вне боя (закрывает органы)');
@@ -210,11 +233,12 @@ const path = require('path');
   if (dataTab.rows !== 'setIntro,setTutorial,setUpReset,setDefaults,setWipe,setVerRow' || dataTab.wipe !== 'СБРОСИТЬ ПРОГРЕСС') fail('вкладка «ДАННЫЕ»: ' + JSON.stringify(dataTab));
   await p.click('#setDefaults'); await p.click('#dlgBtns .btn:has-text("ВОССТАНОВИТЬ")');
   const def = await p.evaluate(() => { const { game, engine } = __arta, st = game.settings(), D = game.SETTINGS;
-    return { diff: Object.keys(D).filter((k) => st[k] !== D[k].def), n: Object.keys(D).length, q: engine.quality.tier, cap: engine.frameCap, invert: engine.settings.invert, body: document.body.className.trim(),
+    return { diff: Object.keys(D).filter((k) => st[k] !== D[k].def), n: Object.keys(D).length, q: engine.quality.tier, qAuto: engine.qualityAuto, qSet: st.quality, shake: engine.settings.shake, cap: engine.frameCap, invert: engine.settings.invert, body: document.body.className.trim(),
       buses: engine.audio.buses, shown: document.getElementById('settings').classList.contains('show'), fps: document.getElementById('fpsMeter').classList.contains('hidden'), difficulty: game.state.difficulty }; });
   console.log('settings-defaults', JSON.stringify(def));
-  if (def.diff.length || def.n < 18) fail('«по умолчанию» не вернуло настройки: ' + def.diff.join());
+  if (def.diff.length || def.n < 21) fail('«по умолчанию» не вернуло настройки: ' + def.diff.join());
   if (def.q !== 'high' || def.cap !== 0 || def.invert || def.body || !def.fps || def.buses.fx !== 1 || def.buses.amb !== 1 || def.buses.radio !== 1) fail('«по умолчанию» не дошло до движка: ' + JSON.stringify(def));
+  if (def.qSet !== 'auto' || def.qAuto !== true || def.shake !== true || def.buses.music !== 1) fail('«по умолчанию»: качество «АВТО», тряска и музыка не дошли до движка: ' + JSON.stringify(def));
   if (!def.shown || def.difficulty !== 1) fail('«по умолчанию» закрыло настройки или сменило сложность');
   await tab('game'); await p.click('#setDiff [data-val="0"]');
   await p.click('#settings [data-setclose]');
@@ -745,9 +769,9 @@ const path = require('path');
   await p.click('#dlgBtns .btn:has-text("ДАЛЬШЕ")');
   await holdWipe(2500);
   await p.waitForFunction(() => document.getElementById('menu').classList.contains('show') && !__arta.shell.introPlaying);
-  const pr2 = await progress(), q2 = await p.evaluate(() => ({ q: __arta.engine.quality.tier, set: __arta.game.settings().quality, seg: (document.querySelector('#diffSeg button.on') || {}).textContent }));
+  const pr2 = await progress(), q2 = await p.evaluate(() => ({ q: __arta.engine.quality.tier, auto: __arta.engine.qualityAuto, set: __arta.game.settings().quality, chosen: __arta.game.settings().qualityChosen, seg: (document.querySelector('#diffSeg button.on') || {}).textContent }));
   console.log('wipe-all', JSON.stringify({ chkOn, pr2, q2 }));
-  if (!chkOn || pr2.xp !== 0 || pr2.sens !== 1 || pr2.difficulty !== 0 || q2.q !== 'high' || q2.set !== 'high' || q2.seg !== 'КУРСАНТ') fail('сброс с настройками не вернул настройки: ' + JSON.stringify({ pr2, q2 }));
+  if (!chkOn || pr2.xp !== 0 || pr2.sens !== 1 || pr2.difficulty !== 0 || q2.q !== 'high' || q2.auto !== true || q2.set !== 'auto' || q2.chosen !== false || q2.seg !== 'КУРСАНТ') fail('сброс с настройками не вернул настройки: ' + JSON.stringify({ pr2, q2 }));
 
   // ---------- 7. находки проверки: настоящий ролик, двойные касания, прерванные запуск и удержание (чистое хранилище, 740×360) ----------
   {
@@ -755,7 +779,7 @@ const path = require('path');
     q.setDefaultTimeout(120000); humanPace(q);
     q.on('pageerror', (e) => { errs++; console.log('PAGEERROR(7)', e.message); });
     await q.addInitScript(() => { window.ArtaNative = { ready() {}, applyUpdate() {} }; });
-    const url = 'file://' + path.resolve(__dirname, '../../app/src/main/assets/www/index.html');
+    const url = 'file://' + WWW;
     const st = () => q.evaluate(() => ({ phase: __arta.game.state.phase, shown: [...document.querySelectorAll('.show')].map((e) => e.id).filter((id) => ['menu', 'settings', 'dialog', 'missions', 'upgrades'].includes(id)),
       intro: __arta.shell.introPlaying, el: !!document.getElementById('arta-intro'), hud: !document.getElementById('hud').classList.contains('hidden'), news: localStorage.getItem('arta2.news') }));
     const center = async (sel) => { const bx = await q.locator(sel).first().boundingBox(); return [bx.x + bx.width / 2, bx.y + bx.height / 2]; };
@@ -878,7 +902,7 @@ const path = require('path');
     r.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') { errs++; console.log('CONSOLE(8)', m.text()); } });
     // игрок с открытой кампанией, который ещё ничего не изучил (xp > 0 — ролик не показывается)
     await r.addInitScript(() => { window.ArtaNative = { ready() {}, applyUpdate() {} }; if (!localStorage.getItem('arta2.save')) localStorage.setItem('arta2.save', JSON.stringify({ unlocked: 36, stars: [], xp: 10, learned: {} })); });
-    await r.goto('file://' + path.resolve(__dirname, '../../app/src/main/assets/www/index.html'));
+    await r.goto('file://' + WWW);
     await r.waitForFunction(() => window.__arta && __arta.shell);
     if (await r.isVisible('#dialog.show')) await r.click('#dlgBtns .btn');
     const hud = () => r.evaluate(() => { const g = __arta.game, hl = document.getElementById('highlight'), tp = document.getElementById('radio'), nx = document.querySelector('#nav button.next'), dc = document.getElementById('detChip');
