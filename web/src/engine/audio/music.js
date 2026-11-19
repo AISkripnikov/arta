@@ -60,7 +60,8 @@ export function createMusic(core) {
     const ctx = core.ctx; if (!playing || !ctx) return;
     const now = ctx.currentTime;
     live = live.filter((k) => k.end > now);
-    if (core.audible()) { const to = now + 1.6; if (to > upto) { schedule(upto, to); upto = to; } }
+    // если таймер надолго отстал (фоновая вкладка), пропущенные события не ставятся в прошлое пачкой
+    if (core.audible()) { const to = now + 1.6; if (to > upto) { schedule(Math.max(upto, now - 0.05), to); upto = to; } }
   }
 
   return {

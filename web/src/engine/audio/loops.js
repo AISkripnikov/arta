@@ -121,6 +121,7 @@ export function createLoops(core, satCurve) {
     core.play('hoistStart');
     const ch = bufLoop('hoistLoop', t + 0.08, { gain: G('hoistLoop'), fade: 0.08 });
     if (ch) ch.stop(end, 0.06);
+    else core.play('hoistLoop', { when: 0.08 });               // банк ещё не готов: один круг цепи вживую
     core.play('hoistStop', { when: dur });
   };
 

@@ -119,6 +119,8 @@ export function createAudio(opts = {}) {
         onReady(name) { const list = ready[name]; if (list) { delete ready[name]; list.forEach((f) => { try { f(); } catch (e) { /* тихо */ } }); } },
       });
       if (!offline) {
+        // своя страховка на сворачивание (движок делает то же самое; вызовы идемпотентны)
+        if (typeof document !== 'undefined' && document.addEventListener) document.addEventListener('visibilitychange', onVis);
         setTimeout(() => { if (bank) bank.start(); }, 250);
         sweeper = setInterval(() => { try { if (ctx && ctx.state === 'running') sweep(ctx.currentTime); } catch (e) { /* тихо */ } }, 1500);
       }
@@ -129,6 +131,8 @@ export function createAudio(opts = {}) {
       return true;
     } catch (e) { failed = true; ctx = null; return false; }
   }
+
+  function onVis() { try { if (document.hidden) api.suspend(); else api.resume(); } catch (e) { /* тихо */ } }
 
   /** Вход шины в заданном пространстве (сухой сигнал + посылы в реверберации). */
   function input(busName, space) {
@@ -251,6 +255,7 @@ export function createAudio(opts = {}) {
     /** Освободить контекст. */
     dispose() {
       clearInterval(sweeper); clearTimeout(irTimer);
+      try { if (!offline && typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVis); } catch (e) { /* тихо */ }
       try { amb.dispose(); amb.reset(); music.reset(); loops.reset(); if (bank && !shared.bank) bank.dispose(); if (ctx && !offline) ctx.close(); } catch (e) { /* тихо */ }
       ctx = null; bank = null; voices = []; garbage = [];
       for (const k of Object.keys(inputs)) delete inputs[k];

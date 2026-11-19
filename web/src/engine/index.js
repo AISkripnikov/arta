@@ -491,8 +491,9 @@ export async function createEngine(canvas, opts = {}) {
     applyQuality(QUALITY[AQ.tier]);
     return true;
   }
-  function autoSample(ms) {
+  function autoSample(ms, cpuMs) {
     if (!engine.qualityAuto) return;
+    const cpu = cpuMs == null ? stats.frameMs : cpuMs;
     if (!(ms > 0) || ms > 1000 || document.hidden) return;      // пауза, свёрнутое приложение — не замер
     if (AQ.hold > 0) { AQ.hold -= ms / 1000; return; }           // первые секунды и смена уровня: компиляция шейдеров
     AQ.acc += ms; AQ.n++;
@@ -500,7 +501,7 @@ export async function createEngine(canvas, opts = {}) {
     const avg = AQ.acc / AQ.n, cap = frameCap ? 1000 / frameCap : 0;
     AQ.acc = 0; AQ.n = 0; AQ.last = avg;
     if (avg > Math.max(24, cap + 8)) { AQ.slow++; AQ.good = 0; }
-    else { AQ.slow = 0; AQ.good = avg <= Math.max(18, cap + 2) && stats.frameMs < 9 ? AQ.good + 1 : 0; }
+    else { AQ.slow = 0; AQ.good = avg <= Math.max(18, cap + 2) && cpu < 9 ? AQ.good + 1 : 0; }
     if (AQ.slow >= 4) { AQ.slow = 0; autoStep(-1); }
     else if (AQ.good >= 30 && AQ.ups < 1) { AQ.good = 0; if (!autoStep(1)) AQ.ups = 1; }
   }
@@ -672,13 +673,16 @@ export async function createEngine(canvas, opts = {}) {
       stats() {
         return {
           calls: stats.calls, triangles: stats.triangles, frameMs: +stats.frameMs.toFixed(2), fps: +stats.fps.toFixed(1),
-          tier: quality.tier, auto: !!engine.qualityAuto, autoMs: +AQ.last.toFixed(1),
+          tier: quality.tier, auto: !!engine.qualityAuto, autoTier: AQ.tier, autoMs: +AQ.last.toFixed(1), autoUps: AQ.ups, autoDowns: AQ.downs,
           shadowCalls: stats.shadowCalls, shadowUpdates: shStats.updates, postCalls: stats.postCalls, postPasses: stats.postPasses,
           particles: engine.fx ? engine.fx.particles : 0,
           geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures,
           programs: renderer.info.programs ? renderer.info.programs.length : 0,
         };
       },
+      /** Для проверки «АВТО» (tools/test-quality.cjs): подать count интервалов между кадрами по ms мс с временем логики cpuMs,
+       *  как будто их намерил цикл кадров. Действует только при qualityAuto. */
+      autoFeed(ms, count = 1, cpuMs = 4) { for (let i = 0; i < count; i++) autoSample(ms, cpuMs); return engine.debug.stats(); },
       /** Один кадр вручную (для тестов и снимков при остановленном цикле); render=false — только логика, без отрисовки. */
       step(dt = 1 / 60, render = true) { step(dt, render); },
       /** Рамка зоны управления (|x| ≤ 0.85, 0.74 ≤ y ≤ 1.46, z = 0) и габарит поста у текущего поста. */

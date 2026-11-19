@@ -126,21 +126,21 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
     ['screen', '#setFps [data-val="30"]', 'fps', 30], ['screen', '#setNight [data-val="soft"]', 'nightTint', 'soft'], ['screen', '#setShowFps [data-val="1"]', 'showFps', true],
     ['screen', '#setShake [data-val="0"]', 'shake', false],
   ];
-  // качество: «АВТО» — по умолчанию и подсвечено; порядок кнопок; выбор в меню помечается (qualityChosen); 'auto' доходит до движка
+  // качество: «АВТО» — по умолчанию и подсвечено; порядок кнопок; выбор в меню помечается (qualityChosen); 'auto' доходит до движка («АВТО» подбирает уровень само — на SwiftShader за секунды уходит вниз; настоящий подбор проверяет tools/test-quality.cjs)
   await tab('screen');
-  const q0 = await p.evaluate(() => { const { game, engine } = __arta; return { set: game.settings().quality, chosen: game.settings().qualityChosen, auto: engine.qualityAuto, tier: engine.quality.tier,
+  const q0 = await p.evaluate(() => { const { game, engine } = __arta; return { set: game.settings().quality, chosen: game.settings().qualityChosen, auto: engine.qualityAuto, tier: engine.quality.tier, autoTier: engine.debug.stats().autoTier,
     seg: [...document.querySelectorAll('#setQuality button')].map((x) => x.textContent).join('/'), on: (document.querySelector('#setQuality button.on') || {}).textContent,
     note: document.querySelector('[data-row="setQuality"] small').textContent, shake: engine.settings.shake, music: engine.audio.buses.music,
     labels: ['setVolMusic', 'setShake'].map((id) => document.querySelector('[data-row="' + id + '"] b').textContent).join('|'),
     panes: ['setVolMusic', 'setShake'].map((id) => document.querySelector('[data-row="' + id + '"]').parentNode.dataset.pane).join() }; });
-  if (q0.set !== 'auto' || q0.chosen !== false || q0.auto !== true || q0.tier !== 'high' || q0.on !== 'АВТО') fail('качество по умолчанию не «АВТО»: ' + JSON.stringify(q0));
+  if (q0.set !== 'auto' || q0.chosen !== false || q0.auto !== true || !['high', 'mid', 'low'].includes(q0.tier) || q0.tier !== q0.autoTier || q0.on !== 'АВТО') fail('качество по умолчанию не «АВТО»: ' + JSON.stringify(q0));
   if (q0.seg !== 'АВТО/ВЫСОКОЕ/СРЕДНЕЕ/ЭКОНОМНОЕ' || !q0.note.startsWith('АВТО само снижает качество, если телефон не успевает')) fail('строка качества: ' + q0.seg + ' · ' + q0.note);
   if (q0.shake !== true || q0.music !== 1 || q0.labels !== 'ГРОМКОСТЬ МУЗЫКИ|ТРЯСКА КАМЕРЫ ПРИ ВЫСТРЕЛЕ' || q0.panes !== 'sound,screen') fail('музыка и тряска по умолчанию: ' + JSON.stringify(q0));
   await p.click('#setQuality [data-val="high"]');
   const q1 = await p.evaluate(() => ({ chosen: __arta.game.settings().qualityChosen, auto: __arta.engine.qualityAuto, tier: __arta.engine.quality.tier }));
   if (q1.chosen !== true || q1.auto !== false || q1.tier !== 'high') fail('выбор «ВЫСОКОЕ» не помечен или не дошёл до движка: ' + JSON.stringify(q1));
   await p.click('#setQuality [data-val="auto"]');
-  if (await p.evaluate(() => __arta.engine.qualityAuto !== true || __arta.engine.quality.tier !== 'high' || __arta.game.settings().qualityChosen !== true)) fail('выбор «АВТО» не дошёл до движка');
+  if (await p.evaluate(() => __arta.engine.qualityAuto !== true || __arta.engine.quality.tier !== __arta.engine.debug.stats().autoTier || __arta.game.settings().qualityChosen !== true)) fail('выбор «АВТО» не дошёл до движка (или не вернул подобранный уровень)');
   const setBad = [];
   for (const [t, sel, key, want] of CASES) {
     await tab(t); await p.click(sel);
@@ -769,9 +769,9 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
   await p.click('#dlgBtns .btn:has-text("ДАЛЬШЕ")');
   await holdWipe(2500);
   await p.waitForFunction(() => document.getElementById('menu').classList.contains('show') && !__arta.shell.introPlaying);
-  const pr2 = await progress(), q2 = await p.evaluate(() => ({ q: __arta.engine.quality.tier, auto: __arta.engine.qualityAuto, set: __arta.game.settings().quality, chosen: __arta.game.settings().qualityChosen, seg: (document.querySelector('#diffSeg button.on') || {}).textContent }));
+  const pr2 = await progress(), q2 = await p.evaluate(() => ({ q: __arta.engine.quality.tier, autoTier: __arta.engine.debug.stats().autoTier, auto: __arta.engine.qualityAuto, set: __arta.game.settings().quality, chosen: __arta.game.settings().qualityChosen, seg: (document.querySelector('#diffSeg button.on') || {}).textContent }));
   console.log('wipe-all', JSON.stringify({ chkOn, pr2, q2 }));
-  if (!chkOn || pr2.xp !== 0 || pr2.sens !== 1 || pr2.difficulty !== 0 || q2.q !== 'high' || q2.auto !== true || q2.set !== 'auto' || q2.chosen !== false || q2.seg !== 'КУРСАНТ') fail('сброс с настройками не вернул настройки: ' + JSON.stringify({ pr2, q2 }));
+  if (!chkOn || pr2.xp !== 0 || pr2.sens !== 1 || pr2.difficulty !== 0 || q2.q !== q2.autoTier || q2.auto !== true || q2.set !== 'auto' || q2.chosen !== false || q2.seg !== 'КУРСАНТ') fail('сброс с настройками не вернул настройки: ' + JSON.stringify({ pr2, q2 }));
 
   // ---------- 7. находки проверки: настоящий ролик, двойные касания, прерванные запуск и удержание (чистое хранилище, 740×360) ----------
   {

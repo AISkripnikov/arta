@@ -1,10 +1,13 @@
-// Обзор полной сборки игры: меню и все восемь постов в бою. node tools/tour.cjs <outDir> [w h] [--www <каталог сборки>]
+// Обзор полной сборки игры: меню и все восемь постов в бою. node tools/tour.cjs <outDir> [w h] [--www <каталог сборки>] [--quality high]
 // Какая сборка: --www <dir> или переменная ARTA_WWW=<dir> (личная сборка: node build.mjs --out <dir>); без них — боевая,
 // app/src/main/assets/www. Снимки: <outDir>/0-menu.png, 0-brief.png, st-<пост>.png (каталог создаётся).
 const { chromium } = require('playwright');
 const path = require('path');
 const fs = require('fs');
 { const i = process.argv.indexOf('--www'); if (i >= 0) { process.env.ARTA_WWW = process.argv[i + 1] || ''; process.argv.splice(i, 2); } }
+// --quality high|mid|low|auto (по умолчанию high): «АВТО» на программном WebGL за секунды уходит в low — для обзора уровень ставится явно
+let QUALITY = 'high';
+{ const i = process.argv.indexOf('--quality'); if (i >= 0) { QUALITY = process.argv[i + 1] || 'high'; process.argv.splice(i, 2); } }
 const WWW = path.join(path.resolve(process.env.ARTA_WWW || path.join(__dirname, '../../app/src/main/assets/www')), 'index.html');
 if (!fs.existsSync(WWW)) { console.error('нет сборки: ' + WWW + ' (node build.mjs или node build.mjs --out <dir>)'); process.exit(1); }
 if (!process.argv[2]) { console.error('usage: node tools/tour.cjs <outDir> [w h] [--www <dir>]'); process.exit(1); }
@@ -22,6 +25,7 @@ fs.mkdirSync(process.argv[2], { recursive: true });
   p.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') { errs++; console.log('CONSOLE', m.text()); } });
   await p.goto('file://' + WWW);
   await p.waitForFunction(() => window.__arta, null, { timeout: 120000 });
+  await p.evaluate((q) => __arta.game.setSetting('quality', q), QUALITY);
   await p.waitForTimeout(1500);
   await p.screenshot({ path: out + '/0-menu.png' });
   await p.evaluate(() => { __arta.game.save.unlocked = 9; __arta.game.startMission(3); });

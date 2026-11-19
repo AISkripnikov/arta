@@ -185,7 +185,7 @@ engine.input.cancel()                                     // (расш.) при�
 - `engine.audio.setBus('fx'|'amb'|'radio'|'music', 0…2)` — громкость эффектов, фона башни, радио и музыки (см. `audio.js`);
   1 — «как записано»: оболочка ставит `volFx/100`, `volAmb/70`, `volRadio/100`, `volMusic/60`. `engine.audio.buses` →
   `{ fx, amb, radio, music }`; `engine.audio.busNode(name)` → `GainNode` шины (или `null`, пока звук не разбужен касанием).
-  В шину `music` пока ничего не играет — она заведена под настройку «ГРОМКОСТЬ МУЗЫКИ».
+  В шину `music` играет тема меню `engine.audio.music(on)` (молчит, пока включён фон башни — то есть в бою).
 
 Поведение:
 - **handwheel** — круговое движение пальца вокруг ступицы; угол считается в плоскости маховика (экран → плоскость, аффинно),
@@ -220,6 +220,21 @@ slewLever 4, rotarySelector 4, gauge 4–6, pushButton 2–4, toggle 2–4, cove
 (`ambient(true)`/`alarm(true)` запоминаются и стартуют после разблокировки). Ни одна функция не бросает исключений.
 `servo(level)` — непрерывный гул: вызывать каждый кадр или при изменении, `servo(0)` — затихает.
 Органы сами издают звук: маховик — `ratchet`, рычаги — `leverPull`/`clunk`, тумблер и крышка — `switchFlip`, кнопки и галетник — `tick`.
+
+**Устройство (расш.).** Код в `audio.js` + `audio/` (kit — синтез, catalogue — рецепты и таблица слоёв, bank — просчёт
+в буферы через OfflineAudioContext в фоне после касания, loops — живые петли, ambience — фон, music — тема меню, space —
+импульсные отклики). Тракт: голос → шина (`fx` с мягким компрессором, `amb`, `radio` — полоса «динамика», `music`) +
+посылы в две свёрточные реверберации («стальная комната» 0.85 с, «открытое море» 3.2 с) → срез 22 Гц → громкость →
+лимитер → мягкий ограничитель (потолок −1.9 дБ). Не больше 28 голосов; каждый звук сам освобождает узлы. Полный список
+функций с аргументами — в комментариях `api` в `audio.js`; перечень для проверки — `CATALOGUE` там же.
+Новые функции: `detent(pitch, vel)`, `gear(speed)`, `slew(level)`, `button`, `selector`, `cover`, `relay`, `drumTick`,
+`bell(n)`, `paper`, `pin`, `loupe`, `hoistRun(on)`, `breechOpen/Close`, `charge`, `unload`, `shellWhoosh`,
+`impact({ range, kind, pan, delay })`, `enemyGun({ range, pan })`, `whistle(dur, pan)`, `nearMiss`, `turretHit`, `fault`,
+`radioMsg(cls, urgent)`, `squelch(open)`, `radioStatic(level)`, `aaFire(on, pan)`, `overheat`, `jam`,
+`planeDrone(level, approach, pan)`, `flyby({ dur, from, to })`, `bombWhistle`, `bombBurst`, `sirenRun(on)`,
+`ambience({ station, weather, night, tension })`, `tension(v)`, `creak/drip/foghorn/farThunder`, интерфейс (`uiTap`,
+`dialogOpen/Close`, `toast`, `saveDone`, `hintNew`, `friendlyFire`, `detected`, `missionWon/Lost`, `rankUp`, `dailyRecord`),
+`music(on)`, `play(name, o)`, `prerender()`, `debug()`. Проверка: `node tools/test-audio.cjs`.
 
 ## Свет, тени, постобработка, эффекты (расш.)
 
