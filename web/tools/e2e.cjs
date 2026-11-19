@@ -15,11 +15,17 @@
 //  8) подсказки и засечка (чистое хранилище, открытая кампания): задание 1 — по шагам; задание 4 — пусто, пока не встретилось
 //      новое, затем «НОВОЕ ·» с объяснением в строке радио и кольцом, гаснет после действия; касание строки показывает объяснение снова; «ПО ШАГАМ» и «ВЫКЛ»; блок «НОВОЕ В ЭТОМ
 //      ЗАДАНИИ»; органы управления тем существуют на постах; плашка «НАС НЕ ВИДЯТ» → выстрел → «ЗАСЕЧЕНЫ».
-//   node tools/e2e.cjs [итог.png] [--www <каталог сборки>]   (рядом кладутся <итог>-debrief.png и <итог>-survival.png)
+//   node tools/e2e.cjs [итог.png] [--www <каталог сборки>] [--tier low|mid|high]   (рядом кладутся <итог>-debrief.png и <итог>-survival.png)
 // Какая сборка проверяется: --www <dir> или переменная ARTA_WWW=<dir> (личная сборка: node build.mjs --out <dir>);
 // без них — боевая, app/src/main/assets/www.
 const { chromium } = require('playwright');
 const path = require('path');
+// Уровень качества: в игре по умолчанию «АВТО», и на программном WebGL (SwiftShader, ~4 к/с) он за 15–40 с сам уходит на
+// «экономное» — проверки, ждущие игрового времени, на старте с «высокого» не успевают. Поэтому каждая страница стартует так,
+// будто «АВТО» уже подобрал уровень на этом устройстве (localStorage['arta2.autoTier'], пока пусто): --tier low|mid|high
+// (по умолчанию low). Настройка остаётся «АВТО» — проверки «АВТО» сравнивают действующий уровень с подобранным.
+const TIER = (() => { const i = process.argv.indexOf('--tier'); const t = i >= 0 ? process.argv.splice(i, 2)[1] : 'low'; if (!['low', 'mid', 'high'].includes(t)) { console.error('--tier low|mid|high'); process.exit(1); } return t; })();
+const seedTier = (pg) => pg.addInitScript((t) => { try { if (!localStorage.getItem('arta2.autoTier')) localStorage.setItem('arta2.autoTier', t); } catch (e) { /* нет хранилища */ } }, TIER);
 { const i = process.argv.indexOf('--www'); if (i >= 0) { process.env.ARTA_WWW = process.argv[i + 1] || ''; process.argv.splice(i, 2); } }
 const WWW = path.join(path.resolve(process.env.ARTA_WWW || path.join(__dirname, '../../app/src/main/assets/www')), 'index.html');
 if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WWW + ' (node build.mjs или node build.mjs --out <dir>)'); process.exit(1); }
@@ -38,7 +44,7 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
   p.on('pageerror', e => { errs++; console.log('PAGEERROR', e.message); });
   p.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') { errs++; console.log('CONSOLE', m.text()); } });
   // приложение ждёт ArtaNative.ready() — подтверждение, что версия игры запустилась; ролик не должен его задерживать
-  await p.addInitScript(() => { window.__ready = 0; window.ArtaNative = { ready() { window.__ready++; }, applyUpdate() {} }; });
+  await seedTier(p); await p.addInitScript(() => { window.__ready = 0; window.ArtaNative = { ready() { window.__ready++; }, applyUpdate() {} }; });
   await p.goto('file://' + WWW);
   await p.waitForFunction(() => window.__arta);
   // самый первый запуск: до меню идёт вступительный ролик; запуск подтверждается, пока он ещё на экране
@@ -154,6 +160,9 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
   const barBox = await p.locator('#setVolRadio .sld-bar').boundingBox();
   await p.mouse.click(barBox.x + barBox.width * 0.25, barBox.y + barBox.height / 2);
   await tab('ctrl');
+  // смена уровня качества (их только что перебрали все) перестраивает шейдеры и текстуры — на программном WebGL это
+  // секунды; замер пропуска кадров начинаем, когда движок снова рисует ровно (6 кадров после последней смены)
+  { const f0 = await p.evaluate(() => __arta.engine.debug.stats().frames); await p.waitForFunction((f) => __arta.engine.debug.stats().frames >= f + 6, f0, { timeout: 60000 }); }
   await p.waitForTimeout(1300);                // даём движку отрисовать секунду с ограничением 30 кадров
   const eng = await p.evaluate(async () => {
     const { engine, game } = __arta, st = game.settings(), fm = document.getElementById('fpsMeter');
@@ -233,11 +242,11 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
   if (dataTab.rows !== 'setIntro,setTutorial,setUpReset,setDefaults,setWipe,setVerRow' || dataTab.wipe !== 'СБРОСИТЬ ПРОГРЕСС') fail('вкладка «ДАННЫЕ»: ' + JSON.stringify(dataTab));
   await p.click('#setDefaults'); await p.click('#dlgBtns .btn:has-text("ВОССТАНОВИТЬ")');
   const def = await p.evaluate(() => { const { game, engine } = __arta, st = game.settings(), D = game.SETTINGS;
-    return { diff: Object.keys(D).filter((k) => st[k] !== D[k].def), n: Object.keys(D).length, q: engine.quality.tier, qAuto: engine.qualityAuto, qSet: st.quality, shake: engine.settings.shake, cap: engine.frameCap, invert: engine.settings.invert, body: document.body.className.trim(),
+    return { diff: Object.keys(D).filter((k) => st[k] !== D[k].def), n: Object.keys(D).length, q: engine.quality.tier, autoTier: engine.debug.stats().autoTier, qAuto: engine.qualityAuto, qSet: st.quality, shake: engine.settings.shake, cap: engine.frameCap, invert: engine.settings.invert, body: document.body.className.trim(),
       buses: engine.audio.buses, shown: document.getElementById('settings').classList.contains('show'), fps: document.getElementById('fpsMeter').classList.contains('hidden'), difficulty: game.state.difficulty }; });
   console.log('settings-defaults', JSON.stringify(def));
   if (def.diff.length || def.n < 21) fail('«по умолчанию» не вернуло настройки: ' + def.diff.join());
-  if (def.q !== 'high' || def.cap !== 0 || def.invert || def.body || !def.fps || def.buses.fx !== 1 || def.buses.amb !== 1 || def.buses.radio !== 1) fail('«по умолчанию» не дошло до движка: ' + JSON.stringify(def));
+  if (!['high', 'mid', 'low'].includes(def.q) || def.q !== def.autoTier || def.cap !== 0 || def.invert || def.body || !def.fps || def.buses.fx !== 1 || def.buses.amb !== 1 || def.buses.radio !== 1) fail('«по умолчанию» не дошло до движка: ' + JSON.stringify(def));
   if (def.qSet !== 'auto' || def.qAuto !== true || def.shake !== true || def.buses.music !== 1) fail('«по умолчанию»: качество «АВТО», тряска и музыка не дошли до движка: ' + JSON.stringify(def));
   if (!def.shown || def.difficulty !== 1) fail('«по умолчанию» закрыло настройки или сменило сложность');
   await tab('game'); await p.click('#setDiff [data-val="0"]');
@@ -778,7 +787,7 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
     const q = await (await b.newContext({ viewport: { width: 740, height: 360 }, hasTouch: true })).newPage();
     q.setDefaultTimeout(120000); humanPace(q);
     q.on('pageerror', (e) => { errs++; console.log('PAGEERROR(7)', e.message); });
-    await q.addInitScript(() => { window.ArtaNative = { ready() {}, applyUpdate() {} }; });
+    await seedTier(q); await q.addInitScript(() => { window.ArtaNative = { ready() {}, applyUpdate() {} }; });
     const url = 'file://' + WWW;
     const st = () => q.evaluate(() => ({ phase: __arta.game.state.phase, shown: [...document.querySelectorAll('.show')].map((e) => e.id).filter((id) => ['menu', 'settings', 'dialog', 'missions', 'upgrades'].includes(id)),
       intro: __arta.shell.introPlaying, el: !!document.getElementById('arta-intro'), hud: !document.getElementById('hud').classList.contains('hidden'), news: localStorage.getItem('arta2.news') }));
@@ -901,7 +910,7 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
     r.on('pageerror', (e) => { errs++; console.log('PAGEERROR(8)', e.message); });
     r.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') { errs++; console.log('CONSOLE(8)', m.text()); } });
     // игрок с открытой кампанией, который ещё ничего не изучил (xp > 0 — ролик не показывается)
-    await r.addInitScript(() => { window.ArtaNative = { ready() {}, applyUpdate() {} }; if (!localStorage.getItem('arta2.save')) localStorage.setItem('arta2.save', JSON.stringify({ unlocked: 36, stars: [], xp: 10, learned: {} })); });
+    await seedTier(r); await r.addInitScript(() => { window.ArtaNative = { ready() {}, applyUpdate() {} }; if (!localStorage.getItem('arta2.save')) localStorage.setItem('arta2.save', JSON.stringify({ unlocked: 36, stars: [], xp: 10, learned: {} })); });
     await r.goto('file://' + WWW);
     await r.waitForFunction(() => window.__arta && __arta.shell);
     if (await r.isVisible('#dialog.show')) await r.click('#dlgBtns .btn');

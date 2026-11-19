@@ -190,7 +190,7 @@ export function createLoops(core, satCurve) {
     const o1 = b.osc('sawtooth', 60, b.gain(0.5, sat)), o2 = b.osc('sawtooth', 72, b.gain(0.4, sat));
     return { out, bp, spin(t, level, tc) {            // level 0…1 — обороты ротора
       o1.frequency.setTargetAtTime(90 + 520 * level, t, tc); o2.frequency.setTargetAtTime((90 + 520 * level) * 1.19, t, tc);
-      bp.frequency.setTargetAtTime(500 + 700 * level, t, tc); out.gain.setTargetAtTime(0.15 * Math.pow(level, 1.5), t, tc);
+      bp.frequency.setTargetAtTime(500 + 700 * level, t, tc); out.gain.setTargetAtTime(0.125 * Math.pow(level, 1.5), t, tc);
     } };
   }
   let siren = null, sirenTimer = 0;

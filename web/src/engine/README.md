@@ -84,7 +84,7 @@ engine.start();
 | `lights` **(расш.)** | `{ hemi, key (SpotLight с тенью), fillCeil, fillCool (он же rim — контровой; им же светит `fx.flash`) }` — цвет и силу ведёт движок (день/ночь, мигание), новые источники не добавлять. |
 | `stationToWorld(id, [x,y,z])` **(расш.)** | Точка из локальных координат поста в мировые. |
 | `geom`, `textures`, `fonts` **(расш.)** | Помощники: `geom.slab/lathe/extrude/merge/boxUV/pipeGeometry/hitBox/hitCylinder…`, `textures.canvasTexture/drawLabel/measureLabel/textTexture…`, `fonts.loaded/capRatio`. |
-| `debug` **(расш.)** | `stats()` → `{ calls, triangles, frameMs, fps, geometries, textures, programs, tier, auto, autoTier, autoMs, autoUps, autoDowns, shadowCalls, shadowUpdates, postCalls, postPasses, particles }` (`calls` — только основной проход: без теней и без постобработки; `tier` — действующий уровень качества, для счётчика кадров); `step(dt, render=true)` — кадр вручную; `autoFeed(ms, count, cpuMs)` — подать «АВТО» интервалы кадров вручную (для `tools/test-quality.cjs`); `guides(show)` — рамка зоны управления и габарита у текущего поста. |
+| `debug` **(расш.)** | `stats()` → `{ calls, triangles, frameMs, fps, geometries, textures, programs, tier, auto, autoTier, gfxSafe, autoMs, autoUps, autoDowns, shadowCalls, shadowUpdates, postCalls, postPasses, particles }` (`gfxSafe` — тени и постобработка выключены после ошибки на этом устройстве: исключение в проходе теней/обработки или несобравшийся шейдер, `console.info`; `calls` — только основной проход: без теней и без постобработки; `tier` — действующий уровень качества, для счётчика кадров); `step(dt, render=true)` — кадр вручную; `autoFeed(ms, count, cpuMs)` — подать «АВТО» интервалы кадров вручную (для `tools/test-quality.cjs`); `guides(show)` — рамка зоны управления и габарита у текущего поста. |
 | `dispose()` **(расш.)** | Снять обработчики, освободить ресурсы. |
 
 Правила для постов:
@@ -103,7 +103,7 @@ engine.input.enabled = false                              // (расш.) гло�
 engine.input.busy                                         // (расш.) идёт перетаскивание органа
 engine.input.cancel()                                     // (расш.) принудительно завершить текущий жест
 ```
-`e = { x, y, dx, dy, ray, point, object }` + **(расш.)** `startX, startY, totalDx, totalDy, dragging, duration (мс), pointerType, cancelled`.
+`e = { x, y, dx, dy, ray, point, object }` + **(расш.)** `startX, startY, totalDx, totalDy, dragging, duration (мс, по меткам времени событий: долгий кадр между касанием и отпусканием не удлиняет жест), pointerType, cancelled`.
 - `point` — точка попадания в объект (мировая); при перетаскивании за пределами объекта — `null`.
 - Луч бросается только по зарегистрированным объектам **текущего** поста (и объектам вне постов); учитывается `visible` всей цепочки родителей. Объект может быть группой — ловятся все её меши; годятся невидимые объёмы `geom.hitBox()/hitCylinder()`.
 - `onDrag` приходит на каждое движение; `e.dragging` становится `true` после сдвига на 10 px (мышь — 5 px). `onTap` — при отпускании без такого сдвига и быстрее 0.7 с. Порядок: `onDown` → `onDrag…` → `onUp` → `onTap`.

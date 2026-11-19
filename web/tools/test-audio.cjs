@@ -154,6 +154,18 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
       const rms = act.length ? Math.sqrt(act.reduce((a, b) => a + b, 0) / act.length) : 0;
       let st = 0; for (let i = 0; i < pows.length; i++) { let s = 0, c = 0; for (let k = i; k < Math.min(pows.length, i + 8); k++) { s += pows[k]; c++; } if (c === 8 || pows.length < 8) st = Math.max(st, s / 8); }
       const all = Math.sqrt(pows.reduce((a, b) => a + b, 0) / Math.max(1, pows.length));
+      const blkMax = pows.reduce((a, b) => Math.max(a, b), 0);       // самый громкий блок 50 мс: «удар» щелчка
+      // «как в динамике телефона»: полоса 0.3–6 кГц (два биквада RBJ: ФВЧ 300 Гц, ФНЧ 6 кГц), максимум по окну 400 мс
+      const bq = (hp, f0) => { const w = 2 * Math.PI * f0 / rate, al = Math.sin(w) / (2 * 0.7071), c = Math.cos(w), a0 = 1 + al;
+        return hp ? [(1 + c) / 2 / a0, -(1 + c) / a0, (1 + c) / 2 / a0, -2 * c / a0, (1 - al) / a0] : [(1 - c) / 2 / a0, (1 - c) / a0, (1 - c) / 2 / a0, -2 * c / a0, (1 - al) / a0]; };
+      const band = Float32Array.from(m);
+      for (const [b0, b1, b2, a1, a2] of [bq(true, 300), bq(false, 6000)]) {
+        let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+        for (let i = 0; i < n; i++) { const x = band[i], y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2; x2 = x1; x1 = x; y2 = y1; y1 = y; band[i] = y; }
+      }
+      let phone = 0;
+      { const w = Math.floor(rate * 0.4), hop = Math.floor(rate * 0.05); const sq = new Float64Array(n + 1); for (let i = 0; i < n; i++) sq[i + 1] = sq[i] + band[i] * band[i];
+        if (n <= w) phone = sq[n] / Math.max(1, w); else for (let i = 0; i + w <= n; i += hop) phone = Math.max(phone, (sq[i + w] - sq[i]) / w); }
       // спектр: усреднённая мощность по кадрам 4096 (окно Ханна)
       const N = 4096, spec = new Float64Array(N / 2), re = new Float64Array(N), im = new Float64Array(N);
       const from = Math.max(0, first), to = Math.max(from + N, last + 1);
@@ -167,7 +179,7 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
       return {
         peak: dB(peak), tp: dB(tp), dc: sum / n, nan, start: first < 0 ? -1 : first / rate, dur: first < 0 ? 0 : (last - first + 1) / rate, eff: e0 < 0 ? 0 : (e1 - e0 + 1) / rate,
         rms: dB(rms), st: dB(Math.sqrt(st)), all: dB(all), cen: tot ? cen / tot : 0, low: tot ? low / tot : 0, sub: tot ? sub / tot : 0, high: tot ? high / tot : 0,
-        subDb: dB(rms * Math.sqrt(tot ? sub / tot : 0)), midDb: dB(rms * Math.sqrt(tot ? mid / tot : 0)), mid: tot ? mid / tot : 0, maxDiff, maxDiffAt: maxDiffAt / rate, endDb: dB(Math.max(Math.abs(L[n - 1]), Math.abs(R[n - 1]))),
+        subDb: dB(rms * Math.sqrt(tot ? sub / tot : 0)), midDb: dB(rms * Math.sqrt(tot ? mid / tot : 0)), blk: dB(Math.sqrt(blkMax)), phone: dB(Math.sqrt(phone)), mid: tot ? mid / tot : 0, maxDiff, maxDiffAt: maxDiffAt / rate, endDb: dB(Math.max(Math.abs(L[n - 1]), Math.abs(R[n - 1]))),
       };
     };
     // сыграть элемент каталога через настоящий тракт; steps — [[t, fn, args]…] действия по ходу просчёта
@@ -274,6 +286,9 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
   const louder = events.filter((r) => r.rms >= gun.rms || r.st >= gun.st);
   ok(louder.length === 0, 'выстрел — самое громкое событие (и интегрально, и за 400 мс)', louder.map((r) => [r.id, +r.rms.toFixed(1), +r.st.toFixed(1)]));
   ok(gun.dur >= 2.5, 'длинный хвост выстрела (≥ 2.5 с)', gun.dur);
+  // в динамике телефона (полоса 0.3–6 кГц, окно 400 мс) выстрел тоже главный — с запасом 3 дБ над любым звуком боя и интерфейса
+  const phoneLoud = events.filter((r) => r.cat !== 'music' && r.phone > gun.phone - 3);
+  ok(phoneLoud.length === 0, 'и в динамике телефона выстрел громче всего на 3+ дБ (полоса 0.3–6 кГц, 400 мс)', { gun: +gun.phone.toFixed(1), louder: phoneLoud.map((r) => [r.id, +r.phone.toFixed(1)]) });
 
   console.log('щелчки и баланс');
   group('щелчки приборов и интерфейса короткие (≤ 0.25 с до −30 дБ от пика) и тихие (пик ≤ −14 дБ, 400 мс ≤ −40 дБ)', rows.filter((r) => TICKS.includes(r.id)),
@@ -283,6 +298,10 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
   console.log('  --   медианы интегральной громкости по категориям, дБ: ' + RANK.map((c) => c + ' ' + med[c].toFixed(1)).join(' > '));
   for (let i = 1; i < RANK.length; i++) ok(med[RANK[i - 1]] > med[RANK[i]] + 1, 'баланс: ' + RANK[i - 1] + ' громче ' + RANK[i] + ' (больше чем на 1 дБ)', [med[RANK[i - 1]], med[RANK[i]]]);
   const beds = rows.filter((r) => r.cat === 'amb');
+  const ctlMed = median(rows.filter((r) => r.cat === 'control').map((r) => r.rms));
+  ok(med.amb <= ctlMed - 5 && beds.every((r) => r.rms <= ctlMed - 3), 'фон заметно тише органов управления: медиана на 5+ дБ, худшее сочетание слоёв (шторм, напряжение) — на 3+ дБ',
+    { control: +ctlMed.toFixed(1), amb: +med.amb.toFixed(1), worst: beds.map((r) => [r.id, +r.rms.toFixed(1)]).sort((a, b) => b[1] - a[1]).slice(0, 2) });
+  ok(rows.filter((r) => r.cat === 'radio' && r.id !== 'radioStatic' && !/^squelch/.test(r.id)).every((r) => r.phone >= Math.max(...beds.map((b) => b.phone)) + 12), 'радио разборчиво: каждая посылка на 12+ дБ громче самого громкого фона в полосе телефона');
   group('фон не доходит до лимитера (пик ≤ −14 дБ) и тише радио', beds, (r) => r.peak <= -14 && r.rms < byId.radio.rms - 6, show);
   ok(byId['ambient:night'].rms < byId['ambient:room'].rms - 1, 'ночью фон тише', [byId['ambient:night'].rms, byId['ambient:room'].rms]);
   ok(byId['ambient:tension'].rms > byId['ambient:room'].rms + 0.5, 'напряжение боя добавляет слой', [byId['ambient:tension'].rms, byId['ambient:room'].rms]);
@@ -449,8 +468,8 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
   ok(problems.length === 0, 'нет ошибок и предупреждений в консоли', problems.slice(0, 5));
   if (!NO_WIRING) await wiring(browser);
   const f1 = (x) => (x <= -179 ? '  -inf' : x.toFixed(1).padStart(6));
-  const lines = ['звук                кат.      пик    ист.пик  длит.  эфф.   инт.   400мс  центр  <90Гц  >4кГц  0.3–6к'];
-  for (const r of rows) lines.push(r.id.padEnd(20) + r.cat.padEnd(8) + f1(r.peak) + '  ' + f1(r.tp) + '  ' + r.dur.toFixed(2).padStart(5) + '  ' + r.eff.toFixed(2).padStart(5) + ' ' + f1(r.rms) + ' ' + f1(r.st) + '  ' + String(Math.round(r.cen)).padStart(5) + '  ' + (r.low * 100).toFixed(0).padStart(4) + '%  ' + (r.high * 100).toFixed(0).padStart(4) + '% ' + f1(r.midDb));
+  const lines = ['звук                кат.      пик    ист.пик  длит.  эфф.   инт.   400мс  центр  <90Гц  >4кГц  0.3–6к   50мс тел.400'];
+  for (const r of rows) lines.push(r.id.padEnd(20) + r.cat.padEnd(8) + f1(r.peak) + '  ' + f1(r.tp) + '  ' + r.dur.toFixed(2).padStart(5) + '  ' + r.eff.toFixed(2).padStart(5) + ' ' + f1(r.rms) + ' ' + f1(r.st) + '  ' + String(Math.round(r.cen)).padStart(5) + '  ' + (r.low * 100).toFixed(0).padStart(4) + '%  ' + (r.high * 100).toFixed(0).padStart(4) + '% ' + f1(r.midDb) + ' ' + f1(r.blk) + ' ' + f1(r.phone));
   console.log(lines.join('\n'));
   if (tableFile) fs.writeFileSync(tableFile, lines.join('\n') + '\n');
   if (problems.length) console.log(problems.slice(0, 10));

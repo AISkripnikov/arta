@@ -443,15 +443,22 @@ export async function createEngine(canvas, opts = {}) {
     engine.fx._resize(height * pixelRatio, camera.fov);
     engine.fx._update(dt, time);
     if (render) {
-      updateShadows();
-      mainC0 = renderer.info.render.calls; mainT0 = renderer.info.render.triangles;
-      if (post.active) {
-        post.render(scene, camera, time, grabStats);
-        stats.postCalls = post.info.calls; stats.postPasses = post.info.passes;
-      } else {
-        renderer.render(scene, camera);
-        grabStats();
-        stats.postCalls = 0; stats.postPasses = 0;
+      try {
+        updateShadows();
+        mainC0 = renderer.info.render.calls; mainT0 = renderer.info.render.triangles;
+        if (post.active) {
+          post.render(scene, camera, time, grabStats);
+          stats.postCalls = post.info.calls; stats.postPasses = post.info.passes;
+        } else {
+          renderer.render(scene, camera);
+          grabStats();
+          stats.postCalls = 0; stats.postPasses = 0;
+        }
+      } catch (e) {
+        // тени или постобработка не работают на этом устройстве — выключаем их и рисуем кадр напрямую, без чёрного экрана
+        if (gfxSafe) throw e;
+        degrade('ошибка кадра', e);
+        try { renderer.setRenderTarget(null); renderer.render(scene, camera); grabStats(); } catch (e2) { console.error('[engine] кадр не нарисован:', e2); }
       }
     } else scene.updateMatrixWorld();
     const ms = performance.now() - t0;
@@ -470,9 +477,25 @@ export async function createEngine(canvas, opts = {}) {
   }
 
   // --- качество ---
-  function applyQuality(q) {
-    if (q === quality) return q;
-    quality = q; maxPixelRatio = q.pixelRatio;
+  // Запасной режим: если тени или постобработка дали ошибку (нет нужного формата, шейдер не собрался на этом GPU),
+  // они выключаются до конца запуска на любом уровне качества — с console.info, без падения и без чёрного экрана.
+  let gfxSafe = false;
+  function degrade(why, e) {
+    if (gfxSafe) return;
+    gfxSafe = true;
+    console.info('[engine] тени и постобработка выключены (' + why + ')' + (e && e.message ? ': ' + e.message : ''));
+    const q = quality; quality = null;
+    applyQuality(q);
+  }
+  renderer.debug.onShaderError = (gl, program, vs, fs) => {
+    let log = '';
+    try { log = (gl.getProgramInfoLog(program) || '') + ' ' + (gl.getShaderInfoLog(vs) || '') + ' ' + (gl.getShaderInfoLog(fs) || ''); } catch (e) { /* нет журнала */ }
+    degrade('шейдер не собрался', { message: log.trim().slice(0, 300) });
+  };
+  function applyQuality(q0) {
+    if (q0 === quality) return q0;
+    const q = gfxSafe ? Object.assign({}, q0, { shadow: 0, postfx: false, bloom: 0, grain: false }) : q0;
+    quality = q0; maxPixelRatio = q.pixelRatio;
     const sh = keyLight.shadow;
     keyLight.castShadow = q.shadow > 0;
     sh.radius = q.shadowSoft || 1.4;
@@ -684,7 +707,7 @@ export async function createEngine(canvas, opts = {}) {
       stats() {
         return {
           calls: stats.calls, triangles: stats.triangles, frameMs: +stats.frameMs.toFixed(2), fps: +stats.fps.toFixed(1),
-          tier: quality.tier, auto: !!engine.qualityAuto, autoTier: AQ.tier, autoMs: +AQ.last.toFixed(1), autoUps: AQ.ups, autoDowns: AQ.downs,
+          tier: quality.tier, auto: !!engine.qualityAuto, autoTier: AQ.tier, gfxSafe, autoMs: +AQ.last.toFixed(1), autoUps: AQ.ups, autoDowns: AQ.downs,
           shadowCalls: stats.shadowCalls, shadowUpdates: shStats.updates, postCalls: stats.postCalls, postPasses: stats.postPasses,
           particles: engine.fx ? engine.fx.particles : 0,
           geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures,

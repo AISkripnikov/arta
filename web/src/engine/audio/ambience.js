@@ -9,7 +9,7 @@
 import { builder } from './loops.js';
 
 const OPEN = { observe: 1, aa: 1 };
-const LEVEL = 0.15;                       // общий уровень фона: заметно тише любого механизма
+const LEVEL = 0.085;                      // общий уровень фона: на 5+ дБ тише щелчков органов управления (tools/test-audio.cjs)
 
 export function createAmbience(core) {
   const st = { on: false, station: '', weather: 'clear', night: false, tension: 0 };

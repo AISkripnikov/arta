@@ -622,13 +622,16 @@ export const CATALOGUE = [
   E('siren', 'air', 8, [4, 8]),
   E('sirenRun', 'air', 4, [3.5, 4], 'sirenRun', [true], { loop: 1 }),
   // фон
-  E('ambient:room', 'amb', 4, [3.9, 4], 'ambient', [true], { loop: 1, pre: ['ambience', { station: 'plot', weather: 'clear', night: false, tension: 0 }] }),
-  E('ambient:loading', 'amb', 4, [3.9, 4], 'ambient', [true], { loop: 1, pre: ['ambience', { station: 'loading' }] }),
-  E('ambient:observe', 'amb', 4, [3.9, 4], 'ambient', [true], { loop: 1, pre: ['ambience', { station: 'observe' }] }),
-  E('ambient:fog', 'amb', 4, [3.9, 4], 'ambient', [true], { loop: 1, pre: ['ambience', { station: 'observe', weather: 'fog' }] }),
-  E('ambient:storm', 'amb', 4, [3.9, 4], 'ambient', [true], { loop: 1, pre: ['ambience', { station: 'aa', weather: 'storm' }] }),
-  E('ambient:night', 'amb', 4, [3.9, 4], 'ambient', [true], { loop: 1, pre: ['ambience', { station: 'plot', night: true }] }),
-  E('ambient:tension', 'amb', 4, [3.9, 4], 'ambient', [true], { loop: 1, pre: ['ambience', { station: 'plot', tension: 1 }] }),
+  E('ambient:room', 'amb', 4, [3.8, 4], 'ambient', [true], { loop: 1, pre: ['ambience', { station: 'plot', weather: 'clear', night: false, tension: 0 }] }),
+  E('ambient:loading', 'amb', 4, [3.8, 4], 'ambient', [true], { loop: 1, pre: ['ambience', { station: 'loading' }] }),
+  E('ambient:observe', 'amb', 4, [3.8, 4], 'ambient', [true], { loop: 1, pre: ['ambience', { station: 'observe' }] }),
+  E('ambient:fog', 'amb', 4, [3.8, 4], 'ambient', [true], { loop: 1, pre: ['ambience', { station: 'observe', weather: 'fog' }] }),
+  E('ambient:storm', 'amb', 4, [3.8, 4], 'ambient', [true], { loop: 1, pre: ['ambience', { station: 'aa', weather: 'storm' }] }),
+  E('ambient:night', 'amb', 4, [3.8, 4], 'ambient', [true], { loop: 1, pre: ['ambience', { station: 'plot', night: true }] }),
+  E('ambient:tension', 'amb', 4, [3.8, 4], 'ambient', [true], { loop: 1, pre: ['ambience', { station: 'plot', tension: 1 }] }),
+  // худшие сочетания слоёв: под ними должны оставаться щелчки органов управления и радио
+  E('ambient:max', 'amb', 4, [3.8, 4], 'ambient', [true], { loop: 1, pre: ['ambience', { station: 'aa', weather: 'storm', tension: 1 }] }),
+  E('ambient:loadstorm', 'amb', 4, [3.8, 4], 'ambient', [true], { loop: 1, pre: ['ambience', { station: 'loading', weather: 'storm', tension: 1 }] }),
   E('creak', 'ambfx', 3, [0.3, 2.6]), E('drip', 'ambfx', 2, [0.02, 1.5]), E('foghorn', 'ambfx', 8, [2.5, 8]), E('farThunder', 'ambfx', 9, [2.5, 9]),
   // интерфейс
   E('uiTap', 'ui', 1.2, [0.005, 0.5]), E('dialogOpen', 'ui', 1.5, [0.1, 1]), E('dialogClose', 'ui', 1.5, [0.1, 1]), E('toast', 'ui', 1.5, [0.1, 1]),

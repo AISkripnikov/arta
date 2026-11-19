@@ -84,7 +84,7 @@ export const RADIO_CLASSES = Object.keys(RADIO);
 function radioRecipe(cls, urgent) {
   const P = RADIO[cls];
   return {
-    d: urgent ? 0.95 : 0.75, sr: 0.34, g: urgent ? 0.12 : 0.085, bus: 'radio', sp: 'in', gap: 0.25, jit: 0.01, pr: 3,
+    d: urgent ? 0.95 : 0.75, sr: 0.34, g: urgent ? 0.09 : 0.064, bus: 'radio', sp: 'in', gap: 0.25, jit: 0.01, pr: 3,
     fn(k, t, dest) {
       const reps = urgent ? 2 : 1, mul = urgent ? 1.335 : 1, len = urgent ? 0.82 : 0.62;
       k.click(t, { f: 2000, gain: 0.5, dur: 0.012, dest });
@@ -119,14 +119,15 @@ function caseTinkle(k, t, dest, gain) {
 
 export const CAT = {
   // ---------------- главный калибр и снаряды ----------------
-  gun: { d: 0.9, v: 3, g: 2.0, sp: 'big', pr: 2, jit: 0.02,
+  gun: { d: 0.9, v: 3, g: 2.4, sp: 'big', pr: 2, jit: 0.02,
     fn(k, t, dest, vi) {
       const sat = k.shaper(2.6, dest);
-      k.tone(t, 0.85, { f: 58 + vi * 2, f2: 30, gain: 0.4, attack: 0.003, dest: sat });
-      k.tone(t, 0.7, { f: 41, f2: 27, gain: 0.28, attack: 0.006, dest: sat });
+      k.tone(t, 0.85, { f: 58 + vi * 2, f2: 30, gain: 0.32, attack: 0.003, dest: sat });
+      k.tone(t, 0.7, { f: 41, f2: 27, gain: 0.22, attack: 0.006, dest: sat });
       k.noise(t, 0.75, { type: 'lowpass', f: 2600 + vi * 200, f2: 260, q: 0.5, gain: 0.8, attack: 0.003, dest: sat });
-      k.noise(t, 0.55, { f: 900 + vi * 60, f2: 320, q: 0.6, gain: 2.0, attack: 0.002, dest });              // «мясо» выстрела: слышно и в маленьком динамике
+      k.noise(t, 0.55, { f: 900 + vi * 60, f2: 320, q: 0.6, gain: 3.0, attack: 0.002, dest });              // «мясо» выстрела: слышно и в маленьком динамике
       k.tone(t, 0.3, { type: 'sawtooth', f: 230, f2: 80, gain: 0.5, attack: 0.002, dest: sat });
+      k.noise(t + 0.004, 0.22, { f: 1700 + vi * 90, f2: 600, q: 0.7, gain: 1.1, attack: 0.002, dest });      // хлёсткий «бах» в середине: телефонный динамик
       k.noise(t, 0.09, { type: 'highpass', f: 1200, gain: 1.0, attack: 0.001, dest });
       k.noise(t, 0.03, { f: 3000, q: 1, gain: 0.6, attack: 0.0008, dest });
       k.modal(t + 0.012, { ratios: k.PLATE, n: 6, f: k.rv(200, 240), decay: 0.5, gain: 0.12, dest });   // лязг казённика при откате
@@ -399,7 +400,7 @@ export const CAT = {
   // ---------------- зенитка и воздух ----------------
   aaShot: { d: 0.4, v: 3, g: 0.72, sp: 'big', pr: 4, gap: 0.07, jit: 0.03,
     fn(k, t, dest, vi) { aaShotLayers(k, t, dest, k.shaper(2.2, dest), 730 + vi * 30, 1); } },
-  aaLoop: { d: 1.3, loop: 0.88, g: 0.56, sp: 'big', pr: 4,
+  aaLoop: { d: 1.3, loop: 0.88, g: 0.48, sp: 'big', pr: 4,
     fn(k, t, dest) {
       const sat = k.shaper(2.2, dest);
       for (let i = 0; i < 8; i++) {
@@ -429,7 +430,7 @@ export const CAT = {
       k.modal(t + 0.12, { ratios: k.PLATE, n: 4, f: 430, decay: 0.15, gain: 0.15, dest });
       k.click(t + 0.12, { f: 2000, gain: 0.2, dest });
     } },
-  bombBurst: { d: 2.8, sr: 0.5, v: 2, g: 0.68, sp: 'big', pr: 6, gap: 0.2,
+  bombBurst: { d: 2.8, sr: 0.5, v: 2, g: 0.54, sp: 'big', pr: 6, gap: 0.2,
     fn(k, t, dest) {
       const sat = k.shaper(2.6, dest);
       k.tone(t, 1.0, { f: 64, f2: 24, gain: 0.55, attack: 0.003, dest: sat });
@@ -496,7 +497,7 @@ export const CAT = {
     } },
   hintNew: { d: 0.8, sr: 0.5, g: 0.08, sp: 'ui', pr: 6, gap: 0.3, jit: 0,
     fn(k, t, dest) { k.modal(t, { ratios: k.BELL, n: 6, f: 1568, decay: 0.5, tilt: 0.5, gain: 0.5, dest }); k.modal(t + 0.12, { ratios: k.BELL, n: 6, f: 2093, decay: 0.5, tilt: 0.5, gain: 0.4, dest }); } },
-  friendly: { d: 0.8, sr: 0.5, g: 0.2, sp: 'ui', pr: 6, gap: 0.5, jit: 0,
+  friendly: { d: 0.8, sr: 0.5, g: 0.17, sp: 'ui', pr: 6, gap: 0.5, jit: 0,
     fn(k, t, dest) {
       const bp = k.filter('bandpass', 1000, 0.8, dest);
       for (const dt of [0, 0.36]) {

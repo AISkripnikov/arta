@@ -61,6 +61,9 @@ export function createInput(engine, canvas) {
     return best;
   }
 
+  // время касания — по метке события (когда палец коснулся/отпустил экран), а не по моменту, когда до него дошёл JS: на
+  // медленном телефоне долгий кадр между touchstart и touchend не должен превращать быстрое касание в долгое нажатие
+  const evTime = (ev) => { const now = performance.now(), t = ev && ev.timeStamp; return t > 0 && t <= now + 1 && t > now - 10000 ? t : now; };
   function makeEvent(ev, p, withPoint, a = active) {
     const e = {
       x: p.x, y: p.y,
@@ -68,7 +71,7 @@ export function createInput(engine, canvas) {
       startX: a ? a.startX : p.x, startY: a ? a.startY : p.y,
       totalDx: a ? p.x - a.startX : 0, totalDy: a ? p.y - a.startY : 0,
       dragging: a ? a.dragging : false,
-      duration: a ? performance.now() - a.t0 : 0,
+      duration: a ? Math.max(0, evTime(ev) - a.t0) : 0,
       pointerType: ev.pointerType || 'mouse',
       ray: raycaster.ray.clone(),
       point: null,
@@ -97,7 +100,7 @@ export function createInput(engine, canvas) {
     if (api.enabled && !engine.flying) found = pick();
     active = {
       id: ev.pointerId, item: found ? found.item : null, type: ev.pointerType || 'mouse',
-      startX: p.x, startY: p.y, lastX: p.x, lastY: p.y, t0: performance.now(), maxDist: 0, dragging: false,
+      startX: p.x, startY: p.y, lastX: p.x, lastY: p.y, t0: evTime(ev), maxDist: 0, dragging: false,
     };
     try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* не критично */ }
     if (ev.cancelable) ev.preventDefault();
@@ -117,7 +120,7 @@ export function createInput(engine, canvas) {
     if (!found || found.item === active.item || !(found.item.multi || (active.item && active.item.multi))) return;
     second = {
       id: ev.pointerId, item: found.item, type: ev.pointerType || 'touch',
-      startX: p.x, startY: p.y, lastX: p.x, lastY: p.y, t0: performance.now(), maxDist: 0, dragging: false,
+      startX: p.x, startY: p.y, lastX: p.x, lastY: p.y, t0: evTime(ev), maxDist: 0, dragging: false,
     };
     try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* не критично */ }
     if (ev.cancelable) ev.preventDefault();
