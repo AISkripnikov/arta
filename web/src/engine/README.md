@@ -258,7 +258,11 @@ slewLever 4, rotarySelector 4, gauge 4–6, pushButton 2–4, toggle 2–4, cove
 `unlock()`, `suspend()`, `resume()`. Контекст создаётся при первом касании/клавише; до этого вызовы молча игнорируются
 (`ambient(true)`/`alarm(true)` запоминаются и стартуют после разблокировки). Ни одна функция не бросает исключений.
 `servo(level)` — непрерывный гул: вызывать каждый кадр или при изменении, `servo(0)` — затихает.
-Органы сами издают звук: маховик — `ratchet`, рычаги — `leverPull`/`clunk`, тумблер и крышка — `switchFlip`, кнопки и галетник — `tick`.
+Органы сами издают звук (только на текущем посту, панорама — по месту органа на экране; `controls/base.js: snd()`): маховик —
+`detent(pitch, vel, pan)` на каждом шаге (выше и сильнее при быстром вращении) и `gear(speed)`, пока крутят (`gear: false` —
+без шестерён), на упоре (`hold()`) — `stopper`; рычаг — `lever`, возврат рычага привода — `tick`; тумблер — `toggle`, крышка —
+`cover`; кнопка — `button`; галетник — `selector`; лампа зажглась/погасла — `relay`; барабанчик со `sound: true` — `drumTick`.
+Звуки боя, фон, музыку и петли из состояния игры (элеватор, зенитка, самолёты, сирена) ведёт `ui/soundscape.js`.
 
 **Устройство (расш.).** Код в `audio.js` + `audio/` (kit — синтез, catalogue — рецепты и таблица слоёв, bank — просчёт
 в буферы через OfflineAudioContext в фоне после касания, loops — живые петли, ambience — фон, music — тема меню, space —
@@ -273,7 +277,10 @@ slewLever 4, rotarySelector 4, gauge 4–6, pushButton 2–4, toggle 2–4, cove
 `planeDrone(level, approach, pan)`, `flyby({ dur, from, to })`, `bombWhistle`, `bombBurst`, `sirenRun(on)`,
 `ambience({ station, weather, night, tension })`, `tension(v)`, `creak/drip/foghorn/farThunder`, интерфейс (`uiTap`,
 `dialogOpen/Close`, `toast`, `saveDone`, `hintNew`, `friendlyFire`, `detected`, `missionWon/Lost`, `rankUp`, `dailyRecord`),
-`music(on)`, `play(name, o)`, `prerender()`, `debug()`. Проверка: `node tools/test-audio.cjs`.
+`music(on)`, `play(name, o)`, `prerender()`, `debug()` (+ `loops` — какие петли звучат, `duck`).
+`duckBus(name, factor 0…1)` — приглушение шины игрой (пауза) поверх громкости игрока; `impact({ …, gain })` — множитель.
+`trace(true)` — писать журнал вызовов API, `trace()` → `[{ n, t, a }]`, `trace(false)` — перестать (проверки проводки).
+Проверка: `node tools/test-audio.cjs` (в конце — сценарий боя в полной игре; только он — `--wiring`).
 
 ## Свет, тени, постобработка, эффекты (расш.)
 

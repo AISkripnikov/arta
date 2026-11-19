@@ -98,7 +98,7 @@ export function createElevationStation(ctx) {
       if (atHard || atLock) {
         wheel.hold();                                  // маховик упёрся и не идёт за пальцем
         acc = 0;
-        if (!thud) { thud = true; audio.clunk(); }
+        thud = true;                                   // удар об упор — сам маховик (handwheel.hold)
         if (atLock && !upBlocked) {
           pushAcc += Math.abs(d);
           if (pushAcc > 0.06) { upBlocked = true; game.elevate(up ? 0.01 : -0.01); }               // один отказ за жест (плашку покажет оболочка)
@@ -107,7 +107,7 @@ export function createElevationStation(ctx) {
       }
       thud = false; pushAcc = 0;
       tickAcc += Math.abs(d);
-      if (tickAcc >= TICK) { tickAcc %= TICK; audio.ratchet(); }
+      if (tickAcc >= TICK) { tickAcc %= TICK; audio.detent(fine ? 1.25 : 0.9, fine ? 0.6 : 0.85, 0.15); }
       acc += d / TAU * (fine ? FINE : COARSE);
       let n = Math.trunc(acc * 100 + (acc > 0 ? 1e-6 : -1e-6));                       // целых сотых градуса
       if (n === 0) return;

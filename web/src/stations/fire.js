@@ -320,12 +320,12 @@ export function createFireStation(ctx) {
     const armed = !!s.fire.armed;
     if (armToggle.value !== (armed ? 1 : 0)) {
       armToggle.set(armed ? 1 : 0);
-      if (here) audio.switchFlip();
+      if (here) audio.toggle();
     }
     if (armed && !armCover.open) armCover.set(true);          // взведено извне — крышка не может быть закрыта
     if (reclose > 0 && (reclose -= dt) <= 0) {
       reclose = 0;
-      if (!armed && armCover.open) { armCover.set(false); if (here) audio.clunk(); }
+      if (!armed && armCover.open) { armCover.set(false); if (here) audio.cover(); }
     }
     armLamp.set(armed);
 

@@ -42,7 +42,7 @@ export function createCrew({ game, box, toast, sfx, vibro }) {
     }
     askRole = null;
     const r = game.treat(role);                // отказ («аптечек нет») покажет общий обработчик события denied
-    if (r && r.ok) { if (sfx) sfx('tick'); render(true); }
+    if (r && r.ok) { if (sfx) sfx('cover'); render(true); }            // аптечка: щелчок крышки ящика
   }
 
   /** Обновить значки по game.state (дёшево: DOM трогаем только при изменении). */

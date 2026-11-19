@@ -4,7 +4,8 @@ import { createSettings } from './settings.js';
 import { createUpgrades } from './upgrades.js';
 import { todayKey, dailyMenuText, dailyResultHtml, resumeHtml } from './daily.js';
 import { createCrew, crewStateText } from './crew.js';
-// DOM-оболочка: меню, HUD, блокнот, брифинг, итоги. Общие эффекты (звук выстрела, тряска, вспышки).
+// DOM-оболочка: меню, HUD, блокнот, брифинг, итоги. Общие эффекты (тряска, вспышки, вибрация) и звуки интерфейса;
+// звуки боя, фон и музыка — ui/soundscape.js.
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
@@ -66,7 +67,8 @@ const DIFF_HINT = [
  */
 export function createShell({ engine, game, stations = [], intro = null }) {
   const s = game.state;
-  const sfx = (name, ...a) => { try { const f = engine.audio && engine.audio[name]; if (f) f.apply(engine.audio, a); } catch (e) { /* звук не критичен */ } };
+  // sfx('tick') в оболочке и её окнах (настройки, снабжение, расчёт) — касание интерфейса: звучит как uiTap
+  const sfx = (name, ...a) => { try { if (name === 'tick') name = 'uiTap'; const f = engine.audio && engine.audio[name]; if (f) f.apply(engine.audio, a); } catch (e) { /* звук не критичен */ } };
   let pendingUpdate = 0;
   let dirty = true, lastRender = 0, notebookOpen = false, unread = 0, dialogDismiss = null, radioTimer = 0, toastTimer = 0;
 
@@ -88,6 +90,7 @@ export function createShell({ engine, game, stations = [], intro = null }) {
   }, true);
   function show(id) {
     if (id !== shownId && inClick) guardUntil = clickAt + TAP_GUARD;
+    if (id === 'dialog' && shownId !== 'dialog') sfx('dialogOpen'); else if (shownId === 'dialog' && id !== 'dialog') sfx('dialogClose');
     shownId = id;
     screens.forEach((n) => $(n).classList.toggle('show', n === id)); notebookOpen = id === 'notebook'; if (id !== 'dialog') dialogDismiss = null;
   }
@@ -171,7 +174,7 @@ export function createShell({ engine, game, stations = [], intro = null }) {
       if (onDone) onDone();
     };
     if (!intro || typeof intro.play !== 'function') { done(); return false; }
-    introOn = true; sfx('ambient', false);
+    introOn = true;                                  // музыку и фон на время ролика гасит ui/soundscape.js
     try { intro.play({ onDone: done }); } catch (e) { console.error('[shell] вступительный ролик не запустился:', e); done(); }
     return true;
   }
@@ -199,7 +202,7 @@ export function createShell({ engine, game, stations = [], intro = null }) {
     $('survBest').textContent = sb ? 'РЕКОРД: ' + sb.waves + ' ' + plural(sb.waves, 'ВОЛНА', 'ВОЛНЫ', 'ВОЛН') + ' · ' + sb.kills + ' ' + plural(sb.kills, 'ЦЕЛЬ', 'ЦЕЛИ', 'ЦЕЛЕЙ') : '';
   }
   function showMenu() {
-    $('hud').classList.add('hidden'); refreshMenu(); show('menu'); sfx('ambient', false);
+    $('hud').classList.add('hidden'); refreshMenu(); show('menu');
     // скачанное обновление игры применяем, когда игрок вышел в меню
     if (pendingUpdate && !introOn) { pendingUpdate = 0; try { window.ArtaNative.applyUpdate(); } catch (e) { /* не в приложении */ } }
   }
@@ -281,7 +284,7 @@ export function createShell({ engine, game, stations = [], intro = null }) {
         const r = game.suspend(); let ri = null;
         try { ri = game.resumeInfo(); } catch (e) { /* нет сохранения */ }
         closeAll();
-        if (r && r.ok && ri) toast('БОЙ СОХРАНЁН · ' + game.fmt.time(ri.time || 0), 'ok'); else toast('НЕ УДАЛОСЬ СОХРАНИТЬ БОЙ');
+        if (r && r.ok && ri) { toast('БОЙ СОХРАНЁН · ' + game.fmt.time(ri.time || 0), 'ok', true); sfx('saveDone'); } else toast('НЕ УДАЛОСЬ СОХРАНИТЬ БОЙ');
       } },
       { text: 'ОТМЕНА', ghost: true, fn: resume },
     ], resume);
@@ -612,7 +615,8 @@ export function createShell({ engine, game, stations = [], intro = null }) {
     clearTimeout(radioTimer); radioTimer = setTimeout(() => { el.className = ''; dirty = true; }, TOPIC_MS);
   }
   /** kind: 'ok' — спокойное сообщение (зелёная кромка); без него — тревожное (красное). */
-  function toast(text, kind) {
+  function toast(text, kind, quiet) {
+    if (!quiet) sfx('toast');
     const el = $('toast'); el.textContent = text; el.className = 'show' + (kind ? ' ' + kind : '');
     clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
   }
@@ -623,9 +627,9 @@ export function createShell({ engine, game, stations = [], intro = null }) {
   game.on('phase', (ph) => {
     if (ph === 'menu') showMenu();
     else if (ph === 'briefing') showBriefing();
-    else if (ph === 'playing') { closeAll(); $('hud').classList.remove('hidden'); $('hSave').classList.remove('hidden'); unread = 0; lastEnd = null; Object.keys(shellSeen).forEach((k) => delete shellSeen[k]); Object.keys(SH()).forEach((k) => { if (s.shells[k] > 0) shellSeen[k] = true; }); shKey = wxKey = obKey = forcesKey = ''; topicKey = detKey = '\u0000'; topicWait = ''; radioFreeAt = 0; topicShownAt = 0; detFreshUntil = -1; windChangedAt = -1e9; resetLog(); crewUi.render(true); $('radio').className = ''; engine.gotoStation(STATIONS.some((st) => st.id === s.station) ? s.station : 'plot', { instant: true });   /* новый бой — планшет; продолженный — пост, на котором сохранились */ sfx('ambient', true); dirty = true; }
+    else if (ph === 'playing') { closeAll(); $('hud').classList.remove('hidden'); $('hSave').classList.remove('hidden'); unread = 0; lastEnd = null; Object.keys(shellSeen).forEach((k) => delete shellSeen[k]); Object.keys(SH()).forEach((k) => { if (s.shells[k] > 0) shellSeen[k] = true; }); shKey = wxKey = obKey = forcesKey = ''; topicKey = detKey = '\u0000'; topicWait = ''; radioFreeAt = 0; topicShownAt = 0; detFreshUntil = -1; windChangedAt = -1e9; resetLog(); crewUi.render(true); $('radio').className = ''; engine.gotoStation(STATIONS.some((st) => st.id === s.station) ? s.station : 'plot', { instant: true });   /* новый бой — планшет; продолженный — пост, на котором сохранились */ dirty = true; }
   });
-  game.on('missionEnd', (e) => { sfx('alarm', false); $('hSave').classList.add('hidden'); lastEnd = e; raidUntil = -1; sampleFriends(true); forcesKey = ''; renderForces(); nav.querySelectorAll('button.alarm').forEach((b) => b.classList.remove('alarm')); setTimeout(() => { if ((s.phase === 'won' || s.phase === 'lost') && lastEnd === e) showResult(e); }, 1400); });
+  game.on('missionEnd', (e) => { $('hSave').classList.add('hidden'); lastEnd = e; raidUntil = -1; sampleFriends(true); forcesKey = ''; renderForces(); nav.querySelectorAll('button.alarm').forEach((b) => b.classList.remove('alarm')); setTimeout(() => { if ((s.phase === 'won' || s.phase === 'lost') && lastEnd === e) showResult(e); }, 1400); });
   // прогресс стёрт (game.resetProgress) или настройки изменились — перерисовать то, что на экране
   game.on('save', () => { menuNew = ''; if (s.phase === 'menu') refreshMenu(); });
   game.on('settings', () => { dirty = true; forcesKey = ''; });
@@ -633,7 +637,7 @@ export function createShell({ engine, game, stations = [], intro = null }) {
   // противник засёк батарею: красная вспышка, строка, красный значок-глаз
   // (e.late — засекли давно, когда стрелять по батарее было некому, а сообщают с появлением первых орудий: оборона)
   game.on('detected', (e) => {
-    if (s.targets.some((t) => t.alive && t.gun)) { flash('det'); vibro('fault'); toast(e && e.late ? 'БАТАРЕЯ ЗАСЕЧЕНА — ОРУДИЯ ПРОТИВНИКА БЬЮТ ПРИЦЕЛЬНО' : 'ПРОТИВНИК ЗАСЁК БАТАРЕЮ — ЖДИТЕ ОТВЕТНОГО ОГНЯ'); if (e && e.late) detFreshUntil = s.time + 8; }
+    if (s.targets.some((t) => t.alive && t.gun)) { flash('det'); vibro('fault'); toast(e && e.late ? 'БАТАРЕЯ ЗАСЕЧЕНА — ОРУДИЯ ПРОТИВНИКА БЬЮТ ПРИЦЕЛЬНО' : 'ПРОТИВНИК ЗАСЁК БАТАРЕЮ — ЖДИТЕ ОТВЕТНОГО ОГНЯ', undefined, true); if (e && e.late) detFreshUntil = s.time + 8; }
     detKey = '\u0000'; dirty = true;
   });
   game.on('topic', () => { dirty = true; });
@@ -645,7 +649,6 @@ export function createShell({ engine, game, stations = [], intro = null }) {
   });
   game.on('wave', (w) => { if (w && w.cleared) flash('wave'); dirty = true; });
   game.on('radio', (m) => {
-    sfx('radio');
     if (!notebookOpen) unread++;
     const el = $('radio');
     // донесение вытеснило объяснение темы, которое игрок не успел прочесть (меньше 5 с на экране) — покажем его снова, когда эфир освободится
@@ -655,19 +658,13 @@ export function createShell({ engine, game, stations = [], intro = null }) {
     clearTimeout(radioTimer); radioTimer = setTimeout(() => { el.className = ''; dirty = true; }, RADIO_MS);
     dirty = true;
   });
-  game.on('denied', (d) => { sfx('buzz'); toast(d.reason); });
-  game.on('fired', () => { sfx('fire'); try { engine.shake(0.06, 0.7); } catch (e) { /* нет тряски */ } flash('fire'); vibro('shot'); });
-  // гром нашего разрыва доходит с задержкой и тем тише, чем дальше
-  game.on('impact', (e) => {
-    if (e.observed && blog) blog.observed[e.n] = true;
-    const bat = s.mission && s.mission.battery;
-    const d = bat ? Math.hypot(e.x - bat.x, e.y - bat.y) : 8;
-    setTimeout(() => sfx('thunder', 1.3 - d / 20), Math.min(3500, d * 260) / (s.speed || 1));
-  });
+  game.on('denied', (d) => { sfx('buzz'); toast(d.reason, undefined, true); });
+  game.on('fired', () => { try { engine.shake(0.06, 0.7); } catch (e) { /* нет тряски */ } flash('fire'); vibro('shot'); });
+  game.on('impact', (e) => { if (e.observed && blog) blog.observed[e.n] = true; });
   // налёт: тревога, плашка «НА ЗЕНИТКУ», итог налёта
   game.on('raid', (e) => {
-    if (e.phase === 'warning') { raidUntil = s.time + (e.eta || 10) + 1; sfx('siren'); vibro('fault'); }
-    else if (e.phase === 'start') { raidUntil = Math.max(raidUntil, s.time + 1); sfx('siren'); }
+    if (e.phase === 'warning') { raidUntil = s.time + (e.eta || 10) + 1; vibro('fault'); }
+    else if (e.phase === 'start') raidUntil = Math.max(raidUntil, s.time + 1);
     else if (e.phase === 'end') { raidUntil = -1; toast((e.bombed ? 'НАЛЁТ ОКОНЧЕН' : 'НАЛЁТ ОТБИТ') + ': СБИТО ' + (e.shot || 0) + ', ПРОРВАЛОСЬ ' + (e.bombed || 0)); }
     forcesKey = ''; dirty = true;
   });
@@ -675,22 +672,21 @@ export function createShell({ engine, game, stations = [], intro = null }) {
     if (e.down) toast('САМОЛЁТ СБИТ!');
     else if (e.bombed && blog) blog.bombs.push({ t: s.time, id: e.id, from: s.raid ? s.raid.from : 0 });
   });
-  game.on('aa', (e) => { if (e.jammed) { sfx('buzz'); toast('ЗЕНИТКА: КЛИН — СТВОЛ ПЕРЕГРЕТ'); } });
+  game.on('aa', (e) => { if (e.jammed) toast('ЗЕНИТКА: КЛИН — СТВОЛ ПЕРЕГРЕТ', undefined, true); });
   game.on('observed', () => { dirty = true; });
   game.on('report', () => { dirty = true; });
   // свои силы
   game.on('friend', (e) => {
     const f = (s.friends || []).find((x) => x.id === e.id), nm = f ? f.label : 'СВОИ';
     if (e.sunk) { flash('hit'); toast(e.by === 'own' ? nm + ' ПОТОПЛЕН ВАШИМ ОГНЁМ!' : nm + ' ПОТОПЛЕН ПРОТИВНИКОМ'); }
-    else if (e.hit && e.by === 'own') { vibro('hit'); toast('ОГОНЬ ПО СВОИМ! ПОПАДАНИЕ: ' + nm); }
+    else if (e.hit && e.by === 'own') { vibro('hit'); toast('ОГОНЬ ПО СВОИМ! ПОПАДАНИЕ: ' + nm, undefined, true); }
     else if (e.hit) toast(nm + ' ПОД ОГНЁМ' + (s.shells.smoke > 0 ? ' — ПРИКРОЙТЕ ДЫМОВЫМ СНАРЯДОМ' : ''));
     else if (e.arrived) toast(nm + ' ДОШЁЛ ДО ПОРТА');
     sampleFriends(true); forcesKey = ''; dirty = true;
   });
-  game.on('incoming', (e) => { sfx('whistle', e.eta * 0.92 / (s.speed || 1)); });
-  game.on('fault', (e) => { if (!e.fixed) { vibro('fault'); sfx('alarm', true); setTimeout(() => sfx('alarm', false), 1600); } faultsKey = ''; });
+  game.on('fault', (e) => { if (!e.fixed) vibro('fault'); faultsKey = ''; });
   $('flightChip').addEventListener('click', () => { if (s.phase === 'playing') goto('plot'); });
-  game.on('batteryHit', (h) => { sfx(h.damage > 0 ? 'impactNear' : 'impactFar'); if (h.damage > 0) { flash('hit'); try { engine.shake(0.04, 0.5); } catch (e) { /* нет тряски */ } vibro(h.by === 'air' ? 'bomb' : 'hit'); toast((h.escape ? 'ЦЕЛЬ ПРОРВАЛАСЬ: −' : 'ПОПАДАНИЕ ПО БАТАРЕЕ: −') + h.damage + '%'); } });
+  game.on('batteryHit', (h) => { if (h.damage > 0) { flash('hit'); try { engine.shake(0.04, 0.5); } catch (e) { /* нет тряски */ } vibro(h.by === 'air' ? 'bomb' : 'hit'); toast((h.escape ? 'ЦЕЛЬ ПРОРВАЛАСЬ: −' : 'ПОПАДАНИЕ ПО БАТАРЕЕ: −') + h.damage + '%', undefined, !h.escape); } });
   engine.on('station', () => { $('hud').dataset.st = engine.current || ''; if (s.phase === 'playing' && engine.current && game.setStation) game.setStation(engine.current); dirty = true; });
   engine.on('swipe', (dir) => { if (s.phase === 'playing' && !s.paused) neighbor(dir > 0 ? 1 : -1); });
 

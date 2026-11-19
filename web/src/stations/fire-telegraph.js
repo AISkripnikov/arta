@@ -161,7 +161,7 @@ export function createTelegraph(ctx, h) {
         const before = feed;
         feed = Math.max(0, feed - dt / 0.17 * hurry);
         knob.rotation.x -= (before - feed) * 1.4;
-        if (sound && before === 1) audio.ratchet();
+        if (sound && before === 1) audio.paper({ gain: 0.8 });          // лента подалась на строку
         if (feed === 0) mode = 'type';
         dirty = true;
       } else if (mode === 'type') {

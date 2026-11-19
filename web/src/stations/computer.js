@@ -523,7 +523,7 @@ export function createComputerStation(ctx) {
       const k = 1 - animT / SPIN_TIME, e = k * k * (3 - 2 * k);
       spin = spinFrom + (spinTo - spinFrom) * e;
       clickT -= dt;
-      if (clickT <= 0) { audio.ratchet(); clickT = 0.06 + 0.12 * Math.abs(k - 0.5); }
+      if (clickT <= 0) { audio.detent(1.5 - 0.5 * Math.abs(k - 0.5), 0.45); clickT = 0.06 + 0.12 * Math.abs(k - 0.5); }
       if (animT === 0) { computing = false; audio.clunk(); }
     }
 

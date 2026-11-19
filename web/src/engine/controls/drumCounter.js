@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { slab, roundedRectShape } from '../geom.js';
 import { makeCanvas, canvasTexture, drawLabel, measureLabel } from '../textures.js';
 import { PALETTE } from '../materials.js';
-import { finish, clamp } from './base.js';
+import { finish, clamp, snd } from './base.js';
 
 // Атлас цифр: три колонки по 6 ячеек: «0…5», «5…9,0», «+ − пусто».
 const ATLAS_W = 256, ATLAS_H = 512, COL_W = 84, CELL_H = ATLAS_H / 6;
@@ -175,7 +175,7 @@ export function drumCounter(c, opts = {}) {
     }
     if (opts.sound) {
       const fi = Math.floor(shown);
-      if (fi !== lastTickInt) { lastTickInt = fi; c.audio.tick(); }
+      if (fi !== lastTickInt) { lastTickInt = fi; snd(c, group, 'drumTick'); }
     }
     render();
   });

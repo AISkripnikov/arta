@@ -124,7 +124,8 @@ export function createLoadingStation(ctx) {
   const known = {};                          // остаток снарядов на момент последнего события (чтобы узнать тип поданного)
   const syncKnown = () => { const sh = st().shells || {}; for (const t of TYPES) known[t] = sh[t] | 0; };
   let needReset = true;                      // новое задание: приборы и механика — без анимации
-  let now = 0, firedAt = -100;
+  let now = 0, firedAt = -100, lastJob = null;
+  const PAN_BREECH = -0.35, PAN_HOIST = 0.3;  // казённик — левее центра кадра, шахта элеватора — правее
   syncKnown();
   offs.push(engine.onFrame((dt, time) => { now = time; }));
   offs.push(game.on('phase', (ph) => { syncKnown(); if (ph === 'briefing' || ph === 'menu') needReset = true; }));
@@ -132,11 +133,16 @@ export function createLoadingStation(ctx) {
     const b = breechOf(), sh = st().shells || {}, k = b.busy && b.busy.kind;
     if (k === 'hoist' && b.busy.t === 0) hoistType = TYPES.find((t) => (sh[t] | 0) < known[t]) || selectedType();
     syncKnown();
-    if (!group.visible) return;              // механику слышно только с этого поста и с соседних
-    if (k === 'open' || k === 'close') audio.breech();
-    else if (k === 'hoist' || k === 'unload') audio.hoist();
-    else if (k === 'ram') audio.ram();
-    else if (k) audio.clunk();
+    // звук начала операции (один раз на операцию; конец операции и выстрел шлют то же событие). Механику слышно только с
+    // этого поста и с соседних. Элеватор (петля цепи и мотора) и автоперезарядку очереди ведёт ui/soundscape.js.
+    const job = b.busy; if (!job || job === lastJob) return;
+    lastJob = job;
+    if (!group.visible) return;
+    if (k === 'open') audio.breechOpen({ pan: PAN_BREECH });
+    else if (k === 'close') audio.breechClose({ pan: PAN_BREECH });
+    else if (k === 'ram') audio.ram({ pan: PAN_BREECH });
+    else if (k === 'uncharge') audio.charge({ pan: PAN_BREECH, rate: 0.85, gain: 0.7 });
+    else if (k === 'unload') audio.unload({ pan: PAN_HOIST });
   }));
   offs.push(game.on('fired', () => { firedAt = now; }));
 
@@ -212,7 +218,7 @@ export function createLoadingStation(ctx) {
       carTilt = 0.1 * Math.sin(Math.PI * seg(p, 0.5, 0.86));
       shellOn = true; type = hoistType;
       sx = K.CAR_X * (1 - r); sy = -K.CAR_DOWN * (1 - up) + 0.045 * Math.sin(Math.PI * r); roll = ROLL * r;
-      if (crossed(p, 0.82)) audio.clunk();
+      if (crossed(p, 0.82)) audio.stopper({ pan: PAN_HOIST });          // люлька пришла наверх
     } else if (k === 'ram') {
       const push = seg(p, 0.04, 0.26), s1 = push * push, back = ease(seg(p, 0.5, 1));
       shellOn = true;
@@ -223,7 +229,7 @@ export function createLoadingStation(ctx) {
       moving = 1;
       headZ = K.HEAD_REST + (bagSeatZ(n) + K.BAG_LEN / 2 - K.HEAD_REST) * push * (1 - ease(seg(p, 0.88, 1)));
       shellOn = !!b.shell && inside; sz = b.rammed ? K.SHELL_SEAT_Z : K.SHELL_TRAY_Z;
-      if (crossed(p, 0.5)) audio.ram();
+      if (crossed(p, 0.5)) audio.charge({ pan: PAN_BREECH });           // картуз лёг в камору
     } else if (k === 'uncharge') {
       placeBag(gun.bags[0], 1 - p, staticBags);
       moving = 1; staticBags -= 1;
@@ -239,7 +245,7 @@ export function createLoadingStation(ctx) {
         carTilt = -0.1 * Math.sin(Math.PI * seg(p, 0.7, 0.87));
         shellOn = true;
         sz = K.SHELL_SEAT_Z + RAM_TRAVEL * out; sx = K.CAR_X * r; sy = -K.CAR_DOWN * down + 0.045 * Math.sin(Math.PI * r); roll = ROLL * (1 - r);
-        if (crossed(p, 0.85)) audio.clunk();
+        if (crossed(p, 0.85)) audio.stopper({ pan: PAN_HOIST, gain: 0.8 });
       }
     } else if (b.shell) {
       shellOn = b.rammed ? inside : true;

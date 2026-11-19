@@ -122,3 +122,26 @@ export function localPlanePoint(c, obj, e, z = 0) {
   const hit = c.input.planePoint(e, _n, _p);
   return hit ? obj.worldToLocal(hit) : null;
 }
+
+// ---------- звук органов управления ----------
+const _sp = new THREE.Vector3(), _ss = {};
+/** id поста, которому принадлежит объект (группа поста помечена движком userData.stationId); null — вне поста (стенд). */
+export function stationOf(obj) { for (let o = obj; o; o = o.parent) if (o.userData && o.userData.stationId) return o.userData.stationId; return null; }
+/** Слышно ли орган: его пост — текущий (приборы чужих постов, которые меняет игра, молчат). */
+export function audible(c, obj) { const id = stationOf(obj); return !id || !c.engine.current || id === c.engine.current; }
+/** Панорама звука органа по его месту на экране: −0.55 (левый край) … +0.55 (правый). */
+export function soundPan(c, obj) {
+  try {
+    obj.getWorldPosition(_sp);
+    const s = c.input.toScreen(_sp, _ss), el = c.engine.renderer && c.engine.renderer.domElement;
+    const W = (el && el.clientWidth) || (typeof innerWidth === 'number' && innerWidth) || 800;
+    return s.behind ? 0 : clamp((s.x / W) * 2 - 1, -1, 1) * 0.55;
+  } catch (e) { return 0; }
+}
+/** Разовый звук органа: c.audio[name]({ pan, …o }) — только если орган слышно. */
+export function snd(c, obj, name, o) {
+  if (!audible(c, obj)) return;
+  const f = c.audio && c.audio[name];
+  if (typeof f !== 'function') return;
+  try { f.call(c.audio, Object.assign({ pan: soundPan(c, obj) }, o)); } catch (e) { /* звук не обязателен */ }
+}

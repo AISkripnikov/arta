@@ -52,7 +52,7 @@ const ROWS = {
     { id: 'setVolFx', key: 'volFx', type: 'vol', label: 'ГРОМКОСТЬ ЭФФЕКТОВ', note: 'Выстрел, механизмы, разрывы, тревога.', needs: 'sound' },
     { id: 'setVolAmb', key: 'volAmb', type: 'vol', label: 'ГРОМКОСТЬ ФОНА БАШНИ', note: 'Гул вентиляции и трансформаторов в бою.', needs: 'sound' },
     { id: 'setVolRadio', key: 'volRadio', type: 'vol', label: 'ГРОМКОСТЬ РАДИО', note: 'Вызов радиста: донесения, доклады, команды штаба.', needs: 'sound' },
-    { id: 'setVolMusic', key: 'volMusic', type: 'vol', label: 'ГРОМКОСТЬ МУЗЫКИ', note: 'Музыка в меню и в бою.', needs: 'sound' },
+    { id: 'setVolMusic', key: 'volMusic', type: 'vol', label: 'ГРОМКОСТЬ МУЗЫКИ', note: 'Тема в меню; в бою молчит.', needs: 'sound' },
   ],
   screen: [
     { id: 'setText', key: 'text', type: 'num', label: 'РАЗМЕР НАДПИСЕЙ', items: TEXT, note: 'Радио, подсказки, блокнот, окна.' },

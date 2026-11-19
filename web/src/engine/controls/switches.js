@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { merge, xf, slab, lathe, hitBox, hitCylinder, hexGeometry, extrude } from '../geom.js';
 import { makeCanvas, canvasTexture, drawLabel, upper, measureLabel } from '../textures.js';
 import { PALETTE } from '../materials.js';
-import { finish, planeMapper, sweepAngle, spring, callSafe, clamp, DEG, TAU, wrapPi, localPlanePoint } from './base.js';
+import { finish, planeMapper, sweepAngle, spring, callSafe, clamp, snd, DEG, TAU, wrapPi, localPlanePoint } from './base.js';
 
 const TOGGLE_TILT = 27 * DEG;
 
@@ -63,7 +63,7 @@ export function toggle(c, opts = {}) {
     i = i ? 1 : 0;
     if (i === value) return;
     value = i;
-    c.audio.switchFlip();
+    snd(c, group, 'toggle');
     if (fire) callSafe(opts.onChange, value);
   }
   const remove = c.input.add(hit, {
@@ -155,7 +155,7 @@ export function cover(c, opts = {}) {
     open = b;
     handle.item.priority = open ? 0 : 10;
     syncGuards();
-    c.audio.switchFlip();
+    snd(c, group, 'cover');
     if (fire) callSafe(opts.onChange, open);
   }
   handle = c.input.add(hit, {
@@ -170,7 +170,7 @@ export function cover(c, opts = {}) {
     const target = open ? 1 : 0;
     if (st.x === target && st.v === 0) return;
     spring(st, target, dt, 17, 0.62);
-    if (st.x < 0) { st.x = 0; st.v = -st.v * 0.25; if (Math.abs(st.v) > 0.3) c.audio.tick(); }
+    if (st.x < 0) { st.x = 0; st.v = -st.v * 0.25; if (Math.abs(st.v) > 0.3) snd(c, group, 'tick', { gain: 0.7 }); }
     if (Math.abs(st.x - target) < 0.002 && Math.abs(st.v) < 0.03) { st.x = target; st.v = 0; }
     apply();
   });
@@ -260,7 +260,7 @@ export function rotarySelector(c, opts = {}) {
     i = clamp(i, 0, n - 1);
     if (i === value) return;
     value = i;
-    c.audio.tick();
+    snd(c, group, 'selector');
     if (fire) callSafe(opts.onChange, value);
   }
   const remove = c.input.add(hit, {

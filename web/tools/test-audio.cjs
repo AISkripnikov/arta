@@ -1,5 +1,7 @@
 // Тест звукового движка (engine/audio.js): слушать нельзя — значит, меряем.
-//   node tools/test-audio.cjs [--table файл.txt]
+//   node tools/test-audio.cjs [--table файл.txt] [--wiring | --no-wiring]
+// В конце (или только это — --wiring) — проводка звука в игре: личная полная сборка в .dev/audio-game, сценарий боя действиями
+// игры, журнал вызовов engine.audio.trace() и состояние петель audio.debug().loops (см. wiring() ниже).
 // Сам собирает движок (esbuild) в .dev/audio-test и открывает его в безголовом Chromium. Каждый звук каталога
 // (audio.catalogue) играется через настоящий тракт — шины, реверберации, компрессор, лимитер — в OfflineAudioContext,
 // результат разбирается: тишина, пик, постоянная составляющая, длительность, спектр, громкость, баланс между
@@ -10,6 +12,7 @@ const fs = require('fs');
 
 const outDir = path.resolve(__dirname, '../.dev/audio-test');
 const tableIdx = process.argv.indexOf('--table');
+const ONLY_WIRING = process.argv.includes('--wiring'), NO_WIRING = process.argv.includes('--no-wiring');
 const tableFile = tableIdx >= 0 ? process.argv[tableIdx + 1] : null;
 
 let failed = 0, passed = 0;
@@ -59,6 +62,12 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
   fs.writeFileSync(path.join(outDir, 'index.html'), '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><script src="app.js"></script></body></html>');
 
   const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
+  if (ONLY_WIRING) {
+    await wiring(browser);
+    await browser.close();
+    console.log(`\n${passed} passed, ${failed} failed`);
+    process.exit(failed ? 1 : 0);
+  }
   const page = await (await browser.newContext()).newPage();
   page.setDefaultTimeout(240000);
   const problems = [];
@@ -235,7 +244,7 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
   }
   const api = await page.evaluate(() => { const a = window.__A.createAudio(); return Object.keys(a).filter((k) => typeof a[k] === 'function'); });
   const service = ['unlock', 'setMuted', 'setVolume', 'setBus', 'busNode', 'suspend', 'resume', 'dispose', 'prerender', 'play', 'debug', 'introVolume', 'introStop',
-    'stopper', 'lever', 'toggle', 'slew', 'nearMiss', 'ambience', 'tension'];   // служебные и вторые имена тех же звуков
+    'stopper', 'lever', 'toggle', 'slew', 'nearMiss', 'ambience', 'tension', 'trace', 'duckBus'];   // служебные и вторые имена тех же звуков
   const covered = new Set(cat.map((e) => e.fn));
   const missing = api.filter((k) => !covered.has(k) && !service.includes(k));
   ok(missing.length === 0, 'в каталоге есть каждая звуковая функция движка', missing);
@@ -438,6 +447,7 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
     ok(sus.after === false, 'dispose(): дальше все вызовы молчат', sus);
   }
   ok(problems.length === 0, 'нет ошибок и предупреждений в консоли', problems.slice(0, 5));
+  if (!NO_WIRING) await wiring(browser);
   const f1 = (x) => (x <= -179 ? '  -inf' : x.toFixed(1).padStart(6));
   const lines = ['звук                кат.      пик    ист.пик  длит.  эфф.   инт.   400мс  центр  <90Гц  >4кГц  0.3–6к'];
   for (const r of rows) lines.push(r.id.padEnd(20) + r.cat.padEnd(8) + f1(r.peak) + '  ' + f1(r.tp) + '  ' + r.dur.toFixed(2).padStart(5) + '  ' + r.eff.toFixed(2).padStart(5) + ' ' + f1(r.rms) + ' ' + f1(r.st) + '  ' + String(Math.round(r.cen)).padStart(5) + '  ' + (r.low * 100).toFixed(0).padStart(4) + '%  ' + (r.high * 100).toFixed(0).padStart(4) + '% ' + f1(r.midDb));
@@ -448,3 +458,188 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });
+
+// ---------- 8. проводка звука в игре ----------
+// Полная игра (личная сборка), сценарий боя действиями game.*; журнал вызовов engine.audio.trace() — что, когда и с какими
+// аргументами позвала игра, audio.debug().loops — какие петли звучат. Проверяются последовательности, а не громкость.
+async function wiring(browser) {
+  console.log('проводка звука в игре (полная сборка, сценарий боя)');
+  const root = path.resolve(__dirname, '..'), dir = path.join(root, '.dev/audio-game');
+  require('child_process').execFileSync(process.execPath, ['build.mjs', '--out', dir], { cwd: root, stdio: 'pipe' });
+  const ctx = await browser.newContext({ viewport: { width: 844, height: 390 }, hasTouch: true });
+  await ctx.addInitScript(() => {
+    try { localStorage.setItem('arta2.intro', '1'); localStorage.setItem('arta2.news', '999'); } catch (e) { /* хранилище недоступно */ }
+    window.ArtaNative = { ready() {}, applyUpdate() {} };
+  });
+  const pg = await ctx.newPage();
+  pg.setDefaultTimeout(300000);
+  const errs = [];
+  pg.on('pageerror', (e) => errs.push(e.message));
+  pg.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
+  await pg.goto('file://' + path.join(dir, 'index.html'));
+  await pg.waitForFunction(() => window.__arta && window.__arta.soundscape);
+  await pg.evaluate(() => {
+    const { engine, game } = window.__arta, a = engine.audio;
+    engine.setQuality('low');                       // программная отрисовка: «АВТО» само ушло бы на экономное — задаём явно
+    a.trace(true); a.unlock();
+    const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
+    const frames = async (n) => { for (let i = 0; i < n; i++) await frame(); };
+    // время боя вперёд шагами по 0.1 с; кадр движка (и звуковая обстановка) — каждые every шагов
+    const step = async (cond, maxSec = 300, every = 4, dt = 0.1) => { for (let i = 0; i < maxSec / dt && !cond(); i++) { game.update(dt); if (i % every === every - 1) await frame(); } await frames(2); return !!cond(); };
+    const wait = async (cond, ms = 20000) => { const t0 = performance.now(); while (!cond() && performance.now() - t0 < ms) await frame(); return !!cond(); };
+    const calls = (n, since = 0) => a.trace().filter((e) => e.t >= since && (!n || e.n === n || (Array.isArray(n) && n.includes(e.n))));
+    const loopsOff = () => { const l = a.debug().loops; return Object.keys(l).filter((k) => l[k]); };
+    window.__W = { frame, frames, step, wait, calls, loopsOff, ss: () => window.__arta.soundscape.state, dbg: () => a.debug() };
+  });
+
+  // меню: музыка (state-вызов до первого касания запомнен и применён при unlock)
+  const m0 = await pg.evaluate(async () => {
+    const W = window.__W, a = window.__arta.engine.audio;
+    await W.wait(() => a.musicPlaying, 8000);
+    return { mode: W.ss().mode, music: a.musicPlaying, ctx: W.dbg().state, amb: W.dbg().ambient };
+  });
+  ok(m0.mode === 'menu' && m0.music && !m0.amb, 'игра: в меню играет музыка, фона башни нет', m0);
+
+  // бой: задание 1 полностью — заряжание, выстрел, разрыв, победа
+  const b1 = await pg.evaluate(async () => {
+    const { game, engine } = window.__arta, a = engine.audio, s = game.state, W = window.__W, RAD = Math.PI / 180, t0 = performance.now();
+    game.startMission(0); await W.frames(3);
+    const brief = { mode: W.ss().mode, music: a.musicPlaying };
+    game.begin(); await W.wait(() => W.ss().mode === 'battle'); await W.frames(3);
+    const start = { music: a.musicPlaying, amb: W.dbg().ambient, ambience: W.calls('ambience', t0).map((e) => e.a[0]) };
+    const tSt = performance.now();
+    engine.gotoStation('loading', { instant: true }); await W.frames(3);
+    const st = { ambience: W.calls('ambience', tSt).map((e) => e.a[0]), gear: W.calls('gear', tSt).map((e) => e.a[0]) };
+    await W.step(() => s.targets[0].reported, 120);
+    const t = s.targets[0], bat = s.mission.battery;
+    game.setPin(t.id, t.reported.x, t.reported.y);
+    const dx = t.reported.x - bat.x, dy = t.reported.y - bat.y, rng = Math.hypot(dx, dy), brg = ((Math.atan2(dx, dy) / RAD) + 360) % 360;
+    game.setAlidade({ bearing: brg, range: rng }); game.recordMeasurement();
+    game.setComputerRange(rng); const ch = game.chargeStates().indexOf('ok') + 1; game.setComputerCharge(ch); const sol = game.compute();
+    const tL = performance.now(), free = () => !s.breech.busy;
+    let hoistSeen = false;
+    game.openBreech(); await W.step(free, 20, 1, 0.1);
+    game.hoistShell('he');
+    for (let i = 0; i < 300 && s.breech.busy; i++) { game.update(0.05); await W.frame(); if (W.dbg().loops.hoist) hoistSeen = true; }
+    await W.frames(3);
+    const hoistAfter = W.dbg().loops.hoist;
+    game.ramShell(); await W.step(free, 20, 1, 0.1);
+    for (let i = 0; i < ch; i++) { game.addCharge(); await W.step(free, 20, 1, 0.1); }
+    game.closeBreech(); await W.step(free, 20, 1, 0.1);
+    engine.gotoStation('traverse', { instant: true });
+    game.setBrake(false); game.rotateTurret(s.plot.recorded[t.id].bearing - s.turret.bearing); game.setBrake(true);
+    engine.gotoStation('elevation', { instant: true });
+    game.elevate(sol.elevation - s.turret.elevation);
+    engine.gotoStation('fire', { instant: true }); await W.frames(2);
+    const tF = performance.now();
+    game.arm(true); const f = game.fire();
+    await W.step(() => s.phase !== 'playing', 60, 2);
+    await W.wait(() => W.ss().mode === 'end', 5000); await W.wait(() => W.calls(['missionWon', 'missionLost'], tL).length > 0, 8000); await W.frames(3);
+    const SEQ = ['breechOpen', 'hoistRun', 'ram', 'charge', 'breechClose', 'fire', 'impact', 'missionWon', 'missionLost'];
+    const seq = W.calls(SEQ, tL).map((e) => e.n + (e.n === 'hoistRun' ? ':' + e.a[0] : ''));
+    const imp = W.calls('impact', tF).map((e) => e.a[0]);
+    const end = { phase: s.phase, mode: W.ss().mode, amb: W.dbg().ambient, loops: W.loopsOff() };
+    game.quit(); await W.wait(() => W.ss().mode === 'menu'); await W.wait(() => a.musicPlaying, 8000);
+    const menu = { mode: W.ss().mode, music: a.musicPlaying, amb: W.dbg().ambient, loops: W.loopsOff() };
+    return { brief, start, st, hoistSeen, hoistAfter, fired: f.ok, seq, imp, end, menu };
+  });
+  console.log('  бой 1: ' + JSON.stringify({ seq: b1.seq, imp: b1.imp, st: b1.st, end: b1.end }));
+  ok(b1.brief.mode === 'menu' && b1.brief.music, 'игра: на брифинге музыка ещё играет', b1.brief);
+  ok(!b1.start.music && b1.start.amb && b1.start.ambience.some((o) => o && o.station === 'plot' && o.weather), 'игра: начало боя — музыка уходит, фон башни с постом и погодой', b1.start);
+  ok(b1.st.ambience.some((o) => o && o.station === 'loading') && b1.st.gear.includes(0), 'игра: смена поста меняет окраску фона (и глушит шестерни)', b1.st);
+  const ix = (n) => b1.seq.indexOf(n);
+  ok(b1.fired && ix('breechOpen') >= 0 && ix('breechOpen') < ix('hoistRun:true') && ix('hoistRun:true') < ix('hoistRun:false') && ix('hoistRun:false') < ix('ram') &&
+    ix('ram') < ix('charge') && ix('charge') < ix('breechClose') && ix('breechClose') < ix('fire') && ix('fire') < ix('impact'), 'игра: заряжание → выстрел → разрыв звучат по порядку', b1.seq);
+  ok(b1.hoistSeen && !b1.hoistAfter, 'игра: петля элеватора звучит, пока люлька идёт, и гаснет с концом подачи', { seen: b1.hoistSeen, after: b1.hoistAfter });
+  ok(b1.imp.length > 0 && b1.imp.every((o) => ['water', 'land', 'steel'].includes(o.kind) && o.range > 0 && o.delay > 0 && o.delay <= 3.5), 'игра: разрыв — по тому, во что попали, с задержкой по дальности', b1.imp);
+  ok(ix('missionWon') > ix('impact') || ix('missionLost') > ix('impact'), 'игра: итог боя озвучен (победа/поражение)', b1.seq);
+  ok(b1.end.mode === 'end' && !b1.end.amb && b1.end.loops.length === 0, 'игра: после боя фон выключен, петель нет', b1.end);
+  ok(b1.menu.mode === 'menu' && b1.menu.music && !b1.menu.amb && b1.menu.loops.length === 0, 'игра: в меню снова музыка', b1.menu);
+
+  // задание 31 «Воздух!»: прицельный огонь противника, налёт, зенитка, пауза, выход посреди петель
+  const b2 = await pg.evaluate(async () => {
+    const { game, engine } = window.__arta, a = engine.audio, s = game.state, W = window.__W, t0 = performance.now();
+    game.save.unlocked = Math.max(game.save.unlocked, 32);
+    game.startMission(31); game.begin(); await W.wait(() => W.ss().mode === 'battle'); await W.frames(2);
+    s.detected = true; s.detectedAt = s.time;          // батарею «засекли» сразу: огонь противника — прицельный
+    engine.gotoStation('aa', { instant: true }); await W.frames(2);
+    const ev = { incoming: [], hits: [] };
+    const offs = [game.on('incoming', (e) => ev.incoming.push({ t: performance.now(), blind: !!e.blind })), game.on('batteryHit', (e) => ev.hits.push({ t: performance.now(), d: e.damage, by: e.by }))];
+    await W.step(() => s.raidWarn && s.raidWarn.until > s.time, 80);
+    await W.frames(3);
+    const warn = { siren: W.dbg().loops.siren, calls: W.calls('sirenRun', t0).map((e) => e.a[0]) };
+    await W.step(() => s.raid && s.raid.phase === 'inbound', 20);
+    await W.frames(4);
+    const tens = W.calls('tension', t0);
+    const inbound = { siren: W.dbg().loops.siren, sirenCalls: W.calls('sirenRun', t0).map((e) => e.a[0]), drone: W.dbg().loops.drone, droneCalls: W.calls('planeDrone', t0).filter((e) => e.a[0] > 0).length, tension: tens.length ? tens[tens.length - 1].a[0] : 0 };
+    const tA = performance.now();
+    game.aimAA({ bearing: s.raid.planes[0].bearing, elevation: s.raid.planes[0].elevation });
+    game.fireAA(true); await W.frames(4);
+    const aaOn = W.dbg().loops.aa;
+    game.pause(true); await W.frames(4);
+    const paused = { aa: W.dbg().loops.aa, duck: W.dbg().duck, ducked: W.ss().ducked };
+    game.pause(false); await W.frames(4);
+    const resumed = { aa: W.dbg().loops.aa, duck: W.dbg().duck };
+    game.fireAA(false); await W.frames(4);
+    const aaOff = W.dbg().loops.aa;
+    const aaCalls = W.calls('aaFire', tA).map((e) => e.a[0]);
+    // самолёты долетают (не сбиваем): свист бомбы, разрыв, пролёт над башней
+    await W.step(() => !s.raid || s.raid.planes.every((q) => q.attacked || !q.alive), 60, 2);
+    await W.step(() => ev.hits.some((h) => h.by !== 'air') && ev.incoming.some((i) => !i.blind), 150, 4);
+    offs.forEach((f) => f());
+    const air = { whistle: W.calls('bombWhistle', t0).length, burst: W.calls('bombBurst', t0).length, flyby: W.calls('flyby', t0).length, bombed: s.stats.bombs };
+    const fire = W.calls(['enemyGun', 'whistle', 'turretHit', 'nearMiss', 'impactFar'], t0).map((e) => e.n);
+    const tension = W.calls('tension', t0).map((e) => e.a[0]);
+    // выход посреди петель: очередь зенитки и элеватор
+    engine.gotoStation('loading', { instant: true }); await W.frames(2);
+    game.fireAA(true);
+    if (!s.breech.busy && !s.breech.open) game.openBreech();
+    await W.step(() => !s.breech.busy, 20, 1);
+    if (!s.breech.shell) game.hoistShell(s.shells.he > 0 ? 'he' : 'ap');
+    for (let i = 0; i < 6; i++) { game.update(0.05); await W.frame(); }
+    const before = W.loopsOff();
+    game.quit(); await W.wait(() => W.ss().mode === 'menu'); await W.frames(6);
+    const after = { loops: W.loopsOff(), amb: W.dbg().ambient, music: a.musicPlaying, mode: W.ss().mode };
+    return { warn, inbound, aaOn, paused, resumed, aaOff, aaCalls, air, ev: { inc: ev.incoming.length, hits: ev.hits.map((h) => h.by + ':' + h.d) }, fire, tension, before, after };
+  });
+  console.log('  бой 31: ' + JSON.stringify(b2));
+  ok(b2.warn.siren && b2.warn.calls.includes(true), 'игра: «ВОЗДУХ!» — сирена воет все 10 с предупреждения', b2.warn);
+  ok(!b2.inbound.siren && b2.inbound.sirenCalls.join() === 'true,false' && b2.inbound.drone && b2.inbound.droneCalls > 0, 'игра: налёт — сирена стихла, гул самолётов', b2.inbound);
+  ok(b2.inbound.tension >= 0.5, 'игра: во время налёта фон напряжённый', b2.inbound.tension);
+  ok(b2.aaOn && !b2.paused.aa && b2.resumed.aa && !b2.aaOff && b2.aaCalls.join() === 'true,false,true,false', 'игра: очередь зенитки — пока жмут гашетку; на паузе молчит', { on: b2.aaOn, paused: b2.paused, resumed: b2.resumed, off: b2.aaOff, calls: b2.aaCalls });
+  ok(b2.paused.ducked && b2.paused.duck.amb < 0.5 && b2.resumed.duck.amb === 1, 'игра: пауза приглушает фон, продолжение возвращает', { p: b2.paused.duck, r: b2.resumed.duck });
+  ok(b2.air.bombed > 0 && b2.air.whistle >= b2.air.bombed && b2.air.burst >= b2.air.bombed && b2.air.flyby >= b2.air.bombed, 'игра: прорвавшийся самолёт — свист бомбы, разрыв, пролёт', b2.air);
+  const eg = b2.fire.indexOf('enemyGun'), wh = b2.fire.indexOf('whistle', eg), hit = Math.max(b2.fire.indexOf('turretHit', wh), b2.fire.indexOf('nearMiss', wh));
+  ok(eg >= 0 && wh > eg && hit > wh, 'игра: огонь противника — далёкий залп, свист, разрыв у батареи', { fire: b2.fire.slice(0, 12), ev: b2.ev });
+  ok(b2.tension.some((v) => v > 0.2) && b2.tension.length < 200, 'игра: напряжение растёт от огня и шлётся без лишних вызовов', b2.tension.length);
+  ok(b2.before.includes('aa'), 'игра: перед выходом очередь зенитки звучит', b2.before);
+  ok(b2.after.loops.length === 0 && !b2.after.amb && b2.after.music && b2.after.mode === 'menu', 'игра: выход в меню посреди очереди и подачи — все петли стихли, снова музыка', b2.after);
+
+  // сохранённый бой: выйти с сохранением на посту НАБЛЮДЕНИЕ, продолжить — фон того же поста
+  const r3 = await pg.evaluate(async () => {
+    const { game, engine } = window.__arta, a = engine.audio, W = window.__W;
+    game.startSkirmish(); game.begin(); await W.wait(() => W.ss().mode === 'battle');
+    engine.gotoStation('observe', { instant: true }); await W.frames(3);
+    game.suspend(); game.quit({ keep: true }); await W.wait(() => W.ss().mode === 'menu'); await W.frames(3);
+    const menu = { music: a.musicPlaying, amb: W.dbg().ambient };
+    const t0 = performance.now();
+    game.restore(); await W.wait(() => W.ss().mode === 'battle'); await W.frames(4);
+    const r = { station: engine.current, amb: W.dbg().ambient, music: a.musicPlaying, ambience: W.calls('ambience', t0).map((e) => e.a[0]) };
+    // ролик: тишина — ни музыки, ни фона
+    game.quit(); await W.wait(() => W.ss().mode === 'menu');
+    const sh = window.__arta.shell; let intro = null;
+    if (sh.intro) {
+      sh.playIntro(() => {}); await W.frames(4);
+      intro = { mode: W.ss().mode, music: a.musicPlaying, amb: W.dbg().ambient };
+      try { sh.intro.skip(); } catch (e) { /* пропуска нет */ }
+      await W.wait(() => !sh.introPlaying, 10000); await W.frames(4);
+      intro.after = { mode: W.ss().mode, music: a.musicPlaying };
+    }
+    return { menu, r, intro, trace: a.trace().length };
+  });
+  console.log('  продолжение и ролик: ' + JSON.stringify(r3));
+  ok(r3.menu.music && !r3.menu.amb && r3.r.station === 'observe' && r3.r.amb && !r3.r.music && r3.r.ambience.some((o) => o && o.station === 'observe'), 'игра: «ПРОДОЛЖИТЬ БОЙ» — фон поста, на котором сохранились', r3);
+  if (r3.intro) ok(r3.intro.mode === 'intro' && !r3.intro.music && !r3.intro.amb && r3.intro.after.mode === 'menu' && r3.intro.after.music, 'игра: во время ролика музыка и фон молчат, после — музыка меню', r3.intro);
+  ok(errs.length === 0, 'игра: без ошибок на странице', errs.slice(0, 5));
+  await ctx.close();
+}

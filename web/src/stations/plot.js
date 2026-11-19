@@ -179,11 +179,11 @@ export function createPlotStation(ctx) {
   // карандаш: провести линию вдоль алидады (засечка по пеленгам) и стереть все линии
   const btnLine = deck.add(keep(ui.pushButton({
     radius: 0.03, color: 'ochre', label: 'ЛИНИЯ',
-    onPress() { if (state().mission) { const r = game.drawLine(); if (r && r.ok) audio.tick(); } },
+    onPress() { if (state().mission) { const r = game.drawLine(); if (r && r.ok) audio.paper(); } },
   })), 0.455, -0.075);
   const btnErase = deck.add(keep(ui.pushButton({
     radius: 0.024, color: 'black', label: 'СТЕРЕТЬ',
-    onPress() { if (state().mission) { game.clearLines(); audio.tick(); } },
+    onPress() { if (state().mission) { game.clearLines(); audio.paper(); } },
   })), 0.455, -0.215);
 
   // лоток фишек
@@ -395,7 +395,7 @@ export function createPlotStation(ctx) {
   backPlate.object3D.position.z = 0.004;
   backPlate.object3D.visible = false;
   plane.add(backPlate.object3D);
-  disposers.push(input.add(backPlate.object3D, { onTap() { if (loupe) { audio.tick(); setLoupe(false); } } }, { priority: 2 }));
+  disposers.push(input.add(backPlate.object3D, { onTap() { if (loupe) { audio.loupe(); setLoupe(false); } } }, { priority: 2 }));
 
   // ------------------------------------------------------------------ вспомогательное
   const hotspots = {};
@@ -596,7 +596,7 @@ export function createPlotStation(ctx) {
           const bat = battery();
           drag.angle = Math.atan2(drag.p0.u - kmU(bat.x), drag.p0.v - kmV(bat.y));
         }
-        audio.tick();
+        if (drag.kind === 'pin') audio.tick(); else audio.paper();     // фишку взяли / линейка, визир поехали по карте
       }
       const du = p.u - drag.p0.u, dv = p.v - drag.p0.v;
       if (drag.kind === 'pin') {
@@ -620,7 +620,7 @@ export function createPlotStation(ctx) {
       const d = drag;
       if (d.moved) {
         d.done = true;
-        if (d.kind === 'pin') { d.free = null; audio.clunk(); }
+        if (d.kind === 'pin') { d.free = null; audio.pin(); }
         if (d.kind === 'sight' || d.kind === 'ruler') trySnap();
         if (loupe && (d.kind === 'pin' || d.kind === 'sight')) {
           // подвести кадр к тому, что двигали
@@ -656,7 +656,7 @@ export function createPlotStation(ctx) {
       }
       if (lastTap && now - lastTap.t < 450 && Math.hypot(e.x - lastTap.x, e.y - lastTap.y) < 34) {
         lastTap = null;
-        audio.tick();
+        audio.loupe();
         if (loupe) setLoupe(false);
         else {
           // двойное касание: лупа у фишки/визира, если они рядом с местом касания, иначе — в месте касания

@@ -274,7 +274,7 @@ export function createAAStation(ctx) {
   // ---------- события ----------
   let warned = false, lastShot = 0, shotSide = 0, shotAcc = 0, lastText = '';
   offs.push(game.on('raid', (e) => {
-    if (e.phase === 'warning') { warned = true; snd('siren'); }
+    if (e.phase === 'warning') warned = true;          // сирена, гул самолётов, очередь, бомбы — ui/soundscape.js
     else warned = false;
   }));
   offs.push(game.on('plane', (e) => {
@@ -289,7 +289,6 @@ export function createAAStation(ctx) {
           sz * 0.55, 1.8, 2.4 + rnd(), 1.9, 0.95, 0.35, 1, 2, 0, 0.6, 0, 1);
         fxp.emit(PK.GLOW, _o.x, _o.y, 0.09, 0, 0, 0, sz * 1.1, 0.6, 0.3, 1.5, 0.95, 0.45, 1, 1, 0, 0, 0, 1);
         for (let i = 0; i < 6; i++) { const an = rnd() * 6.283, v = sz * (0.8 + rnd()); fxp.emit(PK.GLOW, _o.x, _o.y, 0.08, Math.cos(an) * v, Math.sin(an) * v, 0, sz * 0.12, 0, 0.9 + rnd() * 0.5, 1.8, 0.9, 0.4, 1, 1, sz * 2, 0.4, 0, 1); }
-        snd('impactFar');
       }
     } else if (e.bombed && cur) {
       bombT = 0;
@@ -300,24 +299,10 @@ export function createAAStation(ctx) {
         const H = 6 * M;
         for (let i = 0; i < 10; i++) fxp.emit(PK.WATER, _o.x + (rnd() - 0.5) * H * 0.3, _o.y, 0.05, (rnd() - 0.5) * H * 0.2, H * (1.2 + rnd() * 0.9), 0, H * 0.22, 1, 2.2 + rnd(), 0.85, 0.9, 0.93, 0.9, 3, H * 1.1, 0.2, 0);
       }
-      snd('bombHit');
       try { engine.shake(1.3, 0.8); } catch (err) { /* нет тряски */ }
     }
   }));
-  offs.push(game.on('aa', (e) => { if (e.jammed) { release(); if (engine.current === 'aa') snd('buzz'); } }));
-  // гул самолётов слышен на любом посту
-  let droneLvl = 0;
-  offs.push(engine.onFrame(() => {
-    const s = game.state, R = s.raid;
-    let lvl = 0;
-    if (R && s.phase === 'playing' && !s.paused) {
-      let near = Infinity;
-      for (const p of R.planes) if (p.alive && p.range < near) near = p.range;
-      if (near < Infinity) lvl = clamp(1 - near / 8, 0.06, 1) * (engine.current === 'aa' ? 1 : 0.6);
-    }
-    if (Math.abs(lvl - droneLvl) > 0.02 || (lvl === 0 && droneLvl !== 0)) { droneLvl = lvl; snd('planeDrone', lvl); }
-  }));
-
+  offs.push(game.on('aa', (e) => { if (e.jammed) release(); }));
   // ---------- кадр ----------
   const proj = (b, e, a, out) => { out.x = wrap180(b - a.bearing) * Math.cos(e * DEG) * M; out.y = (e - a.elevation) * M; return out; };
   const _o = { x: 0, y: 0 };
@@ -439,7 +424,6 @@ export function createAAStation(ctx) {
         const B = barrels[shotSide];
         B.kick = 1; lastShot = time;
         if (trs.length < NTR) trs.push({ s: 0, from: shotSide, tx: (Math.random() - 0.5) * 0.03, ty: (Math.random() - 0.5) * 0.03, boom: rnd() < 0.55 });
-        snd('aaBurst');
       }
     } else shotAcc = 0.99;                                     // первый выстрел — сразу
     for (const B of barrels) {
@@ -506,7 +490,6 @@ export function createAAStation(ctx) {
     controls: { pad, fireBtn, slewB, slewE, gHeat, lampHot, cAmmo, cBearing, cElev, lampAir, lampClear, targetPlate, sky, shutter, arrow, tracers, planes, info, degPerM: 1 / M },
     dispose() {
       quiet();
-      snd('planeDrone', 0);
       offs.forEach((f) => { try { f(); } catch (e) { /* уже снято */ } });
       kept.forEach((c) => { if (c.dispose) c.dispose(); });
       for (const r of planes.values()) freePlanes.push(r.grp);

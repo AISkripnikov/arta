@@ -49,6 +49,9 @@ export function createAudio(opts = {}) {
   const vol = {};                          // шина → [сухой, посыл в комнату, посыл в море] (GainNode)
   const inputs = {};                       // 'шина/пространство' → входной узел
   const bus = { fx: 1, amb: 1, radio: 1, music: 1 };
+  const mul = { fx: 1, amb: 1, radio: 1, music: 1 };   // приглушение игрой (пауза, диалог) поверх громкости игрока
+  const lvl = (name) => bus[name] * mul[name];
+  let trace = null;                        // журнал вызовов API для проверок (trace(true)); null — не пишется
   let failed = false, muted = false, volume = 0.8, paused = false;
   const last = {};                         // ограничение частоты однотипных звуков
   let voices = [], garbage = [], sweeper = 0, irTimer = 0, extra = 0;
@@ -105,7 +108,7 @@ export function createAudio(opts = {}) {
       // шины
       for (const name of BUSES) {
         const v = vol[name] = [ctx.createGain(), ctx.createGain(), ctx.createGain()];
-        v.forEach((g) => { g.gain.value = bus[name]; });
+        v.forEach((g) => { g.gain.value = lvl(name); });
         v[1].connect(roomConv); v[2].connect(seaConv);
         if (name === 'fx') {
           const c = ctx.createDynamicsCompressor(), cg = ctx.createGain();
@@ -154,11 +157,11 @@ export function createAudio(opts = {}) {
     const t = ctx.currentTime;
     param.cancelScheduledValues(t); param.setTargetAtTime(v, t, 0.012); param.setValueAtTime(v, t + 0.07);
   }
-  function setBusGain(name) { for (const g of vol[name]) setNow(g.gain, bus[name]); }
+  function setBusGain(name) { for (const g of vol[name]) setNow(g.gain, lvl(name)); }
   /** Кратко приглушить шину: до depth за 30 мс, держать hold, вернуть за ~3·rel. */
   function duck(name, depth, hold, rel) {
     const t = ctx.currentTime;
-    for (const g of vol[name]) { g.gain.cancelScheduledValues(t); g.gain.setTargetAtTime(bus[name] * depth, t, 0.03); g.gain.setTargetAtTime(bus[name], t + hold, rel); }
+    for (const g of vol[name]) { g.gain.cancelScheduledValues(t); g.gain.setTargetAtTime(lvl(name) * depth, t, 0.03); g.gain.setTargetAtTime(lvl(name), t + hold, rel); }
   }
 
   // ----- голоса -----
@@ -245,6 +248,17 @@ export function createAudio(opts = {}) {
       bus[name] = clamp(+v || 0, 0, 2);
       try { if (ctx) setBusGain(name); } catch (e) { /* тихо */ }
     },
+    /**
+     * Приглушить шину по ходу игры (пауза, окно поверх боя): factor 0…1 умножает громкость игрока, 1 — снять. Плавно (~0.3 с),
+     * держится, пока не сняли; громкость из настроек (setBus) и «звук выкл» не трогает.
+     */
+    duckBus(name, factor) {
+      if (!Object.prototype.hasOwnProperty.call(mul, name)) return;
+      const f = clamp(factor == null ? 1 : +factor || 0, 0, 1);
+      if (f === mul[name]) return;
+      mul[name] = f;
+      try { if (ctx) { const t = ctx.currentTime; for (const g of vol[name]) { g.gain.cancelScheduledValues(t); g.gain.setTargetAtTime(lvl(name), t, 0.1); } } } catch (e) { /* тихо */ }
+    },
     /** Текущие громкости шин { fx, amb, radio, music }. */
     get buses() { return { fx: bus.fx, amb: bus.amb, radio: bus.radio, music: bus.music }; },
     /** Узел шины (GainNode) для подключения своих источников: 'fx' | 'amb' | 'radio' | 'music'; null, пока звук не разбужен. */
@@ -272,7 +286,7 @@ export function createAudio(opts = {}) {
         voices: voices.reduce((n, v) => n + (v.dying ? 0 : 1), 0), dying: voices.reduce((n, v) => n + (v.dying ? 1 : 0), 0), nodes: voices.reduce((n, v) => n + v.nodes.length, 0) + garbage.reduce((n, v) => n + v.nodes.length, 0),
         inputs: Object.keys(inputs).length, bankBytes: bank ? bank.bytes : 0, bankPending: bank ? bank.pending : 0, bankTotal: bank ? bank.total : 0,
         bufferBytes: (bank ? bank.bytes : 0) + extra, state: ctx ? ctx.state : 'none', rate: ctx ? ctx.sampleRate : 0, paused,
-        music: music.playing, ambient: amb.state.on,
+        music: music.playing, ambient: amb.state.on, loops: loops.state(), duck: Object.assign({}, mul),
       };
     },
 
@@ -281,8 +295,8 @@ export function createAudio(opts = {}) {
     tick: P('tick'),
     /** Трещотка маховика (старое имя) — то же, что detent(). */
     ratchet: P('detent'),
-    /** Щелчок фиксатора маховика: pitch — высота (0.7…1.5), vel — сила (0…1.5). */
-    detent: one((pitch, vel) => play('detent', { rate: clamp(pitch == null ? 1 : +pitch || 1, 0.5, 2), gain: clamp(vel == null ? 1 : +vel || 0, 0, 1.5) })),
+    /** Щелчок фиксатора маховика: pitch — высота (0.7…1.5), vel — сила (0…1.5), pan — панорама. */
+    detent: one((pitch, vel, pan) => play('detent', { rate: clamp(pitch == null ? 1 : +pitch || 1, 0.5, 2), gain: clamp(vel == null ? 1 : +vel || 0, 0, 1.5), pan })),
     /** Шестерни маховика: speed 0…1 — частота зубьев и громкость следуют за скоростью; 0 — стихает. Вызывать при изменении. */
     gear: hold((speed) => loops.gear(speed)),
     /** Глухой удар механизма (фиксация, упор, тормоз). */
@@ -345,12 +359,13 @@ export function createAudio(opts = {}) {
     /**
      * Разрыв своего снаряда вдали. o: range — дальность, км (задержка, глухота и громкость по ней); kind — 'water'
      * (всплеск) | 'land' (разрыв на берегу) | 'steel' (попадание в корабль); pan; delay — своя задержка, с (0 — сразу;
-     * по умолчанию min(3.5, range·0.26)). Возвращает задержку.
+     * по умолчанию min(3.5, range·0.26)); gain — множитель громкости (ОСВ, ДЫМ — тише). Возвращает задержку.
      */
     impact: one((o) => {
       o = pan01(o);
       const range = clamp(o.range == null ? 8 : +o.range || 0, 0, 40), delay = o.delay == null ? Math.min(3.5, range * 0.26) : Math.max(0, +o.delay || 0);
-      play(o.kind === 'water' ? 'impWater' : o.kind === 'steel' ? 'impSteel' : 'impLand', { when: delay, pan: o.pan, gain: 1.5 / (1 + range / 7), lp: 7000 / (1 + range * 0.45), force: true });
+      const g = o.gain == null ? 1 : clamp(+o.gain || 0, 0, 2);
+      play(o.kind === 'water' ? 'impWater' : o.kind === 'steel' ? 'impSteel' : 'impLand', { when: delay, pan: o.pan, gain: g * 1.5 / (1 + range / 7), lp: 7000 / (1 + range * 0.45), force: true });
       return delay;
     }),
     /** Далёкий раскат (vol 0…1.3) — гром разрыва нашего снаряда (старое имя; новое — impact). */
@@ -532,6 +547,28 @@ export function createAudio(opts = {}) {
    * dur: [мин, макс] — ожидаемая длительность звучания, loop — непрерывный звук, off — чем выключить }].
    */
   api.catalogue = CATALOGUE;
+
+  // ----- журнал вызовов (tools/test-audio.cjs, проверка проводки звука в игре) -----
+  // trace(true) — начать писать заново, trace(false) — перестать; trace() — записи [{ n: имя, t: мс (performance.now), a: [аргументы] }].
+  // Пишутся вызовы самой игры, в том числе до первого касания (звука ещё нет, а вызов уже есть). Не больше 4000 последних записей.
+  const NOLOG = { debug: 1, trace: 1, prerender: 1 };
+  const plain = (v) => (v == null || typeof v !== 'object' ? v : Array.isArray(v) ? v.slice(0, 8) : Object.assign({}, v));
+  for (const k of Object.keys(api)) {
+    const d = Object.getOwnPropertyDescriptor(api, k);
+    if (!d || typeof d.value !== 'function' || NOLOG[k]) continue;
+    const f = d.value;
+    api[k] = function () {
+      if (trace) {
+        try { trace.push({ n: k, t: typeof performance !== 'undefined' ? performance.now() : Date.now(), a: Array.prototype.map.call(arguments, plain) }); if (trace.length > 4000) trace.splice(0, 1000); } catch (e) { /* тихо */ }
+      }
+      return f.apply(this, arguments);
+    };
+  }
+  api.trace = function (on) {
+    if (on === true) trace = [];
+    else if (on === false) { const t = trace || []; trace = null; return t; }
+    return trace ? trace.slice() : [];
+  };
 
   if (opts.context) ensure();
   return api;

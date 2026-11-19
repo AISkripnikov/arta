@@ -4,6 +4,7 @@ import { createGame } from './game/index.js';
 import { createShell } from './ui/shell.js';
 import { createIntro } from './ui/intro.js';
 import { createVfx } from './ui/vfx.js';
+import { createSoundscape } from './ui/soundscape.js';
 import { createPlotStation } from './stations/plot.js';
 import { createComputerStation } from './stations/computer.js';
 import { createLoadingStation } from './stations/loading.js';
@@ -36,8 +37,10 @@ const storage = {
     try { intro = createIntro({ engine, audio: engine.audio }); } catch (e) { console.error('[main] вступительный ролик недоступен:', e); }
     const shell = createShell({ engine, game, stations, intro });
     try { createVfx({ engine, game }); } catch (e) { console.error('[main] эффекты боя недоступны:', e); }
+    let soundscape = null;
+    try { soundscape = createSoundscape({ engine, game, shell, stations }); } catch (e) { console.error('[main] звуковая обстановка недоступна:', e); }
     engine.start();
-    window.__arta = { engine, game, shell };
+    window.__arta = { engine, game, shell, soundscape };
     // Сообщаем приложению, что эта версия игры запустилась: иначе после двух неудач оно вернёт прежнюю.
     setTimeout(() => { try { window.ArtaNative.ready(); } catch (e) { /* не в приложении */ } }, 1500);
   } catch (err) {

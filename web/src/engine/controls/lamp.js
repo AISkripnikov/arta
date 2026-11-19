@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { merge, lathe, hitCylinder, hitBox } from '../geom.js';
 import { toColor, PALETTE } from '../materials.js';
-import { finish, callSafe } from './base.js';
+import { finish, callSafe, snd, stationOf } from './base.js';
 
 const BLINK_HZ = 2.2;
 
@@ -36,16 +36,23 @@ export function lamp(c, opts = {}) {
     p.object3D.position.set(0, -(r * 1.5 + 0.01 + p.h / 2), 0);
     group.add(p.object3D);
   }
-  let state = false, lit = false;
+  let state = false, lit = false, armed = false;
   const show = b => { if (b !== lit) { lit = b; lens.material = b ? onMat : offMat; glow.visible = b; } };
   const off = c.engine.onFrame((dt, time) => {
     if (state === 'blink') show((time * BLINK_HZ) % 1 < 0.5);
   });
   const api = {
     get state() { return state; },
-    set(s) { state = s === 'blink' ? 'blink' : !!s; if (state !== 'blink') show(state); },
+    set(s) {
+      const was = state;
+      state = s === 'blink' ? 'blink' : !!s;
+      if (state !== 'blink') show(state);
+      // щелчок реле, когда лампу зажгли/погасили (мигание само по себе не щёлкает) — только на текущем посту
+      if (state !== was && armed && stationOf(group) === c.engine.current) snd(c, group, 'relay');
+    },
   };
   api.set(opts.state || false);
+  armed = true;
   return finish(api, group, [off]);
 }
 
@@ -89,7 +96,7 @@ export function pushButton(c, opts = {}) {
   let pressed = false, lit = false, z = 0, holdT = 0, repeats = 0, nextAt = 0;
   const travel = r * 0.3;
   function press() {
-    c.audio.tick();
+    snd(c, group, repeats ? 'tick' : 'button', repeats ? { gain: 0.6 } : undefined);     // нажатие (автоповтор — лёгкий щелчок)
     callSafe(opts.onPress, repeats++);
   }
   const remove = c.input.add(hit, {
@@ -98,7 +105,7 @@ export function pushButton(c, opts = {}) {
       pressed = true; holdT = 0; repeats = 0; nextAt = 0.42;
       press();
     },
-    onUp() { if (pressed) { pressed = false; c.audio.tick(); } },
+    onUp() { if (pressed) { pressed = false; if (holdT > 0.3) snd(c, group, 'tick', { gain: 0.6 }); } },        // возврат после долгого удержания
   });
   const off = c.engine.onFrame(dt => {
     const tz = pressed ? -travel : 0;

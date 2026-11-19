@@ -257,6 +257,8 @@ export function createLoops(core, satCurve) {
     return dur;
   };
 
+  /** Какие петли сейчас звучат (для проверок: после выхода из боя всё должно быть false). */
+  L.state = () => ({ slew: L.slew.active(), gear: L.gear.active(), hoist: !!hoist, aa: !!aa, drone: L.drone.active(), siren: !!siren, alarm: !!alarm, static: L.staticBed.active() });
   L.reset = () => { hoist = aa = siren = alarm = null; clearTimeout(sirenTimer); L.slew.drop(); L.gear.drop(); L.drone.drop(); L.staticBed.drop(); };
   return L;
 }

@@ -1,12 +1,14 @@
 // handwheel — маховик. Игрок крутит его круговым движением пальца вокруг ступицы.
 import * as THREE from 'three';
 import { merge, xf, lathe, hitCylinder } from '../geom.js';
-import { finish, planeMapper, sweepAngle, callSafe, TAU, DEG } from './base.js';
+import { finish, planeMapper, sweepAngle, callSafe, clamp, soundPan, snd, TAU, DEG } from './base.js';
 
 /**
  * opts: { radius=0.16, spokes=4, color (по умолчанию охра), knob=true, standoff (вынос от панели),
  *         knobAngle=135 (начальное положение рукоятки, градусы по часовой от «12 часов»),
- *         onTurn(deltaRad), onStart(), onEnd(), tickAngle=15° (шаг трещотки для звука; 0 — без звука) }
+ *         onTurn(deltaRad), onStart(), onEnd(), tickAngle=15° (шаг трещотки для звука; 0 — без звука),
+ *         gear=true (шум шестерён, пока крутят: частота и громкость — по скорости) }
+ * Звук: щелчок фиксатора на каждом шаге tickAngle (выше и сильнее, когда крутят быстро), шестерни, на упоре (hold()) — удар.
  * onTurn: приращение угла, «по часовой для игрока» = +.
  * → { object3D, angle (накопленный угол, рад), spin(deltaRad) — повернуть визуально без события,
  *     hold() — отменить последний шаг onTurn (маховик на упоре не идёт за пальцем), enabled }
@@ -72,6 +74,9 @@ export function handwheel(c, opts = {}) {
 
   wheel.rotation.z = -(opts.knobAngle == null ? 135 : opts.knobAngle) * DEG;
   let angle = 0, mapper = null, pu = 0, pv = 0, tickAcc = 0, turning = false, lastPhi = 0, lastDelta = 0;
+  // звук: spdAcc — ход за кадр, spd — сглаженная скорость 0…1, gearQ — что сейчас отдано шестерням, held — упор в этом шаге
+  let spdAcc = 0, spd = 0, gearQ = 0, held = false, stopped = false, pan = 0;
+  const gearOn = opts.gear !== false;
   const rmin = R * 0.3;
 
   function applyVisual(dPhi) { wheel.rotation.z += dPhi; }
@@ -81,7 +86,7 @@ export function handwheel(c, opts = {}) {
       if (!api.enabled) return;
       mapper = planeMapper(c, group, H, R);
       [pu, pv] = mapper.map(e.x, e.y);
-      turning = true;
+      turning = true; stopped = false; spdAcc = 0; pan = soundPan(c, group);
       callSafe(opts.onStart);
     },
     onDrag(e) {
@@ -93,18 +98,32 @@ export function handwheel(c, opts = {}) {
       applyVisual(dPhi);                                 // рукоятка идёт за пальцем
       // настройка «чувствительность маховиков» (engine.settings.sens): тот же ход пальца даёт больший/меньший поворот
       const delta = (mapper.facing ? -dPhi : dPhi) * sensOf(c);   // по часовой для игрока = +
-      angle += delta; lastPhi = dPhi; lastDelta = delta;
+      angle += delta; lastPhi = dPhi; lastDelta = delta; held = false;
+      callSafe(opts.onTurn, delta);
+      if (held) return;                                  // на упоре: ни щелчков, ни шестерён
+      stopped = false;
+      spdAcc += Math.abs(delta);
       if (tickAngle > 0) {
         tickAcc += Math.abs(delta);
-        if (tickAcc >= tickAngle) { tickAcc %= tickAngle; c.audio.ratchet(); }
+        if (tickAcc >= tickAngle) { tickAcc %= tickAngle; c.audio.detent(0.85 + 0.45 * spd, 0.55 + 0.6 * spd, pan); }
       }
-      callSafe(opts.onTurn, delta);
     },
     onUp() {
       if (!turning) return;
       turning = false; mapper = null;
       callSafe(opts.onEnd);
     },
+  });
+
+  // шестерни: скорость вращения (рад/с → 0…1) сглаживается; звук обновляется только при заметной смене (шаг 0.1)
+  const offGear = c.engine.onFrame((dt) => {
+    if (!turning && gearQ === 0 && spd === 0) return;
+    const inst = turning ? clamp(spdAcc / Math.max(dt, 1 / 120) / 14, 0, 1) : 0;
+    spdAcc = 0;
+    spd += (inst - spd) * (1 - Math.exp(-dt * (inst > spd ? 10 : 6)));
+    if (!turning) spd = 0;
+    const q = gearOn && turning && spd >= 0.05 ? Math.round(spd * 10) / 10 || 0.1 : 0;
+    if (q !== gearQ) { gearQ = q; c.audio.gear(q); }
   });
 
   const api = {
@@ -121,7 +140,10 @@ export function handwheel(c, opts = {}) {
      * Маховик упёрся (стопор, упор): откатить последний шаг целиком — и видимый поворот, и накопленный угол. Звать из onTurn.
      * Считает в ходе пальца, поэтому верно при любой чувствительности и при «инверсии маховиков» (spin(-d) там не годится).
      */
-    hold() { wheel.rotation.z -= lastPhi; angle -= lastDelta; lastPhi = 0; lastDelta = 0; },
+    hold() {
+      wheel.rotation.z -= lastPhi; angle -= lastDelta; lastPhi = 0; lastDelta = 0; held = true;
+      if (!stopped) { stopped = true; snd(c, group, 'stopper', { gain: 0.8 }); }    // упёрся — один удар до следующего хода
+    },
   };
-  return finish(api, group, [remove]);
+  return finish(api, group, [remove, offGear, () => { if (gearQ) { gearQ = 0; c.audio.gear(0); } }]);
 }

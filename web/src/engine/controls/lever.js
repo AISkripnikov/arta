@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { merge, xf, slab, lathe, hitBox, rod } from '../geom.js';
 import { makeCanvas, canvasTexture, drawLabel } from '../textures.js';
 import { PALETTE } from '../materials.js';
-import { finish, screenAxis, spring, callSafe, clamp, DEG } from './base.js';
+import { finish, screenAxis, spring, callSafe, clamp, snd, DEG } from './base.js';
 
 const LEVER_SWING = 38 * DEG;      // отклонение рычага от нормали панели вверх/вниз
 
@@ -80,7 +80,7 @@ export function lever(c, opts = {}) {
   function setOn(b, fire) {
     if (b === on) return;
     on = b;
-    c.audio.clunk();
+    snd(c, group, 'lever');
     if (fire) callSafe(opts.onChange, on);
   }
 
@@ -101,7 +101,7 @@ export function lever(c, opts = {}) {
         if (!on && t > 0.72) setOn(true, true);
         else if (on && t < 0.28) setOn(false, true);
       } else {
-        if (armed && t >= 0.88) { armed = false; c.audio.leverPull(); callSafe(opts.onPull); }
+        if (armed && t >= 0.88) { armed = false; snd(c, group, 'lever'); callSafe(opts.onPull); }
         else if (!armed && t < 0.3) armed = true;
       }
     },
@@ -109,7 +109,7 @@ export function lever(c, opts = {}) {
     onTap() {
       if (!api.enabled) return;
       if (isToggle) setOn(!on, true);
-      else { nudge = 0.12; c.audio.tick(); }             // касание без протяжки: рычаг только «качнётся»
+      else { nudge = 0.12; snd(c, group, 'tick'); }             // касание без протяжки: рычаг только «качнётся»
     },
   });
 
@@ -232,7 +232,7 @@ export function slewLever(c, opts = {}) {
     onUp() {
       if (!held) return;
       held = false; raw = 0; value = 0;
-      c.audio.tick();
+      snd(c, group, 'tick');            // пружина вернула рычаг в ноль
       callSafe(opts.onInput, 0);
     },
   });
