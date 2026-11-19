@@ -97,6 +97,7 @@ export function createSlitView(ctx, o) {
   const EX = 2.4;                      // силуэты крупнее натуры (иначе в щели шириной 48° корабль — точка)
   const F_PX = PPD / DEG;              // px на радиан
   let layer = null, hot = false, maskN = 0;
+  engine.on('quality', (q) => { if (layer) { layer.rt.samples = q.samples; layer.rt.dispose(); layer.rt.setSize(Math.round(RW * q.rtScale), Math.round(RH * q.rtScale)); } dirty = true; });
   function makeLayer() {
     const scene = new THREE.Scene();
     const cam = new THREE.OrthographicCamera(0, CW, CH, 0, 1, 6000);
@@ -104,7 +105,8 @@ export function createSlitView(ctx, o) {
     const hemi = new THREE.HemisphereLight(0xffffff, 0x3a444c, 2.6), sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
     sun.position.set(-0.5, 1, 0.7);
     scene.add(hemi, sun);
-    const rt = new THREE.WebGLRenderTarget(RW, RH, { depthBuffer: true, samples: 4 });
+    const q0 = engine.quality, k0 = (q0 && q0.rtScale) || 1;   // настройка «качество графики»
+    const rt = new THREE.WebGLRenderTarget(Math.round(RW * k0), Math.round(RH * k0), { depthBuffer: true, samples: q0 ? q0.samples : 4 });
     rt.texture.colorSpace = THREE.SRGBColorSpace;
     const mat = new THREE.MeshBasicMaterial({
       map: rt.texture, transparent: true, toneMapped: false, depthWrite: false,

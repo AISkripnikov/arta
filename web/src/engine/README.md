@@ -128,7 +128,7 @@ engine.input.cancel()                                     // (расш.) при�
 |---|---|---|
 | `panel(o)` | `w=1, h=0.6, d=0.05, color='#3d4a57', rivets=true\|false\|шаг, bevel=0.012`, расш.: `radius, wear, material`. Тыл на z=0, лицо на z=d. | `w, h, d`, **`add(child, x, y, rotZ)`** — поставить орган/Object3D на лицо панели (расш.) |
 | `plate(text, o)` | `w, h` (по тексту), `style='black'\|'ivory'\|'red'\|'ochre'`, `size=0.026`, расш.: `screws=true, weight` | `setText(t)`, `text, w, h` |
-| `handwheel(o)` | `radius=0.16, spokes=4, color` (охра), `knob=true, onTurn(deltaRad), onStart(), onEnd()`, расш.: `standoff, knobAngle=135, tickAngle=15°` | `angle`, `spin(deltaRad)`, расш.: `turning, radius, wheel` |
+| `handwheel(o)` | `radius=0.16, spokes=4, color` (охра), `knob=true, onTurn(deltaRad), onStart(), onEnd()`, расш.: `standoff, knobAngle=135, tickAngle=15°` | `angle`, `spin(deltaRad)`, расш.: `turning, radius, wheel`, `hold()` |
 | `drumCounter(o)` | `digits=4` (всего разрядов, включая дробные), `decimals=0, unit, digitH=0.05, signed=false`, расш.: `value, wrap` (напр. 360), `label, labelSize, sound` | `setValue(v, {instant})`, `value`, расш.: `shown, w, h` |
 | `lamp(o)` | `color='green', radius=0.022, label`, расш.: `labelSize, state` | `set(false\|true\|'blink')`, `state` |
 | `lever(o)` | `length=0.22, color` (рукоять; по умолч. бакелит), `mode='momentary'\|'toggle', labels, onPull(), onChange(on)`, расш.: `on, labelSide='right'\|'left'\|'ends', labelSize` | `set(on)`, `on`, расш.: `travel` (0 верх … 1 низ), `handle` |
@@ -147,11 +147,24 @@ engine.input.cancel()                                     // (расш.) при�
 `game.settings()`). `sens` (0.6…1.6): `handwheel` умножает на него `delta` в `onTurn` и накопленный `angle` (рукоятка при этом
 по-прежнему идёт за пальцем 1:1), `slewLever` — ход пальца до полного отклонения. Свои «площадки» перетаскивания на постах
 (труба наблюдения, зенитка и т.п.) должны умножать сдвиг на `engine.settings.sens` сами. При `sens = 1` поведение прежнее.
+`invert` (bool, «инверсия маховиков»): `handwheel` меняет знак `delta` в `onTurn` (рукоятка идёт за пальцем как раньше).
+
+**Настройки игрока в движке** (ставит оболочка из `game.settings()`, см. `web/src/ui/settings.js`):
+- `engine.setQuality('high'|'mid'|'low')` → `engine.quality = { tier, pixelRatio, rtScale, samples }`: предел плотности пикселей
+  2 / 1.5 / 1, масштаб текстур-видов 1 / 0.75 / 0.5, MSAA этих текстур 4 / 4 / 0. Шлёт событие `'quality'(q)`. Пост со своим
+  `WebGLRenderTarget` создаёт его размером `база × engine.quality.rtScale` и по событию меняет размер (`rt.setSize`) —
+  так сделаны смотровая щель (`fire-slit.js`) и окуляр трубы (`observe.js`). Теней и постобработки в движке нет.
+- `engine.setFrameCap(30|60|0)` — не чаще 30 кадров в секунду (лишние кадры пропускаются целиком, `dt` остаётся честным).
+- `engine.guards.fire(proceed)` — перехватчик выстрела. Пост ОГОНЬ по спуску зовёт `engine.guards.fire(() => game.fire())`,
+  если перехватчик задан, иначе `game.fire()` напрямую (стенды без оболочки). Оболочка либо сразу вызывает `proceed()`,
+  либо сперва спрашивает игрока («СВОИ В ЗОНЕ. ОГОНЬ?»). Очередь и вилка идут внутри одного `game.fire()` — вопрос один.
+- `engine.audio.setBus('fx'|'amb'|'radio', 0…1.5)` — громкость эффектов, фона башни и радио (см. `audio.js`).
 
 Поведение:
 - **handwheel** — круговое движение пальца вокруг ступицы; угол считается в плоскости маховика (экран → плоскость, аффинно),
   ход 1:1, рукоятка идёт за пальцем. Внутри 0.3·R от ступицы — «вязкая» зона: проход пальца через центр не даёт скачка.
-  `onTurn(delta)`: по часовой для игрока = `+`. `spin()` крутит визуально без события.
+  `onTurn(delta)`: по часовой для игрока = `+`. `spin()` крутит визуально без события. `hold()` (звать из `onTurn`) отменяет последний шаг целиком — видимый поворот и `angle`:
+  маховик на стопоре или упоре стоит при любой чувствительности и при инверсии (`spin(-delta)` для этого не годится).
 - **drumCounter** — одометр: младший разряд катится плавно, старшие переносятся на последней десятой. `wrap: 360` — круговая
   величина (359.9 → 0.0 идёт через ноль). Значение обрезается диапазоном разрядов.
 - **lever** — торчит к игроку, верх — исходное положение. `momentary`: `onPull()` один раз за протяжку ≥ 88 % хода, взводится

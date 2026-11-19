@@ -2,6 +2,7 @@
 import { createEngine } from './engine/index.js';
 import { createGame } from './game/index.js';
 import { createShell } from './ui/shell.js';
+import { createIntro } from './ui/intro.js';
 import { createPlotStation } from './stations/plot.js';
 import { createComputerStation } from './stations/computer.js';
 import { createLoadingStation } from './stations/loading.js';
@@ -28,9 +29,13 @@ const storage = {
     stations.forEach((st) => engine.addStation(st));
     engine.onFrame((dt) => game.update(dt));
     engine.gotoStation('fire', { instant: true });
-    createShell({ engine, game, stations });
+    // Вступительный ролик: оболочка сама покажет его при первом запуске и после сброса прогресса (и по кнопке в настройках).
+    // Не создался — игра идёт без него (null: сразу меню). Подтверждение запуска ниже (ArtaNative.ready) ролик не задерживает.
+    let intro = null;
+    try { intro = createIntro({ engine, audio: engine.audio }); } catch (e) { console.error('[main] вступительный ролик недоступен:', e); }
+    const shell = createShell({ engine, game, stations, intro });
     engine.start();
-    window.__arta = { engine, game };
+    window.__arta = { engine, game, shell };
     // Сообщаем приложению, что эта версия игры запустилась: иначе после двух неудач оно вернёт прежнюю.
     setTimeout(() => { try { window.ArtaNative.ready(); } catch (e) { /* не в приложении */ } }, 1500);
   } catch (err) {

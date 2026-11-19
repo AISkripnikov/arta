@@ -155,7 +155,7 @@ export function createGame(opts = {}) {
   const newCrew = () => { const o = {}; for (const k of CREW_ROLES) o[k] = { role: k, title: CREW[k].title, name: CREW[k].name, state: 'ok', fatigue: 0, woundedUntil: 0 }; return o; };
   /** Всё, что относится к одному бою (сбрасывается при запуске задания). */
   const freshBattle = () => ({
-    paused: false, speed: 1, time: 0, integrity: 100, shots: 0,
+    paused: false, speed: 1, station: 'plot', time: 0, integrity: 100, shots: 0,
     shells: stock(null), lights: [], smokes: [], history: [], tracks: {}, wave: 0, kills: 0,
     targets: [], activeTarget: null, flight: [], impacts: [], radio: [], lastReport: null, reportDue: null,
     plot: { pins: {}, alidade: { bearing: 0, range: 5 }, recorded: {}, pivot: 0, lines: [] },
@@ -542,6 +542,8 @@ export function createGame(opts = {}) {
   }
   function pause(b) { state.paused = !!b; changed(); return ok(); }
   function setSpeed(n) { state.speed = n === 3 ? 3 : n === 2 ? 2 : 1; changed(); return ok(); }
+  /** Интерфейс сообщает, на каком посту игрок (id поста): попадает в снимок боя, чтобы «ПРОДОЛЖИТЬ БОЙ» вернул на тот же пост. */
+  function setStation(id) { if (typeof id !== 'string' || !/^[a-z][a-z0-9-]{0,23}$/.test(id)) return deny('setStation', 'Нет такого поста'); state.station = id; return ok(); }
   function setDifficulty(d) { state.difficulty = save.difficulty = d ? 1 : 0; persist(); changed(); return ok(); }
   function setMuted(b) { save.muted = !!b; persist(); return ok(); }
 
@@ -1575,7 +1577,9 @@ export function createGame(opts = {}) {
     Object.assign(state, { phase: 'menu', difficulty: save.difficulty, mission: null, ...freshBattle() }, c.state);
     sys = Object.assign(freshSys(), c.sys);
     sys.nextAuto = state.time + AUTOSAVE;
-    state.paused = false; state.speed = save.settings.speed; state.aa.firing = false;
+    state.paused = false; state.aa.firing = false;
+    if (![1, 2, 3].includes(state.speed)) state.speed = save.settings.speed;      // скорость — та, что была в момент записи
+    if (typeof state.station !== 'string') state.station = 'plot';
     drove = false;
     updateChecklist();
     emit('phase', state.phase); emit('restored', resumeInfo());
@@ -1701,7 +1705,7 @@ export function createGame(opts = {}) {
   const game = {
     state, save, C, on, campaign: CAMPAIGN, difficulties: DIFF.map((d) => d.name),
     SHELLS, ranks: RANKS, rank, lit, smoked: (id) => { const t = target(id); return !!(t && state.mission && smoked(t)); }, setSalvo, startSurvival,
-    update, startMission, startSkirmish, begin, quit, pause, setSpeed, setDifficulty, setMuted,
+    update, startMission, startSkirmish, begin, quit, pause, setSpeed, setStation, setDifficulty, setMuted,
     selectTarget, setPin, setAlidade, recordMeasurement, predict, shellPosition,
     pivots, setPivot, drawLine, clearLines, windParts, firingBearing, setBurst, repair, FAULTS,
     setComputerRange, setComputerCharge, chargeStates, compute,

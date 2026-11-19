@@ -321,7 +321,11 @@ test('ночь: цель выдаёт себя вспышкой — грубое
 });
 
 test('вилка: два снаряда, два разрыва, один доклад', () => {
-  const game = start(0); const s = game.state, bat = s.mission.battery; tick(game, 8);
+  // место цели в задании случайное, а ствол ходит шагами по 0,01° (±5 м по дальности): на случайной дальности «перелёт 350»
+  // иногда округлялся до 360. Фиксируем расстановку — тогда отклонение всегда одно и то же (≈349,7 м).
+  const R0 = Math.random; let sd = 2; Math.random = () => (sd = (Math.imul(sd, 1664525) + 1013904223) >>> 0) / 4294967296;
+  let game; try { game = start(0); } finally { Math.random = R0; }
+  const s = game.state, bat = s.mission.battery; tick(game, 8);
   const t = s.targets[0], L = Math.hypot(t.x - bat.x, t.y - bat.y), ux = (t.x - bat.x) / L, uy = (t.y - bat.y) / L;
   assert.ok(game.setSalvo(true).ok); assert.equal(s.fire.salvo, true);
   const he0 = s.shells.he, radio0 = s.radio.filter((m) => m.from === 'КОРРЕКТИРОВЩИК').length;

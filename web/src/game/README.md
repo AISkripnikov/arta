@@ -143,7 +143,8 @@ stats: { friendlyHits, friendlyKills, convoyLost, convoyArrived, planesDown, bom
 | **`friendsInDanger()`** → `friend[]`, **`friendInDanger()`** → id \| `null`, `FRIEND_ZONE` = 0.4 | свои в зоне поражения — раздел 8 |
 | `SETTINGS` | `{ key: { def, list } }` — значение по умолчанию и список допустимых значений (`list: null` у булевых и числовых) |
 | **`snapshot()`** → JSON \| `null` (не в бою) | весь идущий бой |
-| **`restore(snap?)`** → `{ok}` | без аргумента — из `save.resume`; фаза сразу `playing`, пауза снята, скорость — `settings.speed` |
+| **`restore(snap?)`** → `{ok}` | без аргумента — из `save.resume`; фаза сразу `playing`, пауза снята; скорость времени (`state.speed`) и пост (`state.station`) — те, что были в момент записи |
+| **`setStation(id)`** → `{ok}` | интерфейс сообщает id поста, на котором игрок (`state.station`, по умолчанию `'plot'`); логика его только хранит — он попадает в снимок боя, и оболочка после `restore()` открывает тот же пост |
 | **`suspend()`** | записать `save.resume` сейчас (выход с сохранением, уход приложения в фон) |
 | **`discardResume()`**, **`resumeInfo()`** → `{ title, time, integrity, kind }` \| `null` | `kind`: `'campaign'|'skirmish'|'survival'|'daily'` |
 | `rank()`, `lit(x,y)`, `smoked(targetId)`, `shellPosition(f)`, `solve`, `chargeRange`, `isLand`, `coastAt`, `fmt.km/time/brg` | как раньше |

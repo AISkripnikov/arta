@@ -182,7 +182,7 @@ test('автосохранение выключено: периодическо�
   assert.equal(g4.state.phase, 'playing'); assert.ok(Math.abs(g4.state.time - time) < 1e-9);
 });
 
-test('скорость боя по умолчанию: применяется в begin() и restore(); setSpeed понимает ×1, ×2, ×3', () => {
+test('скорость боя по умолчанию: применяется в begin(); restore() возвращает скорость, с которой бой записан; setSpeed понимает ×1, ×2, ×3', () => {
   const st = mem(); const g = createGame({ storage: st });
   g.startMission(0); g.begin(); assert.equal(g.state.speed, 1); g.quit();
   assert.ok(g.setSetting('speed', 2).ok);
@@ -193,7 +193,7 @@ test('скорость боя по умолчанию: применяется в
   // смена настройки посреди боя текущую скорость не трогает
   g.setSpeed(3); g.setSetting('speed', 1); assert.equal(g.state.speed, 3); g.setSetting('speed', 2);
   g.suspend(); g.quit({ keep: true });
-  const g2 = createGame({ storage: st }); assert.ok(g2.restore().ok); assert.equal(g2.state.speed, 2);
+  const g2 = createGame({ storage: st }); assert.ok(g2.restore().ok); assert.equal(g2.state.speed, 3, 'продолженный бой — с той же скоростью, что при записи');
   g2.quit(); g2.startSurvival(); g2.begin(); assert.equal(g2.state.speed, 2);
   g2.quit(); g2.startDaily('2026-11-18'); g2.begin(); assert.equal(g2.state.speed, 2);
 });
@@ -242,4 +242,30 @@ test('свои в зоне поражения: friendsInDanger / friendInDanger 
   // вне боя — никого и без ошибок
   g.quit(); assert.deepEqual(g.friendsInDanger(), []); assert.equal(g.friendInDanger(), null);
   assert.equal(createGame({ storage: mem() }).friendInDanger(), null);
+});
+
+test('продолженный бой: скорость времени и пост — те же, что при записи; новый бой — с планшета и скоростью из настроек', () => {
+  const st = mem();
+  const g = createGame({ storage: st });
+  assert.ok(g.startMission(0).ok); g.begin();
+  assert.equal(g.state.station, 'plot'); assert.equal(g.state.speed, 1);
+  assert.equal(g.setStation('').ok, false); assert.equal(g.setStation(7).ok, false); assert.equal(g.setStation('<b>').ok, false);
+  assert.equal(g.state.station, 'plot', 'негодный пост не записан');
+  assert.ok(g.setStation('fire').ok); g.setSpeed(3); g.update(0.5);
+  assert.ok(g.suspend().ok); g.quit({ keep: true });
+  // тот же сеанс
+  assert.ok(g.restore().ok);
+  assert.equal(g.state.speed, 3); assert.equal(g.state.station, 'fire'); assert.equal(g.state.paused, false);
+  // после перезапуска игры
+  const g2 = createGame({ storage: st });
+  assert.ok(g2.restore().ok);
+  assert.equal(g2.state.speed, 3); assert.equal(g2.state.station, 'fire');
+  // испорченные значения в старом снимке не ломают бой
+  const snap = JSON.parse(JSON.stringify(g2.save.resume.snap)); snap.state.speed = 9; delete snap.state.station;
+  g2.setSetting('speed', 2);
+  assert.ok(g2.restore(snap).ok);
+  assert.equal(g2.state.speed, 2); assert.equal(g2.state.station, 'plot');
+  // новый бой
+  g2.quit(); assert.ok(g2.startMission(0).ok); g2.begin();
+  assert.equal(g2.state.speed, 2); assert.equal(g2.state.station, 'plot');
 });

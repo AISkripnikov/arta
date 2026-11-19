@@ -10,13 +10,15 @@
 <canvas id="stage"></canvas>
 <div id="night"></div>
 <div id="flash"></div>
+<div id="fpsMeter" class="hidden"></div>
 
 <!-- ===== HUD ===== -->
 <div id="hud" class="hidden">
   <header id="topbar">
     <button class="tb-btn" data-act="pause" aria-label="Пауза">❚❚</button>
+    <button class="tb-btn tb-save" id="hSave" data-act="save" aria-label="Сохранить бой"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 1.5h9.5L14 4v10.5H2z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M4.6 1.8v3.7h5.6V1.8M4.4 14.2V9.3h7.2v4.9" fill="none" stroke="currentColor" stroke-width="1.3"/></svg><span>СОХРАНИТЬ</span></button>
     <div class="tb-cell"><span class="k" id="hTimeK">ВРЕМЯ</span><span class="v" id="hTime">00:00</span></div>
-    <div class="tb-cell grow"><span class="k">ПРОЧНОСТЬ БАТАРЕИ</span><div class="bar"><i id="hInt"></i></div></div>
+    <div class="tb-cell grow"><span class="k">ПРОЧНОСТЬ<u class="w-only"> БАТАРЕИ</u></span><div class="bar"><i id="hInt"></i></div></div>
     <div class="tb-cell"><span class="k">СНАРЯДЫ</span><span class="v" id="hShells"></span></div>
     <div class="tb-cell" id="hMeteo"><span class="k" id="hWx">ВЕТЕР</span><span class="v" id="hWind">—</span></div>
     <button class="tb-cell tgt" data-act="nextTarget"><span class="k">ЦЕЛЬ ▸</span><span class="v" id="hTarget">—</span></button>
@@ -75,15 +77,9 @@
 </section>
 
 <section id="settings" class="screen">
-  <div class="sheet">
-    <div class="sheet-head"><h2>НАСТРОЙКИ</h2><button class="btn small" data-setclose>ГОТОВО</button></div>
-    <div class="set-list">
-      <div class="opt"><span>ЧУВСТВИТЕЛЬНОСТЬ МАХОВИКОВ</span><div class="seg" id="setSens"></div></div>
-      <div class="opt"><span>РАЗМЕР НАДПИСЕЙ</span><div class="seg" id="setText"></div></div>
-      <div class="opt"><span>РЕЖИМ ДЛЯ ЛЕВШИ</span><div class="seg" id="setLefty"></div></div>
-      <div class="opt"><span>ВИБРАЦИЯ</span><div class="seg" id="setVibro"></div></div>
-      <div class="opt"><span>ЗВУК</span><div class="seg" id="soundSeg"><button data-sound="1">ВКЛ</button><button data-sound="0">ВЫКЛ</button></div></div>
-    </div>
+  <div class="sheet wide">
+    <div class="sheet-head set-head"><h2>НАСТРОЙКИ</h2><div class="set-tabs" id="setTabs"></div><button class="btn small" data-setclose>ГОТОВО</button></div>
+    <div class="set-list" id="setList"></div>
   </div>
 </section>
 

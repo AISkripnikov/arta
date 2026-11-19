@@ -276,7 +276,7 @@ export function createTraverseStation(ctx) {
     onTurn(d) {
       if (wheelCut || !isCurrent()) return;
       if (brakeOn()) {
-        wheel.spin(-d);                               // на стопоре маховик не проворачивается
+        wheel.hold();                                 // на стопоре маховик не проворачивается
         if (!wheelDenied) { wheelDenied = true; denyOnce(d); }
         return;
       }
@@ -419,7 +419,7 @@ export function createTraverseStation(ctx) {
         cardDeg: card.rotation.z / DEG, bugVisible: bugPivot.visible, bugDeg: -bugPivot.rotation.z / DEG,
         error: gError.value, pressure, servo: servoLevel,
         lampBrake: lampBrake.state, lampFree: lampFree.state, lampAligned: lampAligned.state,
-        leverFree: brakeLever.on, slew: slewV, wheelAngle: wheel.angle,
+        leverFree: brakeLever.on, slew: slewV, wheelAngle: wheel.angle, wheelRot: wheel.wheel.rotation.z,
       };
     },
     dispose() {

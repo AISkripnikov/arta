@@ -74,7 +74,14 @@ export async function createEngine(canvas, opts = {}) {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.shadowMap.enabled = false;
   setMaxAnisotropy(renderer.capabilities.getMaxAnisotropy());
-  const maxPixelRatio = opts.maxPixelRatio || 2;
+  // качество графики (настройка игрока): предел плотности пикселей и размер текстур-видов (щель, окуляр)
+  const QUALITY = {
+    high: { tier: 'high', pixelRatio: opts.maxPixelRatio || 2, rtScale: 1, samples: 4 },
+    mid: { tier: 'mid', pixelRatio: Math.min(opts.maxPixelRatio || 2, 1.5), rtScale: 0.75, samples: 4 },
+    low: { tier: 'low', pixelRatio: 1, rtScale: 0.5, samples: 0 },
+  };
+  let quality = QUALITY.high, maxPixelRatio = quality.pixelRatio;
+  let frameCap = 0;                              // 0 — без ограничения; 30 — «экономия батареи»
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x050607);
@@ -243,6 +250,8 @@ export async function createEngine(canvas, opts = {}) {
   function frame(now) {
     if (!running) return;
     raf = requestAnimationFrame(frame);
+    // ограничение кадров: лишние кадры пропускаем целиком, dt следующего — полное время с прошлого отрисованного
+    if (frameCap && lastT && now - lastT < 1000 / frameCap - 3) return;
     const dt = lastT ? Math.min(0.05, Math.max(0, (now - lastT) / 1000)) : 0;
     if (lastT) { fpsT += now - lastT; fpsN++; if (fpsT >= 500) { stats.fps = fpsN * 1000 / fpsT; fpsT = 0; fpsN = 0; } }
     lastT = now;
@@ -345,6 +354,26 @@ export async function createEngine(canvas, opts = {}) {
       if (engine.room) engine.room.flicker(Math.min(1, amount), seconds);
     },
 
+    /**
+     * Качество графики: 'high' | 'mid' | 'low' → предел плотности пикселей 2 / 1.5 / 1, масштаб текстур-видов 1 / 0.75 / 0.5,
+     * сглаживание этих текстур (на 'low' выключено). Шлёт 'quality'(engine.quality) — посты меняют размер своих текстур.
+     */
+    setQuality(tier) {
+      const q = QUALITY[tier] || QUALITY.high;
+      if (q === quality) return q;
+      quality = q; maxPixelRatio = q.pixelRatio;
+      checkResize(false);
+      emit('quality', q);
+      return q;
+    },
+    /** { tier, pixelRatio, rtScale, samples } — текущее качество (только чтение). */
+    get quality() { return quality; },
+    /** Текущая плотность пикселей рендера (после ограничения качеством). */
+    get pixelRatio() { return pixelRatio; },
+    /** Ограничение кадров: 30 — рисовать не чаще 30 раз в секунду; 0 или 60 — без ограничения. */
+    setFrameCap(n) { frameCap = n > 0 && n < 60 ? n : 0; },
+    get frameCap() { return frameCap; },
+
     /** Точка из локальных координат поста → мировые. */
     stationToWorld(id, v, out = new THREE.Vector3()) {
       const st = byId.get(id);
@@ -399,8 +428,12 @@ export async function createEngine(canvas, opts = {}) {
     },
   };
 
-  /** Настройки игрока, которые читают органы управления: sens — чувствительность маховиков и рычагов привода (0.6…1.6, 1 — ход 1:1). */
-  engine.settings = { sens: 1 };
+  /** Настройки игрока, которые читают органы управления: sens — чувствительность маховиков и рычагов привода (0.6…1.6, 1 — ход 1:1);
+   *  invert — маховики крутят в обратную сторону. */
+  engine.settings = { sens: 1, invert: false };
+  /** Перехватчики действий постов (ставит оболочка). guards.fire(proceed) — пост ОГОНЬ вызывает его вместо game.fire();
+   *  оболочка либо сразу зовёт proceed(), либо сперва спрашивает игрока. null — перехвата нет. */
+  engine.guards = { fire: null };
   engine.mat = createMaterials();
   engine.audio = createAudio();
   engine.input = createInput(engine, canvas);

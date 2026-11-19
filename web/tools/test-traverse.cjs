@@ -80,10 +80,20 @@ const path = require('path');
   ok(!s.i.servo, 'привод молчит на стопоре', s.i.servo);
   await p.mouse.up(); await step(2);
   // ---- 3. отказ: маховик на стопоре ----
+  const rot0 = (await st()).i.wheelRot;
   await turnWheel(0, 60);
   s = await st();
   ok(s.denied === 2, 'маховик на стопоре: ровно один отказ за жест', s.denied);
   ok(s.turret.bearing === 0 && near(s.i.wheelAngle, 0, 1e-6), 'маховик на стопоре не проворачивается', [s.turret.bearing, s.i.wheelAngle]);
+  ok(near(s.i.wheelRot, rot0, 1e-6), 'маховик на стопоре и на вид стоит', [rot0, s.i.wheelRot]);
+  // то же с «инверсией маховиков» и другой чувствительностью: раньше маховик на стопоре проворачивался вдвое
+  for (const [inv, sens] of [[true, 1], [true, 1.6], [false, 0.6]]) {
+    await p.evaluate(([inv, sens]) => { const e = window.__dev.engine; e.settings.invert = inv; e.settings.sens = sens; }, [inv, sens]);
+    await turnWheel(0, 60);
+    s = await st();
+    ok(s.turret.bearing === 0 && near(s.i.wheelAngle, 0, 1e-6) && near(s.i.wheelRot, rot0, 1e-6), 'маховик на стопоре стоит: инверсия ' + inv + ', чувствительность ' + sens, [s.turret.bearing, s.i.wheelAngle, s.i.wheelRot - rot0]);
+  }
+  await p.evaluate(() => { const e = window.__dev.engine; e.settings.invert = false; e.settings.sens = 1; window.__denied.length = 2; });
   await step(45);
   s = await st();
   ok(s.i.lampBrake === true, 'мигание прекращается, лампа СТОПОР снова горит ровно', s.i.lampBrake);

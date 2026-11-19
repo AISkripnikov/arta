@@ -26,8 +26,12 @@ function createScopeView(ctx) {
   const cam = new THREE.PerspectiveCamera(16, 1, 30, 70000);
   cam.rotation.order = 'YXZ';
   cam.position.set(0, EYE, 0);
-  const rt = new THREE.WebGLRenderTarget(RT, RT, { depthBuffer: true, samples: 4 });
+  // размер и сглаживание текстуры окуляра следуют настройке «качество графики» (engine.quality)
+  const rtSize = (q) => Math.max(128, Math.round(RT * ((q && q.rtScale) || 1)));
+  const q0 = engine.quality;
+  const rt = new THREE.WebGLRenderTarget(rtSize(q0), rtSize(q0), { depthBuffer: true, samples: q0 ? q0.samples : 4 });
   rt.texture.colorSpace = THREE.SRGBColorSpace;
+  engine.on('quality', (q) => { rt.samples = q.samples; rt.dispose(); rt.setSize(rtSize(q), rtSize(q)); lastRender = -1; });
   const hemi = new THREE.HemisphereLight(0xffffff, 0x3a464e, 2.6), sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
   sun.position.set(-0.4, 1, 0.5);
   scene.add(hemi, sun);

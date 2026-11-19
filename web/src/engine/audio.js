@@ -3,7 +3,10 @@
 // если звук недоступен — все вызовы тихо ничего не делают.
 
 export function createAudio() {
-  let ctx = null, master = null, comp = null, noiseBuf = null;
+  // Шины громкости: out — общий выход (звук вкл/выкл); в него идут три шины: master — эффекты (всё, что не названо иначе),
+  // ambBus — фон башни, radioBus — радио. Имя master оставлено за шиной эффектов: все функции подключаются к ней по умолчанию.
+  let ctx = null, out = null, master = null, ambBus = null, radioBus = null, comp = null, noiseBuf = null;
+  const bus = { fx: 1, amb: 1, radio: 1 };
   let failed = false, muted = false, volume = 0.8;
   const last = {};                       // ограничение частоты однотипных щелчков
   let servoNode = null, alarmNode = null, ambientNode = null;
@@ -17,9 +20,12 @@ export function createAudio() {
       ctx = new AC({ latencyHint: 'interactive' });
       comp = ctx.createDynamicsCompressor();
       comp.threshold.value = -14; comp.knee.value = 18; comp.ratio.value = 5; comp.attack.value = 0.003; comp.release.value = 0.2;
-      master = ctx.createGain();
-      master.gain.value = muted ? 0 : volume;
-      master.connect(comp); comp.connect(ctx.destination);
+      out = ctx.createGain();
+      out.gain.value = muted ? 0 : volume;
+      out.connect(comp); comp.connect(ctx.destination);
+      master = ctx.createGain(); master.gain.value = bus.fx; master.connect(out);
+      ambBus = ctx.createGain(); ambBus.gain.value = bus.amb; ambBus.connect(out);
+      radioBus = ctx.createGain(); radioBus.gain.value = bus.radio; radioBus.connect(out);
       const len = Math.floor(ctx.sampleRate * 2);
       noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
       const d = noiseBuf.getChannelData(0);
@@ -72,8 +78,16 @@ export function createAudio() {
     unlock() { try { if (ensure() && ctx.state === 'suspended') ctx.resume(); } catch (e) { /* тихо */ } },
     get ready() { return !!ctx; },
     get muted() { return muted; },
-    setMuted(b) { muted = !!b; try { if (ctx) master.gain.setTargetAtTime(muted ? 0 : volume, ctx.currentTime, 0.03); } catch (e) { /* тихо */ } },
-    setVolume(v) { volume = Math.max(0, Math.min(1, v)); try { if (ctx && !muted) master.gain.setTargetAtTime(volume, ctx.currentTime, 0.03); } catch (e) { /* тихо */ } },
+    setMuted(b) { muted = !!b; try { if (ctx) out.gain.setTargetAtTime(muted ? 0 : volume, ctx.currentTime, 0.03); } catch (e) { /* тихо */ } },
+    setVolume(v) { volume = Math.max(0, Math.min(1, v)); try { if (ctx && !muted) out.gain.setTargetAtTime(volume, ctx.currentTime, 0.03); } catch (e) { /* тихо */ } },
+    /** Громкость шины: name = 'fx' (эффекты) | 'amb' (фон башни) | 'radio' (радио); v = 0…1.5 (1 — как записано). */
+    setBus(name, v) {
+      if (!(name in bus)) return;
+      bus[name] = Math.max(0, Math.min(1.5, +v || 0));
+      try { const node = name === 'fx' ? master : name === 'amb' ? ambBus : radioBus; if (ctx && node) node.gain.setTargetAtTime(bus[name], ctx.currentTime, 0.03); } catch (e) { /* тихо */ }
+    },
+    /** Текущие громкости шин { fx, amb, radio }. */
+    get buses() { return { fx: bus.fx, amb: bus.amb, radio: bus.radio }; },
 
     /** Лёгкий щелчок (деление счётчика, кнопка, фиксатор). */
     tick: safe(() => {
@@ -208,11 +222,11 @@ export function createAudio() {
     radio: safe(() => {
       if (!limited('radio', 0.3)) return;
       const t = now();
-      noise(t, 0.02, { type: 'highpass', f: 2000, gain: 0.2, attack: 0.001 });
-      noise(t + 0.02, 0.42, { type: 'bandpass', f: 1900, q: 0.9, gain: 0.07, attack: 0.02 });
-      tone(t + 0.06, 0.09, { type: 'square', f: 1180, gain: 0.035 });
-      tone(t + 0.2, 0.12, { type: 'square', f: 880, gain: 0.035 });
-      noise(t + 0.46, 0.02, { type: 'highpass', f: 2000, gain: 0.14, attack: 0.001 });
+      noise(t, 0.02, { type: 'highpass', f: 2000, gain: 0.2, attack: 0.001, dest: radioBus });
+      noise(t + 0.02, 0.42, { type: 'bandpass', f: 1900, q: 0.9, gain: 0.07, attack: 0.02, dest: radioBus });
+      tone(t + 0.06, 0.09, { type: 'square', f: 1180, gain: 0.035, dest: radioBus });
+      tone(t + 0.2, 0.12, { type: 'square', f: 880, gain: 0.035, dest: radioBus });
+      noise(t + 0.46, 0.02, { type: 'highpass', f: 2000, gain: 0.14, attack: 0.001, dest: radioBus });
     }),
     /** Тревога (ревун): on/off. */
     alarm(on) {
@@ -240,7 +254,7 @@ export function createAudio() {
       try {
         if (!ctx) return;
         if (on && !ambientNode) {
-          const g = ctx.createGain(); g.gain.value = 0; g.connect(master);
+          const g = ctx.createGain(); g.gain.value = 0; g.connect(ambBus);
           const src = ctx.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
           const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 210; f.Q.value = 0.6;
           const ng = ctx.createGain(); ng.gain.value = 0.5;
@@ -324,5 +338,127 @@ export function createAudio() {
       o.start(t0); o.stop(t0 + 1.4);
     }
   });
+  // ----- вступительный ролик (добавлено ui/intro.js; всё ниже — только новые функции) -----
+  // Все звуки ролика идут через собственную шину introBus → master: громкость ролика задаётся отдельно (introVolume),
+  // а introStop() гасит всё разом. До первого касания (ctx == null) вызовы тихо ничего не делают.
+  let introBus = null, introVol = 1, introWindNode = null, introHissNode = null;
+  const ibus = () => {
+    if (!introBus) { introBus = ctx.createGain(); introBus.gain.value = introVol; introBus.connect(master); }
+    return introBus;
+  };
+  /** Громкость шины ролика 0..1. */
+  api.introVolume = function (v) {
+    introVol = Math.max(0, Math.min(1, +v || 0));
+    try { if (ctx && introBus) introBus.gain.setTargetAtTime(introVol, ctx.currentTime, 0.05); } catch (e) { /* тихо */ }
+  };
+  /** Ветер с моря: level 0..1 (0 — затихает и освобождается). Можно вызывать каждый кадр. */
+  api.introWind = function (level) {
+    try {
+      level = Math.max(0, Math.min(1, +level || 0));
+      if (!ctx || (level > 0 && ctx.state !== 'running')) return;
+      if (level > 0 && !introWindNode) {
+        const src = ctx.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+        const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 420; f.Q.value = 0.9;
+        const lfo = ctx.createOscillator(), lg = ctx.createGain(); lfo.frequency.value = 0.13; lg.gain.value = 170;
+        const g = ctx.createGain(); g.gain.value = 0;
+        lfo.connect(lg); lg.connect(f.frequency); src.connect(f); f.connect(g); g.connect(ibus());
+        src.onended = () => { try { g.disconnect(); } catch (e) { /* тихо */ } };
+        src.start(0, Math.random()); lfo.start();
+        introWindNode = { src, lfo, g };
+      }
+      if (!introWindNode) return;
+      const t = ctx.currentTime;
+      introWindNode.g.gain.setTargetAtTime(0.5 * level, t, 0.4);
+      if (level <= 0) { const n = introWindNode; introWindNode = null; n.src.stop(t + 1.5); n.lfo.stop(t + 1.5); }
+    } catch (e) { /* тихо */ }
+  };
+  /** Шипение эфира: level 0..1 (0 — выключить). */
+  api.introHiss = function (level) {
+    try {
+      level = Math.max(0, Math.min(1, +level || 0));
+      if (!ctx || (level > 0 && ctx.state !== 'running')) return;
+      if (level > 0 && !introHissNode) {
+        const src = ctx.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+        const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 2300; f.Q.value = 0.7;
+        const o = ctx.createOscillator(), og = ctx.createGain(); o.type = 'sine'; o.frequency.value = 1420; og.gain.value = 0.012;
+        const lfo = ctx.createOscillator(), lg = ctx.createGain(); lfo.frequency.value = 0.7; lg.gain.value = 60; lfo.connect(lg); lg.connect(o.frequency);
+        const g = ctx.createGain(); g.gain.value = 0;
+        src.connect(f); f.connect(g); o.connect(og); og.connect(g); g.connect(ibus());
+        src.onended = () => { try { g.disconnect(); } catch (e) { /* тихо */ } };
+        src.start(0, Math.random()); o.start(); lfo.start();
+        introHissNode = { src, o, lfo, g };
+      }
+      if (!introHissNode) return;
+      const t = ctx.currentTime;
+      introHissNode.g.gain.setTargetAtTime(0.11 * level, t, 0.15);
+      if (level <= 0) { const n = introHissNode; introHissNode = null; n.src.stop(t + 0.8); n.o.stop(t + 0.8); n.lfo.stop(t + 0.8); }
+    } catch (e) { /* тихо */ }
+  };
+  const isafe = (fn) => function () {
+    try { if (!ctx || ctx.state !== 'running') return; return fn.apply(null, arguments); } catch (e) { /* тихо */ }
+  };
+  /** Далёкая канонада: два-три глухих раската. */
+  api.introGuns = isafe(() => {
+    const t = now(), d = ibus();
+    for (let i = 0; i < 3; i++) {
+      const t0 = t + i * rv(0.28, 0.5);
+      noise(t0, 1.3, { type: 'lowpass', f: 240, f2: 50, gain: 0.34 - i * 0.07, attack: 0.04, dest: d });
+      tone(t0, 0.7, { f: 52, f2: 27, gain: 0.3 - i * 0.06, attack: 0.03, dest: d });
+    }
+  });
+  /** Свист падающего снаряда (~0.5 с). */
+  api.introWhistle = isafe(() => {
+    const t = now(), d = ibus();
+    tone(t, 0.5, { type: 'sawtooth', f: 1900, f2: 420, gain: 0.05, attack: 0.08, dest: d });
+    noise(t, 0.5, { type: 'bandpass', f: 2600, f2: 700, q: 3, gain: 0.07, attack: 0.1, dest: d });
+  });
+  /** Близкий разрыв: power 0..1. */
+  api.introBlast = isafe((power) => {
+    const k = 0.45 + 0.55 * Math.max(0, Math.min(1, power == null ? 1 : +power)), t = now(), d = ibus();
+    noise(t, 0.05, { type: 'highpass', f: 1800, gain: 0.5 * k, attack: 0.001, dest: d });
+    noise(t, 1.5, { type: 'lowpass', f: 1100, f2: 55, gain: 0.85 * k, attack: 0.004, dest: d });
+    tone(t, 1.0, { f: 82, f2: 24, gain: 0.7 * k, attack: 0.004, dest: d });
+    noise(t + 0.35, 2.2, { type: 'bandpass', f: 420, f2: 110, q: 0.6, gain: 0.13 * k, attack: 0.4, dest: d });
+  });
+  /** Броневая дверь: скрип петель и удар упора. */
+  api.introDoor = isafe(() => {
+    const t = now(), d = ibus();
+    tone(t, 0.9, { type: 'sawtooth', f: 210, f2: 330, gain: 0.035, attack: 0.2, dest: d });
+    noise(t, 0.9, { type: 'bandpass', f: 1300, f2: 800, q: 6, gain: 0.07, attack: 0.25, dest: d });
+    tone(t + 1.0, 0.35, { f: 96, f2: 44, gain: 0.5, dest: d });
+    noise(t + 1.0, 0.08, { type: 'lowpass', f: 1400, gain: 0.3, dest: d });
+    tone(t + 1.0, 0.6, { type: 'triangle', f: 540, gain: 0.03, dest: d });
+  });
+  /** Морзянка: несколько посылок. */
+  api.introMorse = isafe(() => {
+    const t = now(), d = ibus(), pat = [1, 3, 1, 0, 3, 1, 1, 0, 1, 3];
+    let x = t;
+    for (const p of pat) {
+      if (!p) { x += 0.14; continue; }
+      tone(x, 0.055 * p, { type: 'sine', f: 760, gain: 0.05, attack: 0.004, dest: d });
+      x += 0.07 * p + 0.06;
+    }
+  });
+  /** Стук печатающейся буквы субтитров. */
+  api.introKey = isafe(() => {
+    if (!limited('introKey', 0.055)) return;
+    const t = now();
+    noise(t, 0.012, { type: 'bandpass', f: rv(2400, 3200), q: 2, gain: 0.05, attack: 0.001, dest: ibus() });
+  });
+  /** Финальный удар под заставку. */
+  api.introTitle = isafe(() => {
+    const t = now(), d = ibus();
+    tone(t, 1.6, { f: 62, f2: 31, gain: 0.6, attack: 0.006, dest: d });
+    noise(t, 0.5, { type: 'lowpass', f: 700, f2: 90, gain: 0.35, attack: 0.004, dest: d });
+    tone(t + 0.02, 1.8, { type: 'triangle', f: 196, gain: 0.07, attack: 0.02, dest: d });
+    tone(t + 0.02, 1.8, { type: 'triangle', f: 293.7, gain: 0.05, attack: 0.02, dest: d });
+  });
+  /** Конец ролика: погасить петли и хвосты разовых звуков. Шина остаётся (один узел усиления) и оживает при следующем introVolume(). */
+  api.introStop = function () {
+    try {
+      api.introWind(0); api.introHiss(0);
+      if (ctx && introBus) introBus.gain.setTargetAtTime(0, ctx.currentTime, 0.12);
+    } catch (e) { /* тихо */ }
+  };
   return api;
 }

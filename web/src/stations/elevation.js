@@ -96,7 +96,7 @@ export function createElevationStation(ctx) {
       // игра отказывает и в спуске малыми шагами — тогда заперты оба направления, пока затвор не закроют)
       const atLock = s.breech.open && (up ? el >= C.LOAD_ANGLE - 0.004 : el > C.LOAD_ANGLE + 0.004);
       if (atHard || atLock) {
-        wheel.spin(-d);                                // маховик упёрся и не идёт за пальцем
+        wheel.hold();                                  // маховик упёрся и не идёт за пальцем
         acc = 0;
         if (!thud) { thud = true; audio.clunk(); }
         if (atLock && !upBlocked) {

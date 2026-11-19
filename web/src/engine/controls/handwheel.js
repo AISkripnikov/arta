@@ -8,9 +8,11 @@ import { finish, planeMapper, sweepAngle, callSafe, TAU, DEG } from './base.js';
  *         knobAngle=135 (начальное положение рукоятки, градусы по часовой от «12 часов»),
  *         onTurn(deltaRad), onStart(), onEnd(), tickAngle=15° (шаг трещотки для звука; 0 — без звука) }
  * onTurn: приращение угла, «по часовой для игрока» = +.
- * → { object3D, angle (накопленный угол, рад), spin(deltaRad) — повернуть визуально без события, enabled }
+ * → { object3D, angle (накопленный угол, рад), spin(deltaRad) — повернуть визуально без события,
+ *     hold() — отменить последний шаг onTurn (маховик на упоре не идёт за пальцем), enabled }
  */
-const sensOf = (c) => { const v = c.engine.settings && +c.engine.settings.sens; return v > 0 ? v : 1; };
+// настройки игрока: чувствительность и «инверсия маховиков» (тот же ход пальца — поворот в обратную сторону)
+const sensOf = (c) => { const st = c.engine.settings, v = st && +st.sens; return (v > 0 ? v : 1) * (st && st.invert ? -1 : 1); };
 
 export function handwheel(c, opts = {}) {
   const { radius: R = 0.16, spokes = 4, knob = true } = opts;
@@ -66,7 +68,7 @@ export function handwheel(c, opts = {}) {
   group.add(hit);
 
   wheel.rotation.z = -(opts.knobAngle == null ? 135 : opts.knobAngle) * DEG;
-  let angle = 0, mapper = null, pu = 0, pv = 0, tickAcc = 0, turning = false;
+  let angle = 0, mapper = null, pu = 0, pv = 0, tickAcc = 0, turning = false, lastPhi = 0, lastDelta = 0;
   const rmin = R * 0.3;
 
   function applyVisual(dPhi) { wheel.rotation.z += dPhi; }
@@ -88,7 +90,7 @@ export function handwheel(c, opts = {}) {
       applyVisual(dPhi);                                 // рукоятка идёт за пальцем
       // настройка «чувствительность маховиков» (engine.settings.sens): тот же ход пальца даёт больший/меньший поворот
       const delta = (mapper.facing ? -dPhi : dPhi) * sensOf(c);   // по часовой для игрока = +
-      angle += delta;
+      angle += delta; lastPhi = dPhi; lastDelta = delta;
       if (tickAngle > 0) {
         tickAcc += Math.abs(delta);
         if (tickAcc >= tickAngle) { tickAcc %= tickAngle; c.audio.ratchet(); }
@@ -112,6 +114,11 @@ export function handwheel(c, opts = {}) {
     get turning() { return turning; },
     /** Повернуть визуально на deltaRad (по часовой, если смотреть на лицо маховика) без события onTurn. */
     spin(deltaRad) { angle += deltaRad; wheel.rotation.z -= deltaRad; },
+    /**
+     * Маховик упёрся (стопор, упор): откатить последний шаг целиком — и видимый поворот, и накопленный угол. Звать из onTurn.
+     * Считает в ходе пальца, поэтому верно при любой чувствительности и при «инверсии маховиков» (spin(-d) там не годится).
+     */
+    hold() { wheel.rotation.z -= lastPhi; angle -= lastDelta; lastPhi = 0; lastDelta = 0; },
   };
   return finish(api, group, [remove]);
 }

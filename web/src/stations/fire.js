@@ -182,7 +182,8 @@ export function createFireStation(ctx) {
   const leverBaseZ = leverMount.position.z;
   const fireLever = ui.lever({
     mode: 'momentary', length: 0.26, color: PAL.plateRed, labels: ['СПУСК'], labelSize: LABEL,
-    onPull() { game.fire(); },                // одно обращение на одно протягивание; отказ покажет оболочка
+    // одно обращение на одно протягивание; отказ покажет оболочка. engine.guards.fire — перехватчик оболочки («СВОИ В ЗОНЕ. ОГОНЬ?»)
+    onPull() { const guard = engine.guards && engine.guards.fire; if (guard) guard(() => game.fire()); else game.fire(); },
   });
   leverMount.add(fireLever.object3D);
   fascia.add(ui.plate('БЕЗ СТОПОРА\nНЕ СТРЕЛЯТЬ', { size: 0.024, style: 'red', screws: false }), 0.715, 0.25);
