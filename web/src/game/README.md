@@ -2,7 +2,8 @@
 
 Чистый JS без DOM/THREE. Проверяется `cd web && npm test` (~55 с): бот проходит все **36** заданий на обеих
 сложностях по полной процедуре (с зениткой и своими в море) + отдельные тесты на каждое правило
-(`test/game.test.js` — старые правила, `test/features.test.js` — восемь новых возможностей, `test/bot.js` — бот).
+(`test/game.test.js` — старые правила, `test/features.test.js` — восемь новых возможностей, `test/settings.test.js` — настройки,
+`test/hints.test.js` — засечка батареи и подсказки, `test/bot.js` — бот).
 Единицы: **км**, **градусы** (пеленг 0° — север, по часовой), **секунды**. Карта 20×20 км, x — восток, y — север.
 
 ```js
@@ -114,6 +115,10 @@ crew: { gunner, loader, radio } — каждый { role, title: 'НАВОДЧИ�
                                            state: 'ok'|'tired'|'wounded', fatigue 0…1, woundedUntil (time) }
 medkits: 0…3
 stats: { friendlyHits, friendlyKills, convoyLost, convoyArrived, planesDown, bombs }     // счётчики текущего боя
+detected: bool, detectedAt: null | time, detectTold: null | time   // detectTold — когда игроку об этом сообщили (раздел 9)
+                                             // НОВОЕ: противник засёк батарею (раздел 9); до этого его огонь — наугад, без вреда
+windChangedAt: null | time                   // когда последний раз менялся ветер (шторм, новая волна обороны)
+topic: null | { id, since (time), shown (с настоящего времени) }     // тема «НОВОЕ», которая сейчас на экране (раздел 10)
 ```
 
 ## Действия → `{ ok:true, … }` | `{ ok:false, reason }` (+ событие `denied`)
@@ -140,6 +145,11 @@ stats: { friendlyHits, friendlyKills, convoyLost, convoyArrived, planesDown, bom
 | **`settings()`** → копия всех настроек, **`setSetting(key, value)`** → `{ok}` | ключи и области — раздел 8; неизвестный ключ или значение вне области — отказ `{ok:false}` + `denied`, ничего не меняется; событие `settings` |
 | **`resetSettings()`** → `{ok}` | все настройки по умолчанию + `save.muted = false`; сложность и прогресс не трогает; события `settings`, `state` |
 | **`resetProgress({ settings: false }?)`** → `{ok}` | стирает весь прогресс; в любой фазе (бой сначала бросается); события `phase` (если была не `menu`), `save`, `upgrades`, `settings` (только при `settings: true`), `state` — раздел 8 |
+| **`hint(ui?)`** → `{ kind: 'step'|'topic'|null, id, title, text, more, station, hotspot, dom, warn }` | подсказка для экрана боя — раздел 10; `ui` (необязательно) — `{ hasHot(пост, имя) → bool, shellType() }` |
+| **`hintMode()`** → `'steps'|'topics'|'off'`, **`nextStep(ui?)`** → `{ st, hot, text, warn? }` \| `null` вне боя | режим подсказок в этом бою; шаг процедуры выстрела |
+| **`topicInfo()`** → `{ id, title, more, warn, dom, station }` \| `null` | активная тема «НОВОЕ» (в режиме шагов строку подсказки может занимать шаг, а тема идёт объяснением) |
+| **`briefTopics()`** → `[{ id, title, brief, text }]`, **`menuHint()`** → `{ id, title, text }` \| `null` | «НОВОЕ В ЭТОМ ЗАДАНИИ» для инструктажа; подсказка меню («хватает очков снабжения») |
+| **`learnTopic(id)`**, **`dismissTopic()`**, **`resetLearned()`** | отметить тему изученной; убрать тему с экрана (изучена); забыть всё изученное («показать обучение заново») |
 | **`friendsInDanger()`** → `friend[]`, **`friendInDanger()`** → id \| `null`, `FRIEND_ZONE` = 0.4 | свои в зоне поражения — раздел 8 |
 | `SETTINGS` | `{ key: { def, list } }` — значение по умолчанию и список допустимых значений (`list: null` у булевых и числовых) |
 | **`snapshot()`** → JSON \| `null` (не в бою) | весь идущий бой |
@@ -163,7 +173,8 @@ stats: { friendlyHits, friendlyKills, convoyLost, convoyArrived, planesDown, bom
   Налёт добавлен в три старых задания: 19 «Танкеры», 23 «Генеральное сражение», 26 «Штормовая дуэль».
 - `game.save` = `{ unlocked, stars[], records[], difficulty, muted, xp, survivalBest,`
   `upgrades: { hoist, range, spotter, armor, magazine, repair } (0…3), points (производное, пересчитывается),`
-  `settings: { …18 ключей, раздел 8 }, daily: null | { date, score, stars }, resume: null | { snap, title, savedAt, kind, integrity } }`.
+  `settings: { …18 ключей, раздел 8 }, daily: null | { date, score, stars }, resume: null | { snap, title, savedAt, kind, integrity },`
+  `learned: { [topicId]: true } }` — изученные темы подсказок (раздел 10).
   Старые сохранения загружаются: чего нет — по умолчанию; мусор в новых полях заменяется значениями по умолчанию.
 
 ## События `game.on(name, fn)` → функция отписки
@@ -173,9 +184,11 @@ stats: { friendlyHits, friendlyKills, convoyLost, convoyArrived, planesDown, bom
 Изменились:
 - `impact ({ report, hits, x, y, shell, n, pair, **observed**: bool, **friendly**: [{ id, damage, destroyed }] })` —
   `report` здесь будущий (см. ловушку 5), у него есть `delay`; `friendly` — попадания по своим этим снарядом.
-- `batteryHit ({ damage, by, escape?, plane? })` — `by: 'air'` и `plane: id` для бомб.
+- `batteryHit ({ damage, by, escape?, plane?, blind?, miss? })` — `by: 'air'` и `plane: id` для бомб; `blind: true, miss: км` — беспокоящий огонь
+  по незасечённой батарее (урон 0, снаряд лёг в `miss` км от «Утёса»).
+- `incoming ({ by, eta, blind? })` — `blind: true`: выстрел наугад (батарея не засечена).
 - `missionEnd ({ won, stars, reason, stats, record, survival, **daily**, xpGained, rank, rankUp, **points**, history, tracks })`:
-  `stats` += `{ friendlyHits, friendlyKills, convoyLost, convoyArrived, convoyTotal, planesDown, bombs }`;
+  `stats` += `{ friendlyHits, friendlyKills, convoyLost, convoyArrived, convoyTotal, planesDown, bombs, detectedAt: null | time }`;
   `daily: null | { date, score, best: {score,stars}|null, isNew, previous }`; `points` — очков снабжения после боя.
 
 Новые:
@@ -194,6 +207,8 @@ stats: { friendlyHits, friendlyKills, convoyLost, convoyArrived, planesDown, bom
 | `settings` | `game.settings()` (после `setSetting`, `resetSettings`, `resetProgress({settings:true})`) |
 | `save` | `game.save` — прогресс стёрт (`resetProgress`): перерисовать меню, звание, рекорды, «ПРОДОЛЖИТЬ БОЙ» |
 | `restored` | `resumeInfo()` на момент восстановления (после него сразу `phase` и `state`) |
+| `detected` | `{ time }` — противник засёк батарею (один раз за бой) |
+| `topic` | `{ id, learned: false }` — тема «НОВОЕ» появилась на экране · `{ id, learned: true }` — тема изучена (записано в `save.learned`) |
 
 `game.update(dtSeconds)` вызывать каждый кадр (сама учитывает паузу, фазу и ускорение времени).
 
@@ -299,7 +314,7 @@ transport, landing, destroyer, cruiser, minelayer, howitzer, radar, fort, submar
 (местная дата устройства, `'YYYY-MM-DD'`).
 
 ### 8. Настройки и сохранение боя
-- `save.settings` — 18 ключей. Логика их хранит и проверяет; применяет интерфейс (кроме `autosave` и `speed`).
+- `save.settings` — 18 ключей. Логика их хранит и проверяет; применяет интерфейс (кроме `autosave`, `speed` и `hints`).
   Типы строгие: булевы — только `true/false`, числа — только числа (строка `'30'` — отказ).
 
   | Ключ | Область | По умолчанию | Смысл |
@@ -309,7 +324,7 @@ transport, landing, destroyer, cruiser, minelayer, howitzer, radar, fort, submar
   | `lefty` | bool | false | режим для левши |
   | `vibro` | bool | true | вибрация |
   | `vibroPower` | `'low'` \| `'high'` | `'high'` | сила вибрации |
-  | `hints` | bool | true | подсказки обучения (текст + кольцо) |
+  | `hints` | `'new'` \| `'all'` \| `'off'` | `'new'` | подсказки: только новое / по шагам в каждом бою / нет (раздел 10); применяет логика (`game.hint()`) |
   | `autosave` | bool | true | запись боя каждые 15 с; `suspend()` работает всегда |
   | `speed` | 1 \| 2 | 1 | скорость боя по умолчанию: ставится в `begin()` и `restore()` |
   | `confirmFriendly` | bool | true | спрашивать «СВОИ В ЗОНЕ. ОГОНЬ?» (спрашивает интерфейс, `fire()` не блокируется) |
@@ -322,11 +337,12 @@ transport, landing, destroyer, cruiser, minelayer, howitzer, radar, fort, submar
   | `showFps` | bool | false | счётчик кадров |
 
   Общий звук вкл/выкл — по-прежнему `save.muted` / `setMuted(b)` (не в `settings`; события не шлёт). Сложность — `save.difficulty` / `setDifficulty`.
-  Старое сохранение: недостающие и негодные значения — по умолчанию, лишние ключи отбрасываются.
+  Старое сохранение: недостающие и негодные значения — по умолчанию, лишние ключи отбрасываются; прежний выключатель
+  `hints: true/false` читается как `'new'` / `'off'`.
   Смена `speed` посреди боя текущую скорость не трогает (её меняет `setSpeed`); `setSpeed` принимает 1, 2, 3.
 - `resetSettings()` — `save.settings` по умолчанию, `save.muted = false`. Сложность не трогает.
 - `resetProgress({ settings })` — `unlocked: 1`, `stars: []`, `records: []`, `xp: 0`, `survivalBest: null`, `upgrades` — все 0, `points: 0`,
-  `daily: null`, `resume: null`; лишние поля прежних версий удаляются. Без `settings: true` остаются `settings`, `muted`, `difficulty`;
+  `daily: null`, `resume: null`, `learned: {}`; лишние поля прежних версий удаляются. Без `settings: true` остаются `settings`, `muted`, `difficulty`;
   с ним — и они по умолчанию (`difficulty: 0`, `muted: false`). В фазах `briefing|playing|won|lost` сначала `quit()` (событие `phase: 'menu'`).
   Флагов «обучение пройдено / ролик показан / что нового» в логике нет — ключи `localStorage` интерфейса он чистит сам (по событию `save`).
 - Свои в зоне поражения — один источник правды: `friendsInDanger()` → свои (объекты из `state.friends`, ближайший к прицелу первым)
@@ -336,7 +352,7 @@ transport, landing, destroyer, cruiser, minelayer, howitzer, radar, fort, submar
   для вопроса перед выстрелом. Вне боя — `[]` / `null`.
 - `snapshot()` — обычный JSON `{ v, state, sys }` (без функций; `JSON.parse(JSON.stringify(snap))` — без потерь): состояние целиком
   (цели, свои, снаряды в полёте, налёт, расчёт, журнал) и служебная часть — отложенные действия `sys.events = [{ t, a, p }]`
-  (`a` — имя: `radio, windShift, activate, finish, nextWave, enemyShell, friendShell, report, raidWarn, raidStart, raidEnd`), счётчики.
+  (`a` — имя: `radio, windShift, activate, finish, nextWave, enemyShell, friendShell, report, raidWarn, raidStart, raidEnd, detect`), счётчики.
   Внутрь снимка интерфейсу лезть не нужно.
 - `restore(snap)` — в любой фазе, в т.ч. в свежесозданной игре: фаза `playing`, события `phase`, `restored`, `state`.
   Случайность после восстановления новая (исход боя не предопределён). Снимок другой версии (`v`) — отказ.
@@ -345,7 +361,72 @@ transport, landing, destroyer, cruiser, minelayer, howitzer, radar, fort, submar
 - Сценарий интерфейса: при запуске `game.resumeInfo()` → предложить «ПРОДОЛЖИТЬ БОЙ» → `game.restore()`;
   уход в фон (`visibilitychange`) → `game.suspend()`; «выйти с сохранением» → `suspend(); quit({ keep: true })`.
 
+### 9. Засечка батареи
+Противник видит «Утёс» только после первого выстрела самой батареи.
+- В начале боя `state.detected = false`. Пока так, **ни один снаряд противника по батарее не попадает**: нет урона, ранений, отказов.
+- **Беспокоящий огонь наугад.** Орудия противника при этом не молчат: стреляют по своим прежним таймерам (иначе задания, где есть
+  только скрытые батареи, зашли бы в тупик — их засекают по звуку ИХ залпов). Такой выстрел — обычный во всём, кроме исхода:
+  `incoming { blind: true }`, `firedAt` (вспышка в трубе, ночью — засечка «по вспышке»), пеленги звукометрии, счёт залпов кочующей
+  батареи; через 2,4 с — `batteryHit { damage: 0, blind: true, miss }`, `miss` = 0,6…2,5 км от батареи. Один раз за бой — радио ШТАБА
+  «Противник ведёт беспокоящий огонь наугад — нас пока не видят.» (отложенное действие `harass`, через 3 с после первого залпа;
+  если за эти 3 с батарею засекли, строка не выходит).
+- **Засечка**: вспышка первого выстрела главного калибра (любой снаряд, включая ОСВ и ДЫМ) запускает её, первый свой разрыв —
+  завершает; если снаряд летит дольше 8 с — засечка через 8 с после выстрела (отложенное действие `detect` в `sys.events`, попадает
+  в снимок). Тогда `state.detected = true`, `state.detectedAt`, радио ШТАБА «Противник засёк батарею по вспышке — ждите ответного
+  огня.» (если у противника есть живые орудия), событие `detected { time, armed }`.
+- **Засекли, когда стрелять по батарее некому** (первая волна ОБОРОНЫ без орудий): строки нет, `state.detectTold = null`. С первой
+  волной, где есть орудия (`nextWave`), один раз: радио ШТАБА «Батарея давно засечена — орудия противника бьют прицельно с первого
+  залпа.», `state.detectTold = время`, событие `detected { time, armed: true, late: true }` (оболочка: всплывающая строка, мигающий значок).
+  Тема `detected` отсчитывает свои 60 с от `detectTold`. Снимок без `detectTold`: «уже сообщали», если есть живые орудия.
+- **После засечки** — прежние правила точности (`gun.p`, +0.04 за каждый наш боевой выстрел, РЛС +0.18, дым ×0.4). Первый прицельный
+  выстрел каждого орудия — не раньше чем через `6 + случайное·период/2` секунд (уже назначенный более поздний выстрел не приближается).
+  РЛС даёт прибавку только засечённой батарее (до засечки попаданий нет вовсе).
+- Засечка держится до конца боя; в ОБОРОНЕ — на все следующие волны. Задание дня, свободный бой — то же правило.
+- Не артиллерия — без изменений: налёты (бомбы падают и на незасечённую батарею), охотники по конвою, высадка, уход целей.
+- Зенитный огонь батарею не выдаёт.
+- Снимок прежней версии без `detected`: батарея, которая уже стреляла (`shots > 0`), считается засечённой.
+- Баланс: задания стали немного легче (обычно первые 10–40 с боя батарея не получает урона); точность противника не повышалась.
+
+### 10. Подсказки
+Вся логика подсказок — здесь (`game/hints.js` + `game.hint()`); интерфейс только рисует строку, плашку и кольцо.
+- Настройка `hints`: `'new'` (по умолчанию) · `'all'` · `'off'`. **`hintMode()`** в идущем бою:
+  `'steps'` — пошаговые подсказки: при `'all'` — в любом бою; при `'new'` — в заданиях кампании с номерами 0, 1, 2;
+  `'topics'` — при `'new'` во всех остальных боях (кампания с задания 4, свободный бой, оборона, задание дня);
+  `'off'` — при `'off'` и вне боя. От сложности режим больше не зависит (раньше шаги были только на «Курсанте» и в учебном задании).
+- **`hint(ui)`**: `'steps'` → `{ kind: 'step', id: 'пост:орган', text, station, hotspot, warn }` (то же, что `nextStep`); если шага нет
+  (`station: null` — снаряд в полёте, ждём донесения) и есть активная тема — возвращается она, как в режиме `'topics'`;
+  `'topics'` → тема на экране: `{ kind: 'topic', id, title, text: 'НОВОЕ · ' + title, more: объяснение (1–2 предложения), station,
+  hotspot, dom (id элемента обвязки HUD для кольца, если органа на посту нет), warn (тема об опасности) }`, либо `kind: null`.
+  Оболочка пишет `text` в строку подсказки, а `more` показывает в строке радио на 12 с (когда та свободна от донесений).
+- **Темы** (`game.TOPICS` — `[{ id, pri, title, station, hot[], dom, menu }]`; определения и предикаты — `hints.js`): по одной на механику.
+  Опасность (3): `raid, friendZone, convoySmoke, faults, wounded, detected, enemyFire, landing, aaHeat`; наводка (2): `night, flash, armor,
+  sound, soundManual, relocate, shrap, lead, escape, submarine, radar, fort, tanker, wind, stale, noSpotter, smoke, stealth, fog, convoy`;
+  удобство (1): `friends, waves, survival, observe, burst, bracket, fatigue`; меню: `upgrades`.
+- **Жизнь темы** (режим `'topics'`, проверка 5 раз в секунду): тема появляется, когда её предикат `when` истинен и она не изучена;
+  на экране одна тема — самая срочная (приоритет, затем порядок списка). Гаснет, когда игрок сделал нужное (`done`), или прошло
+  40 с настоящего времени (у справочных тем — 20–25 с, поле `hold`), или механика ушла (но не раньше 6 с показа), или интерфейс
+  вызвал `dismissTopic()` (сейчас оболочка его не зовёт: касание строки «НОВОЕ · …» показывает объяснение ещё раз), — и записывается в `save.learned`. Больше она не показывается. События `topic`.
+- **Вытеснение**: если на экране тема, а появилась более срочная (приоритет строго выше), текущая уходит *неизученной* и вернётся
+  позже. Темы с `urgent` (`raid`, `friendZone`) вытесняют сразу и любую не-urgent тему, даже того же приоритета; остальные — когда текущая
+  пробыла на экране 6 с (`TOPIC_MIN`).
+- В режиме `'steps'` без показа засчитываются только темы с `steps: true` — те, что объясняют сами шаги (`raid, night, armor, sound,
+  soundManual, shrap, wind, stale, noSpotter`). Остальные (засечка, свой глаз, ремонт, аптечка, очередь, вилка…) живут как в режиме
+  `'topics'`, но тема не об опасности начинается только когда шага нет; объяснение оболочка берёт из `topicInfo()`. При `'off'`
+  ничего не показывается и не засчитывается.
+- **Шаги звукометрии на «Командире»** (линии сами не рисуются): для каждого пеленга из донесения, которого нет на планшете
+  (`soundLineDrawn`): «коснитесь знака поста ЗВ-n» → «поверните алидаду на пеленг» (`bearingWheel`) → «ЛИНИЯ» (`btnLine`); затем фишка
+  на пересечение и ось обратно на «УТЁС».
+- **`briefTopics()`** — неизученные темы, механика которых есть в текущем задании (по составу целей, погоде, своим, налётам и
+  сложности: `soundManual` — только на «Командире») — для блока «НОВОЕ В ЭТОМ ЗАДАНИИ» инструктажа. В блок идёт `brief` — отдельная
+  строка темы «что это и что делать» (текст `text` написан для момента, когда механика уже случилась). **`menuHint()`** — в меню, один раз: хватает очков снабжения на улучшение (интерфейс
+  показывает строку и зовёт `learnTopic('upgrades')`).
+- **Старые сохранения** (поля `learned` нет): изученными считаются только темы механик из заданий, за которые уже есть звёзды, и
+  «общие» темы (`observe`, `fatigue` — с задания 31, `burst` — с 18, `bracket` — с 26), если пройдено задание не раньше; `upgrades` —
+  если стоит хоть одно улучшение. Темы нового правила засечки (`stealth`, `detected`) не засчитываются никому, `soundManual` — только игравшим на «Командире». Остальное игрок
+  увидит по одному разу.
+- `resetProgress()` и `resetLearned()` стирают `save.learned`.
+
 ### Вид из амбразуры / трубы — что есть в состоянии
 `turret.bearing`, `scope`, `mission.night/weather/wind`, `targets[]` + `visible(id)` (heading, burning, sinking, sunk, firedAt),
 `friends[]`, `lights[]`, `smokes[]`, `raid.planes[]`, `aa`, события `fired`, `impact {x,y,shell,observed}`, `light`, `smoke`,
-`incoming`, `friendFire`, `plane`, `raid`.
+`incoming` (`blind` — выстрел наугад), `friendFire`, `plane`, `raid`.

@@ -6,7 +6,7 @@ import { CAMPAIGN, dailyDef, isLand } from '../src/game/missions.js';
 import { RAD, norm, tick, waitBreech, waitReport, unlockAll, botStep, playBot, autoAA, fireQuiet, noWind, start, elevTo, turnTo, friendNear } from './bot.js';
 
 /** Настройки по умолчанию (полный список — см. README, раздел 8). */
-const DEF = { sens: 1, invert: false, lefty: false, vibro: true, vibroPower: 'high', hints: true, autosave: true, speed: 1, confirmFriendly: true, crewPanel: 'full', volFx: 100, volAmb: 70, volRadio: 100, text: 1, quality: 'high', fps: 60, nightTint: 'normal', showFps: false };
+const DEF = { sens: 1, invert: false, lefty: false, vibro: true, vibroPower: 'high', hints: 'new', autosave: true, speed: 1, confirmFriendly: true, crewPanel: 'full', volFx: 100, volAmb: 70, volRadio: 100, text: 1, quality: 'high', fps: 60, nightTint: 'normal', showFps: false };
 const mem = (init) => { const m = {}; if (init) m['arta2.save'] = JSON.stringify(init); return { mem: m, get: (k) => m[k] || null, set: (k, v) => { m[k] = v; } }; };
 const brgTo = (bat, o) => norm(Math.atan2(o.x - bat.x, o.y - bat.y) / RAD);
 const withRandom = (v, fn) => { const R = Math.random; Math.random = () => v; try { return fn(); } finally { Math.random = R; } };
@@ -42,7 +42,7 @@ function scenario(begin, cond, diff = 0) {
   assert.ok(g2.restore(JSON.parse(JSON.stringify(snap))).ok);
   assert.equal(g2.state.phase, 'playing');
   const again = g2.snapshot();
-  again.sys.nextAuto = snap.sys.nextAuto; again.state.aa.firing = snap.state.aa.firing; again.state.paused = snap.state.paused; again.state.speed = snap.state.speed;
+  again.sys.nextAuto = snap.sys.nextAuto; again.state.aa.firing = snap.state.aa.firing; again.state.paused = snap.state.paused;
   assert.deepEqual(again, snap, 'восстановленный бой — тот же самый');
   let end2 = null; g2.on('missionEnd', (e) => { end2 = e; });
   playBot(g2); tick(g2, 5);
@@ -440,6 +440,7 @@ test('расчёт: попадание по батарее ранит с вер�
   const g = start(2, null, 1); const s = g.state; tick(g, 12);
   const gun = s.targets.find((t) => t.gun);
   const ev = []; g.on('crew', (e) => ev.push(e));
+  s.detected = true;                        // батарея уже засечена: до первого своего выстрела противник не попадает
   gun.gun.next = s.time; gun.gun.p = 0.9;
   withRandom(0, () => tick(g, 3));          // 0 < 0.2 — ранение; индекс 0 — наводчик
   assert.deepEqual(ev, [{ role: 'gunner', state: 'wounded' }]);

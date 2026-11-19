@@ -12,6 +12,9 @@
 //  6) «СБРОСИТЬ ПРОГРЕСС»: два шага, удержание красной кнопки, меню с нуля, ролик (подставной) запускается заново.
 //  7) находки проверки (чистое хранилище, 740×360, настоящий ролик): прерванный первый запуск, двойные касания «ПРОПУСТИТЬ» и
 //      «СОХРАНИТЬ И ВЫЙТИ», закрытое окно во время удержания сброса, высота «ГОТОВО», пост и скорость после «ПРОДОЛЖИТЬ БОЙ».
+//  8) подсказки и засечка (чистое хранилище, открытая кампания): задание 1 — по шагам; задание 4 — пусто, пока не встретилось
+//      новое, затем «НОВОЕ ·» с объяснением в строке радио и кольцом, гаснет после действия; касание строки показывает объяснение снова; «ПО ШАГАМ» и «ВЫКЛ»; блок «НОВОЕ В ЭТОМ
+//      ЗАДАНИИ»; органы управления тем существуют на постах; плашка «НАС НЕ ВИДЯТ» → выстрел → «ЗАСЕЧЕНЫ».
 //   node tools/e2e.cjs [итог.png]   (рядом кладутся <итог>-debrief.png и <итог>-survival.png)
 const { chromium } = require('playwright');
 const path = require('path');
@@ -106,7 +109,7 @@ const path = require('path');
   await p.click('[data-act=settings]');
   const valueOf = (key) => p.evaluate((k) => { const g = __arta.game; return k === 'difficulty' ? g.state.difficulty : k === 'sound' ? !g.save.muted : g.settings()[k]; }, key);
   const CASES = [
-    ['game', '#setDiff [data-val="1"]', 'difficulty', 1], ['game', '#setHints [data-val="0"]', 'hints', false], ['game', '#setAutosave [data-val="0"]', 'autosave', false],
+    ['game', '#setDiff [data-val="1"]', 'difficulty', 1], ['game', '#setHints [data-val="all"]', 'hints', 'all'], ['game', '#setHints [data-val="off"]', 'hints', 'off'], ['game', '#setAutosave [data-val="0"]', 'autosave', false],
     ['game', '#setSpeed [data-val="2"]', 'speed', 2], ['game', '#setConfirm [data-val="0"]', 'confirmFriendly', false], ['game', '#setCrew [data-val="compact"]', 'crewPanel', 'compact'],
     ['game', '#setCrew [data-val="off"]', 'crewPanel', 'off'],
     ['ctrl', '#setInvert [data-val="1"]', 'invert', true], ['ctrl', '#setLefty [data-val="1"]', 'lefty', true], ['ctrl', '#setLefty [data-val="0"]', 'lefty', false],
@@ -143,7 +146,7 @@ const path = require('path');
     return { volRadio: st.volRadio, bar: document.querySelector('#setVolRadio .sld-bar i').style.width, label: document.querySelector('#setVolRadio .sld-bar b').textContent,
       powerOff: [...document.querySelectorAll('#setVibroPower button')].every((x) => x.disabled),
       invert: engine.settings.invert, sens: engine.settings.sens, q: engine.quality, cap: engine.frameCap, frames, free, slow, maxDt, rtW, buses: engine.audio.buses, muted: engine.audio.muted,
-      body: document.body.className, fps: !fm.classList.contains('hidden') && fm.offsetWidth > 0 && fm.textContent, night: getComputedStyle(document.getElementById('night')).transitionProperty,
+      body: document.body.className, fps: !fm.classList.contains('hidden') && fm.textContent, fpsSeen: fm.offsetWidth > 0, night: getComputedStyle(document.getElementById('night')).transitionProperty,
       rcol: getComputedStyle(document.querySelector('#crew .crew-chip')).display };
   });
   console.log('settings-engine', JSON.stringify(eng));
@@ -155,7 +158,8 @@ const path = require('path');
   if (eng.free < 5 || eng.slow < 1 || eng.slow > 4 || eng.maxDt > 0.0501) fail('пропуск кадров не работает: без предела ' + eng.free + ' кадров за 1,5 с, с пределом 2 к/с — ' + eng.slow + ', dt до ' + eng.maxDt);
   if (Math.abs(eng.buses.fx - 0.9) > 1e-6 || Math.abs(eng.buses.amb - 80 / 70) > 1e-6 || Math.abs(eng.buses.radio - 0.25) > 1e-6 || eng.muted) fail('громкости не дошли до звука: ' + JSON.stringify(eng.buses));
   if (!/crew-off/.test(eng.body) || !/night-soft/.test(eng.body) || !/text-l/.test(eng.body) || eng.rcol !== 'none') fail('классы настроек не применены: ' + eng.body);
-  if (!/^\d+ К\/С$/.test(eng.fps || '')) fail('счётчик кадров не показан: ' + eng.fps);
+  if (!/^\d+ К\/С$/.test(eng.fps || '')) fail('счётчик кадров не включён: ' + eng.fps);
+  if (eng.fpsSeen) fail('счётчик кадров виден на экране настроек вне боя (закрывает органы)');
   // вёрстка: 740×360, самый крупный шрифт, правша и левша — все вкладки помещаются, длинная вкладка прокручивается до конца
   await p.setViewportSize({ width: 740, height: 360 });
   await tab('screen'); await p.click('#setText [data-val="1.3"]');
@@ -277,9 +281,9 @@ const path = require('path');
     return { text: el.innerText.trim(), glyph: !!el.querySelector('svg'), in: r.width >= 40 && r.left >= 0 && r.right <= innerWidth && r.top >= tb.top && r.bottom <= tb.bottom + 1, hint: document.getElementById('hint').textContent.length }; });
   if (sb0.text !== 'СОХРАНИТЬ' || !sb0.glyph || !sb0.in) fail('кнопка «СОХРАНИТЬ» не видна в верхней панели: ' + JSON.stringify(sb0));
   // подсказки обучения выкл → строки подсказки и подсветки вкладки нет; вкл → возвращаются
-  await p.evaluate(() => __arta.game.setSetting('hints', false));
+  await p.evaluate(() => __arta.game.setSetting('hints', 'off'));
   await p.waitForFunction(() => document.getElementById('hint').textContent === '' && !document.querySelector('#nav button.next'), null, { timeout: 20000 }).catch(() => fail('подсказки не выключились настройкой'));
-  await p.evaluate(() => __arta.game.setSetting('hints', true));
+  await p.evaluate(() => __arta.game.setSetting('hints', 'new'));
   await p.waitForFunction(() => document.getElementById('hint').textContent !== '', null, { timeout: 20000 }).catch(() => fail('подсказки не включились обратно'));
   // «СОХРАНИТЬ И ПРОДОЛЖИТЬ»: бой на паузе, пока открыт лист; запись есть, бой идёт дальше, сообщение со временем
   await p.click('#hSave');
@@ -470,6 +474,9 @@ const path = require('path');
   await p.evaluate(() => __arta.game.quit());
 
   // ---------- 5. конвой с налётом (задание 32 «Воздух!»): расчёт и аптечка, свои в блокноте, тревога → зенитка, итог и разбор ----------
+  // Задание 32 — дальше третьего: по умолчанию здесь только темы «НОВОЕ» (их проверяет раздел 8). Раздел 5 проверяет пошаговую
+  // подсказку зенитного поста и её вёрстку, поэтому идёт в режиме «ПО ШАГАМ».
+  await p.evaluate(() => __arta.game.setSetting('hints', 'all'));
   const hudFits = () => p.evaluate(() => {
     const r = (id) => document.getElementById(id).getBoundingClientRect(), c = r('rcol');
     const chips = [...document.querySelectorAll('#crew .crew-chip')];
@@ -533,11 +540,12 @@ const path = require('path');
     for (const id of ['plot', 'computer', 'loading', 'traverse', 'elevation', 'fire', 'observe', 'aa']) { await go(id); out.covered.push(...under(id)); }
     // подсказка в нижней строке
     {
-      const m = document.getElementById('memo'), o = document.getElementById('obs'), h = document.getElementById('hint'), keep = [m.innerHTML, o.innerHTML, h.innerHTML];
+      // (меряем строку шага: если в этот момент в строке тема «НОВОЕ», её начертание на время замера снимаем)
+      const m = document.getElementById('memo'), o = document.getElementById('obs'), h = document.getElementById('hint'), keep = [m.innerHTML, o.innerHTML, h.innerHTML, h.className]; h.className = '';
       m.textContent = 'ЦЕЛЬ 1 · ПЕЛЕНГ 012,4° · ДАЛЬНОСТЬ 9,85 КМ · УГОЛ 25,11° · ЗАРЯД 2'; o.textContent = 'КОРР. №1: ПЕРЕЛЁТ 350, ВПРАВО 120';
       h.textContent = 'ПОДЪЁМ: держите «НА УГОЛ ЗАРЯЖАНИЯ» — ствол должен опуститься до 3°';
       out.hintCut = h.scrollWidth - h.clientWidth;
-      m.innerHTML = keep[0]; o.innerHTML = keep[1]; h.innerHTML = keep[2];
+      m.innerHTML = keep[0]; o.innerHTML = keep[1]; h.innerHTML = keep[2]; h.className = keep[3];
     }
     // две неисправности, крупный шрифт
     game.setSetting('text', 1.3);
@@ -684,6 +692,7 @@ const path = require('path');
   await p.click('#dlgBtns .btn:has-text("В МЕНЮ")');
   await p.evaluate(() => { __arta.game.save.unlocked = Math.max(window.__unl, 2); });
 
+  await p.evaluate(() => __arta.game.setSetting('hints', 'new'));
   // ---------- 6. «СБРОСИТЬ ПРОГРЕСС»: список потерь, галочка «И НАСТРОЙКИ», удержание красной кнопки ----------
   const holdWipe = async (ms) => { const bx = await p.locator('#wipeHold').boundingBox(); await p.mouse.move(bx.x + bx.width / 2, bx.y + bx.height / 2); await p.mouse.down(); await p.waitForTimeout(ms); await p.mouse.up(); };
   const openWipe = async () => { await p.click('[data-act=settings]'); await tab('data'); await p.click('#setWipe'); };
@@ -750,7 +759,16 @@ const path = require('path');
     const st = () => q.evaluate(() => ({ phase: __arta.game.state.phase, shown: [...document.querySelectorAll('.show')].map((e) => e.id).filter((id) => ['menu', 'settings', 'dialog', 'missions', 'upgrades'].includes(id)),
       intro: __arta.shell.introPlaying, el: !!document.getElementById('arta-intro'), hud: !document.getElementById('hud').classList.contains('hidden'), news: localStorage.getItem('arta2.news') }));
     const center = async (sel) => { const bx = await q.locator(sel).first().boundingBox(); return [bx.x + bx.width / 2, bx.y + bx.height / 2]; };
-    const dtap = async (sel, gap) => { const [x, y] = await center(sel); await q.touchscreen.tap(x, y); await q.waitForTimeout(gap); await q.touchscreen.tap(x, y); };
+    // Двойное касание: два касания через gap мс. Время касаний задаём явно и ответа страницы на первое не ждём: touchscreen.tap()
+    // возвращается только после обработки нажатия, и на медленном программном рендере «150 мс» растягивались до 0,5 с
+    // (второе касание тогда честно попадало в кнопку нового экрана — проверка падала через раз).
+    const cdp = await q.context().newCDPSession(q);
+    const dtap = async (sel, gap) => {
+      await q.waitForFunction(() => !(__arta.shell.tapGuard > 0));
+      const [x, y] = await center(sel), t0 = Date.now() / 1000;
+      const send = (type, ms) => new Promise((r) => setTimeout(r, ms)).then(() => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }], timestamp: t0 + ms / 1000 }));
+      await Promise.all([send('touchStart', 0), send('touchEnd', 30), send('touchStart', gap), send('touchEnd', gap + 30)]);
+    };
     const introGone = () => q.waitForFunction(() => !__arta.shell.introPlaying && !document.getElementById('arta-intro'));
     // 7а. первый запуск прерван в первые секунды ролика → при следующем запуске ролик показывается снова
     await q.goto(url); await q.waitForFunction(() => window.__arta && __arta.shell.introPlaying);
@@ -810,8 +828,12 @@ const path = require('path');
     await q.evaluate(() => { __arta.engine.gotoStation('fire', { instant: true }); __arta.game.setSpeed(3); });
     await q.waitForFunction(() => __arta.engine.current === 'fire' && __arta.game.state.station === 'fire');
     await q.click('#hSave'); await q.waitForTimeout(400);
+    // программный рендер рисует кадр по 100–300 мс: второе касание доходит до страницы с опозданием — как на слабом телефоне.
+    // Для верности первое нажатие ещё и задерживаем на 450 мс: защита считает по времени касания, а не по времени обработки.
+    await q.evaluate(() => document.addEventListener('click', () => { if (!window.__stalled) { window.__stalled = 1; const t = performance.now(); while (performance.now() - t < 450); } }, { once: true }));
     await dtap('#dlgBtns .btn.primary', 150); await q.waitForTimeout(250);
     const e1 = await st();
+    if (e1.shown.join() !== 'menu' || e1.phase !== 'menu') { fail('двойное касание «СОХРАНИТЬ И ВЫЙТИ В МЕНЮ» открыло экран под пальцем: ' + JSON.stringify(e1)); await q.evaluate(() => __arta.shell.showMenu()); }
     await q.evaluate(() => __arta.engine.gotoStation('plot', { instant: true }));
     await q.waitForTimeout(200);
     await q.click('#resumeBtn');
@@ -819,14 +841,284 @@ const path = require('path');
     await q.waitForTimeout(200);
     const e2 = await q.evaluate(() => ({ station: __arta.engine.current, saved: __arta.game.state.station, speed: __arta.game.state.speed, tab: (document.querySelector('#nav button.on') || {}).dataset }));
     console.log('save-dtap-resume', JSON.stringify({ e1, e2 }));
-    if (e1.shown.join() !== 'menu' || e1.phase !== 'menu') fail('двойное касание «СОХРАНИТЬ И ВЫЙТИ В МЕНЮ» открыло экран под пальцем: ' + JSON.stringify(e1));
     if (e2.station !== 'fire' || e2.saved !== 'fire' || e2.speed !== 3) fail('«ПРОДОЛЖИТЬ БОЙ» вернуло не на тот пост или не с той скоростью: ' + JSON.stringify(e2));
     // новый бой после продолженного — снова с планшета и со скоростью из настроек
     await q.evaluate(() => { const g = __arta.game; g.quit(); g.startMission(0); g.begin(); });
     const e3 = await q.evaluate(() => ({ station: __arta.engine.current, speed: __arta.game.state.speed }));
     if (e3.station !== 'plot' || e3.speed !== 1) fail('новый бой начался не с планшета или не со скоростью по умолчанию: ' + JSON.stringify(e3));
-    await q.evaluate(() => __arta.game.quit());
+    // 7е. счётчик кадров: в бою — слева внизу над полосой постов и ничего не перехватывает; под окном настроек не лежит поверх органов; в меню не виден
+    await q.evaluate(() => __arta.game.setSetting('showFps', true));
+    const fpsBox = () => q.evaluate(() => { const fm = document.getElementById('fpsMeter'), r = fm.getBoundingClientRect(), nav = document.getElementById('bottombar').getBoundingClientRect();
+      const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return { w: r.width, x: r.left, r: r.right, b: r.bottom, navTop: nav.top, pe: getComputedStyle(fm).pointerEvents, text: fm.textContent, onTop: !!top && top.id === 'fpsMeter', under: top ? top.id || top.className : null }; });
+    const f1 = await fpsBox();
+    if (!(f1.w > 0) || !/^\d+ К\/С$/.test(f1.text) || f1.x > 40 || f1.b > f1.navTop + 0.5 || f1.navTop - f1.b > 12 || f1.pe !== 'none') fail('счётчик кадров в бою не слева внизу над полосой постов: ' + JSON.stringify(f1));
+    await q.evaluate(() => __arta.engine.gotoStation('fire', { instant: true }));
+    await q.waitForFunction(() => document.getElementById('hud').dataset.st === 'fire');
+    const f1f = await fpsBox();
+    if (!(f1f.w > 0) || f1f.r < 700 || f1f.b > f1f.navTop + 0.5) fail('счётчик кадров на посту ОГОНЬ не справа внизу (слева — неисправности): ' + JSON.stringify(f1f));
+    await q.evaluate(() => __arta.shell.settings.open(null, { battle: true, tab: 'screen' }));
+    const f2 = await q.evaluate(() => { const fm = document.getElementById('fpsMeter'), r = fm.getBoundingClientRect(); const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return { shown: document.getElementById('settings').classList.contains('show'), covered: !!top && !!top.closest('#settings') }; });
+    if (!f2.shown || !f2.covered) fail('счётчик кадров лежит поверх экрана настроек: ' + JSON.stringify(f2));
+    await q.evaluate(() => { __arta.shell.settings.close(); __arta.game.quit(); });
+    await q.waitForFunction(() => document.getElementById('menu').classList.contains('show'));
+    const f3 = await q.evaluate(() => document.getElementById('fpsMeter').offsetWidth);
+    if (f3 !== 0) fail('счётчик кадров виден в меню: ' + f3);
+    await q.evaluate(() => __arta.game.setSetting('showFps', false));
+    console.log('fps-meter', JSON.stringify({ f1, f1f, f2, f3 }));
     await q.close();
+  }
+
+  // ---------- 8. подсказки: по шагам в первых трёх заданиях, дальше — только «НОВОЕ»; засечка батареи ----------
+  {
+    const r = await (await b.newContext({ viewport: { width: 844, height: 390 }, hasTouch: true })).newPage();
+    r.setDefaultTimeout(120000); humanPace(r);
+    r.on('pageerror', (e) => { errs++; console.log('PAGEERROR(8)', e.message); });
+    r.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') { errs++; console.log('CONSOLE(8)', m.text()); } });
+    // игрок с открытой кампанией, который ещё ничего не изучил (xp > 0 — ролик не показывается)
+    await r.addInitScript(() => { window.ArtaNative = { ready() {}, applyUpdate() {} }; if (!localStorage.getItem('arta2.save')) localStorage.setItem('arta2.save', JSON.stringify({ unlocked: 36, stars: [], xp: 10, learned: {} })); });
+    await r.goto('file://' + path.resolve(__dirname, '../../app/src/main/assets/www/index.html'));
+    await r.waitForFunction(() => window.__arta && __arta.shell);
+    if (await r.isVisible('#dialog.show')) await r.click('#dlgBtns .btn');
+    const hud = () => r.evaluate(() => { const g = __arta.game, hl = document.getElementById('highlight'), tp = document.getElementById('radio'), nx = document.querySelector('#nav button.next'), dc = document.getElementById('detChip');
+      return { hint: document.getElementById('hint').textContent, cls: document.getElementById('hint').className, ring: hl.style.display === 'block', next: nx ? nx.dataset.station : null,
+        topic: /show/.test(tp.className) && /topic/.test(tp.className) ? tp.textContent : '', mode: g.hintMode(), kind: g.hint().kind, id: g.hint().id, time: g.state.time, learned: Object.keys(g.save.learned).sort().join(), det: dc.offsetWidth > 0 ? dc.textContent : '', detCls: dc.className }; });
+    const startMission = async (i) => { await r.evaluate((n) => __arta.game.startMission(n), i); await r.waitForSelector('#dialog.show'); };
+    // 8а. задание 1: в инструктаже — строка о засечке и нет блока «НОВОЕ»; в бою — шаги, вкладка поста, кольцо
+    await startMission(0);
+    const b1 = await r.evaluate(() => ({ text: document.getElementById('dlgBody').innerText, box: !!document.getElementById('briefNew') }));
+    if (b1.box || !/после вашего первого выстрела/.test(b1.text)) fail('инструктаж задания 1: нет строки о засечке или лишний блок «НОВОЕ»: ' + JSON.stringify(b1).slice(0, 300));
+    await r.click('#dlgBtns .btn');
+    await r.waitForFunction(() => document.getElementById('hint').textContent !== '' && document.getElementById('highlight').style.display === 'block' && document.querySelector('#nav button.next'), null, { timeout: 60000 }).catch(() => fail('задание 1: нет пошаговой подсказки с кольцом'));
+    const h1 = await hud();
+    if (h1.mode !== 'steps' || h1.kind !== 'step' || /НОВОЕ/.test(h1.hint) || !/ПЛАНШЕТ/.test(h1.hint) || h1.next !== 'plot' || h1.topic || /topic/.test(h1.cls) || h1.det) fail('задание 1: подсказки не по шагам: ' + JSON.stringify(h1));
+    await r.evaluate(() => __arta.game.quit());
+    // 8б. задание 4: блок «НОВОЕ В ЭТОМ ЗАДАНИИ»; в бою пусто, пока разведка молчит; потом «НОВОЕ ·»
+    await startMission(3);
+    const b4 = await r.evaluate(() => { const el = document.getElementById('briefNew'); return el ? { head: el.querySelector('h3').textContent, items: [...el.querySelectorAll('li')].map((x) => x.textContent) } : null; });
+    if (!b4 || b4.head !== 'НОВОЕ В ЭТОМ ЗАДАНИИ' || !b4.items.some((t) => /^ДВИЖУЩАЯСЯ ЦЕЛЬ — .+\.$/.test(t)) || !b4.items.some((t) => /^ПОПРАВКА НА ВЕТЕР — /.test(t)) || b4.items.length > 7) fail('инструктаж задания 4: блок «НОВОЕ В ЭТОМ ЗАДАНИИ»: ' + JSON.stringify(b4));
+    await r.screenshot({ path: shotOf('brief-new') });
+    await r.evaluate(() => { const g = __arta.game; g.begin(); g.pause(true); });
+    await r.waitForFunction(() => !document.getElementById('hud').classList.contains('hidden'));
+    // обвязка перерисовывается по кадрам, а программный WebGL бывает медленнее кадра в секунду: ждём перерисовки, а не 0,6 с
+    await r.waitForFunction(() => document.getElementById('hint').textContent === '' && !document.querySelector('#nav button.next'), null, { timeout: 20000 }).catch(() => {});
+    await r.waitForTimeout(300);
+    const h4a = await hud();
+    if (h4a.mode !== 'topics' || h4a.hint !== '' || h4a.ring || h4a.next || h4a.topic || h4a.kind !== null || h4a.time > 3 || h4a.det) fail('задание 4: до появления нового подсказок быть не должно: ' + JSON.stringify(h4a));
+    await r.evaluate(() => __arta.game.pause(false));
+    await r.waitForFunction(() => /^НОВОЕ · /.test(document.getElementById('hint').textContent) && /show topic/.test(document.getElementById('radio').className) && document.getElementById('highlight').style.display === 'block', null, { timeout: 90000 }).catch(() => fail('задание 4: подсказка «НОВОЕ ·» не появилась'));
+    const h4b = await hud();
+    // строка радио выезжает на место за 0,25 с (transform) — меряем, когда она встала
+    const settled = () => r.waitForFunction(() => { const el = document.getElementById('radio'), cs = getComputedStyle(el); return +cs.opacity > 0.99 && new DOMMatrix(cs.transform).m42 === 0; }, null, { timeout: 15000 }).catch(() => fail('строка радио не встала на место'));
+    await settled();
+    const box = await r.evaluate(() => { const t = document.getElementById('radio').getBoundingClientRect(), nav = document.getElementById('bottombar').getBoundingClientRect(), top = document.getElementById('topbar').getBoundingClientRect();
+      return { l: t.left, r: t.right, t: t.top, b: t.bottom, navTop: nav.top, topBottom: top.bottom, w: innerWidth, pe: getComputedStyle(document.getElementById('radio')).pointerEvents }; });
+    if (h4b.hint !== 'НОВОЕ · ДВИЖУЩАЯСЯ ЦЕЛЬ' || !/topic/.test(h4b.cls) || !/упреждени/.test(h4b.topic) || h4b.next !== 'plot' || h4b.id !== 'lead' || /lead/.test(h4b.learned)) fail('задание 4: тема о движущейся цели: ' + JSON.stringify(h4b));
+    if (box.l < 0 || box.r > box.w || box.b > box.navTop + 0.5 || box.t < box.topBottom || box.b - box.t > 70 || box.pe !== 'none') fail('объяснение темы (строка радио) не помещается или перехватывает касания: ' + JSON.stringify(box));
+    await r.screenshot({ path: shotOf('topic') });
+    // действие игрока (замер) — тема гаснет и считается изученной; следующая по очереди — «ЦЕЛЬ УХОДИТ», её убирает касание
+    await r.evaluate(() => { const g = __arta.game; g.setAlidade({ bearing: 5, range: 9 }); g.recordMeasurement(); });
+    await r.waitForFunction(() => __arta.game.save.learned.lead === true && document.getElementById('hint').textContent !== 'НОВОЕ · ДВИЖУЩАЯСЯ ЦЕЛЬ', null, { timeout: 30000 }).catch(() => fail('тема не погасла после действия игрока'));
+    await r.waitForFunction(() => document.getElementById('hint').textContent === 'НОВОЕ · ЦЕЛЬ УХОДИТ', null, { timeout: 30000 }).catch(() => fail('следующая тема очереди не показана'));
+    await r.waitForFunction(() => document.getElementById('highlight').style.display !== 'block', null, { timeout: 30000 }).catch(() => fail('у темы без органа управления осталось кольцо'));
+    const h4c = await hud();
+    // объяснение ушло со строки радио — касание строки «НОВОЕ · …» внизу показывает его снова
+    await r.evaluate(() => { document.getElementById('radio').className = ''; });
+    await r.click('#hint');
+    const again = await hud();
+    if (!/^НОВОЕ · ЦЕЛЬ УХОДИТ.*выйдет из зоны огня/.test(again.topic)) fail('касание строки «НОВОЕ» не показало объяснение: ' + JSON.stringify(again));
+    // тема убрана (как по истечении времени) — подсказок больше нет
+    await r.evaluate(() => __arta.game.dismissTopic());
+    await r.waitForFunction(() => document.getElementById('hint').textContent === '' && !document.querySelector('#hint.topic'), null, { timeout: 30000 }).catch(() => fail('убранная тема осталась на экране'));
+    const h4d = await hud();
+    if (h4c.ring || h4c.id !== 'escape' || !/escape/.test(h4d.learned) || !/lead/.test(h4d.learned) || h4d.kind !== null || h4d.ring || h4d.next) fail('после изученных тем подсказок быть не должно: ' + JSON.stringify({ h4c, h4d }));
+    if (JSON.parse(await r.evaluate(() => localStorage.getItem('arta2.save'))).learned.lead !== true) fail('изученная тема не записана в сохранение');
+    // 8в. «ПО ШАГАМ» возвращает шаги и в задании 4; «ВЫКЛ» прячет всё
+    await r.evaluate(() => __arta.game.setSetting('hints', 'all'));
+    await r.waitForFunction(() => /^[А-ЯЁ]+: /.test(document.getElementById('hint').textContent) && document.querySelector('#nav button.next'), null, { timeout: 30000 }).catch(() => fail('«ПО ШАГАМ» не вернуло пошаговые подсказки'));
+    const hAll = await hud();
+    await r.evaluate(() => __arta.game.setSetting('hints', 'off'));
+    await r.waitForFunction(() => document.getElementById('hint').textContent === '' && !document.querySelector('#nav button.next') && document.getElementById('highlight').style.display !== 'block', null, { timeout: 30000 }).catch(() => fail('«ВЫКЛ» не спрятало подсказки'));
+    const hOff = await hud();
+    if (hAll.kind !== 'step' || /НОВОЕ/.test(hAll.hint) || hAll.topic || hOff.kind !== null || hOff.mode !== 'off') fail('режимы подсказок: ' + JSON.stringify({ hAll, hOff }));
+    // настройка на экране: три положения, «ВЫКЛ» отмечено
+    await r.evaluate(() => { __arta.game.pause(true); __arta.shell.settings.open(null, { battle: true, tab: 'game' }); });
+    const seg = await r.evaluate(() => [...document.querySelectorAll('#setHints button')].map((x) => x.textContent + (x.classList.contains('on') ? '*' : '')));
+    if (seg.join() !== 'НОВОЕ,ПО ШАГАМ,ВЫКЛ*') fail('настройка «ПОДСКАЗКИ»: ' + seg.join());
+    await r.click('#setHints [data-val="new"]');
+    await r.evaluate(() => { __arta.shell.settings.close(); __arta.game.pause(false); });
+    if (await r.evaluate(() => __arta.game.settings().hints) !== 'new') fail('настройка «ПОДСКАЗКИ» не переключилась на «НОВОЕ»');
+    // в задании 1 и «ВЫКЛ» ничего не показывает
+    await r.evaluate(() => { const g = __arta.game; g.quit(); g.setSetting('hints', 'off'); g.startMission(0); g.begin(); });
+    await r.waitForFunction(() => __arta.game.state.time > 5);
+    await r.waitForTimeout(400);
+    const hOff1 = await hud();
+    if (hOff1.hint !== '' || hOff1.ring || hOff1.next) fail('«ВЫКЛ»: в задании 1 подсказки остались: ' + JSON.stringify(hOff1));
+    await r.evaluate(() => { const g = __arta.game; g.quit(); g.setSetting('hints', 'new'); });
+    // 8г. у каждой темы пост и орган управления (или элемент обвязки) существуют на самом деле
+    const missing = await r.evaluate(() => { const { game, engine } = __arta, bad = [];
+      for (const t of game.TOPICS) {
+        const st = t.station ? engine.stations.find((x) => x.id === t.station) : null;
+        if (t.station && !st) bad.push(t.id + ': нет поста ' + t.station);
+        for (const h of t.hot) if (!st || !st.hotspots || !st.hotspots[h]) bad.push(t.id + ': нет органа ' + h);
+        if (t.dom && !document.getElementById(t.dom)) bad.push(t.id + ': нет элемента #' + t.dom);
+      }
+      return bad; });
+    if (missing.length) fail('темы подсказок указывают на несуществующее: ' + missing.join('; '));
+    // 8д. засечка: задание 3 «Бетон» идёт по шагам; плашка «НАС НЕ ВИДЯТ» → выстрел → «ЗАСЕЧЕНЫ», строка и запись в блокноте
+    await r.evaluate(() => { const g = __arta.game; g.startMission(2); g.begin(); });
+    await r.waitForFunction(() => document.getElementById('detChip').offsetWidth > 0, null, { timeout: 60000 }).catch(() => fail('нет плашки «НАС НЕ ВИДЯТ»'));
+    const d0 = await hud();
+    await r.click('[data-act=notebook]');
+    const nb0 = await r.innerText('#nbBattery'); await r.click('[data-act=closeNotebook]');
+    if (d0.det !== 'НАС НЕ ВИДЯТ' || d0.detCls !== 'calm' || d0.kind !== 'step' || !/нас не видит/.test(nb0)) fail('до выстрела: ' + JSON.stringify(d0) + ' / ' + nb0.slice(0, 200));
+    const shot1 = await r.evaluate(async () => {
+      const g = __arta.game, s = g.state, sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+      const until = async (f) => { for (let i = 0; i < 3000 && !f(); i++) { g.update(0.1); await sleep(0); } return f(); };
+      const ev = []; g.on('detected', (e) => ev.push(e)); window.__det = ev;
+      s.targets.forEach((t) => { if (t.gun) t.gun.next = s.time + 500; });
+      g.elevate(-s.turret.elevation); g.openBreech(); await until(() => !s.breech.busy); g.hoistShell('he'); await until(() => !s.breech.busy);
+      g.ramShell(); await until(() => !s.breech.busy); g.addCharge(); await until(() => !s.breech.busy); g.closeBreech(); await until(() => !s.breech.busy);
+      g.elevate(20); g.setBrake(true); g.arm(true);
+      const f = g.fire(), before = s.detected;
+      await until(() => s.detected);
+      return { fired: f.ok, before, detected: s.detected, events: ev.length, integrity: s.integrity, radio: s.radio.some((m) => /засёк батарею по вспышке/.test(m.text)), toast: document.getElementById('toast').textContent };
+    });
+    await r.waitForFunction(() => document.getElementById('detChip').textContent === 'ЗАСЕЧЕНЫ', null, { timeout: 30000 }).catch(() => fail('плашка не сменилась на «ЗАСЕЧЕНЫ»'));
+    const d1 = await hud();
+    await r.click('[data-act=notebook]');
+    const nb1 = await r.innerText('#nbBattery'); await r.click('[data-act=closeNotebook]');
+    if (!shot1.fired || shot1.before || !shot1.detected || shot1.events !== 1 || shot1.integrity !== 100 || !shot1.radio || !/ЗАСЁК БАТАРЕЮ/.test(shot1.toast) || !/det/.test(d1.detCls) || !/засёк батарею в \d\d:\d\d/.test(nb1)) fail('засечка: ' + JSON.stringify({ shot1, d1 }) + ' / ' + nb1.slice(0, 200));
+    // 8е. значок засечки постоянный, поэтому проверяется пересечением прямоугольников (у него pointer-events: none, и
+    // elementFromPoint из раздела 5 его не видит): все 8 постов × 640/740/844 px × надписи 1 и 1.3 × правша/левша × оба состояния.
+    // Положение органов на экране зависит только от поста и размера экрана, прямоугольник значка — только от настроек, поэтому
+    // посты обходим один раз на размер (программный WebGL медленный), а пары «орган × прямоугольник» перебираем все.
+    // Заодно — другие видимые элементы обвязки, не ловящие касания и лежащие над постами (кроме строки радио и всплывающих).
+    const geo = []; let geoN = 0;
+    // разрыв позади — засечку больше ничто не меняет (часы боя двигаем сами: на медленном программном WebGL они отстают от настоящих)
+    await r.evaluate(async () => { const g = __arta.game, s = g.state; for (let i = 0; i < 3000 && (s.flight.length || s.reportDue != null) && s.phase === 'playing'; i++) { g.update(0.1); if (i % 40 === 0) await new Promise((res) => setTimeout(res, 0)); } });
+    if (await r.evaluate(() => { const s = __arta.game.state; return s.phase !== 'playing' || s.flight.length > 0; })) fail('задание 3: снаряд не долетел или бой окончен');
+    for (const [w, hgt] of [[640, 360], [740, 360], [844, 390]]) {
+      await r.setViewportSize({ width: w, height: hgt });
+      const g1 = await r.evaluate(async (w) => {
+        const { engine, game } = __arta, s = game.state, V = new engine.THREE.Vector3(), hudEl = document.getElementById('hud'), dc = document.getElementById('detChip'), bad = [];
+        const wait = (fn, ms = 15000) => new Promise((res) => { const t0 = Date.now(); (function f() { if (fn() || Date.now() - t0 > ms) res(!!fn()); else setTimeout(f, 40); })(); });
+        const frame = () => new Promise((res) => requestAnimationFrame(() => res()));
+        const inside = (q, x, y) => x > q.left - 4 && x < q.right + 4 && y > q.top - 4 && y < q.bottom + 4;
+        s.targets.forEach((t) => { if (t.gun) t.gun.next = s.time + 900; });
+        game.setSetting('text', 1); game.setSetting('lefty', false);
+        const pts = [];
+        for (const id of ['plot', 'computer', 'loading', 'traverse', 'elevation', 'fire', 'observe', 'aa']) {
+          engine.gotoStation(id, { instant: true }); await wait(() => hudEl.dataset.st === id && !engine.flying); await frame();
+          const st = engine.stations.find((x) => x.id === id); let k0 = pts.length;
+          for (const k of Object.keys(st.hotspots || {})) {
+            const o = st.hotspots[k]; if (!o || !o.getWorldPosition) continue;
+            o.getWorldPosition(V); const sc = engine.input.toScreen(V, {});
+            if (!sc.behind && sc.x >= 0 && sc.y >= 0 && sc.x <= innerWidth && sc.y <= innerHeight) pts.push([id + '.' + k, sc.x, sc.y]);
+          }
+          if (pts.length - k0 < 4) bad.push(w + ' ' + id + ': органов на экране ' + (pts.length - k0));
+          for (const el of hudEl.querySelectorAll('#rstack > *, #rcol > *, #faults > *, #raidBanner')) {
+            const q = el.getBoundingClientRect(), cs = getComputedStyle(el);
+            if (q.width > 0 && q.height > 0 && cs.pointerEvents === 'none' && cs.visibility !== 'hidden' && +cs.opacity > 0 && !['crew', 'convoyChip'].includes(el.id))
+              for (let i = k0; i < pts.length; i++) if (inside(q, pts[i][1], pts[i][2])) bad.push(w + ': ' + pts[i][0] + ' под #' + (el.id || el.className));
+          }
+        }
+        let n = 0;
+        for (const text of [1, 1.3]) for (const lefty of [false, true]) for (const det of [false, true]) {
+          game.setSetting('text', text); game.setSetting('lefty', lefty);
+          s.detected = det; s.detectedAt = s.detectTold = det ? s.time - 20 : null;
+          const okc = await wait(() => dc.className === (det ? 'det' : 'calm') && document.body.classList.contains('lefty') === lefty);
+          const tag = w + ' т' + text + (lefty ? ' левша' : '') + (det ? ' засечены' : ' не видят');
+          const c = dc.getBoundingClientRect(), tb = document.getElementById('topbar').getBoundingClientRect();
+          if (!okc || !(c.width >= 10 && c.height >= 8)) { bad.push(tag + ': значка засечки нет'); continue; }
+          if (c.top < tb.top || c.bottom > tb.bottom || c.left < 0 || c.right > innerWidth) bad.push(tag + ': значок вне верхней панели ' + [c.left, c.top, c.right, c.bottom].map(Math.round));
+          const cell = dc.closest('.tb-cell').getBoundingClientRect(), bar = dc.parentNode.querySelector('.bar').getBoundingClientRect();
+          if (c.left < cell.left || c.right > cell.right || bar.width < 30) bad.push(tag + ': значок не помещается в ячейке «ПРОЧНОСТЬ» (полоса ' + Math.round(bar.width) + ' px)');
+          for (const [k, x, y] of pts) { n++; if (inside(c, x, y)) bad.push(tag + ': ' + k + ' под значком засечки'); }
+        }
+        game.setSetting('text', 1); game.setSetting('lefty', false); s.detected = true; s.detectedAt = s.detectTold = s.time - 20;
+        return { bad, n, pts: pts.length };
+      }, w);
+      geo.push(...g1.bad); geoN += g1.n;
+      if (g1.n !== g1.pts * 8 || g1.pts < 40) geo.push(w + ': проверено пар ' + g1.n + ' при ' + g1.pts + ' органах');
+    }
+    await r.setViewportSize({ width: 844, height: 390 });
+    if (geo.length) fail('значок засечки / несенсорные элементы HUD закрывают органы постов: ' + geo.slice(0, 12).join('; ') + (geo.length > 12 ? ' … всего ' + geo.length : ''));
+    // 8ж. оборона: батарею засекли, пока стрелять по ней было некому — с первой вооружённой волной приходит строка штаба,
+    // всплывающая строка и мигающий значок (а не молча «ЗАСЕЧЕНЫ»)
+    const late = await r.evaluate(async () => {
+      const g = __arta.game, s = g.state, sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+      g.quit(); g.startSurvival(); g.begin();
+      const ev = []; g.on('detected', (e) => ev.push(e));
+      for (let i = 0; i < 100; i++) g.update(0.1);
+      s.targets.forEach((t) => { t.gun = null; });
+      s.detected = true; s.detectedAt = s.time; s.detectTold = null;         // как после выстрела в волне без орудий
+      g.update(0.1);
+      for (let i = 0; i < 300 && document.getElementById('detChip').className !== 'hidden'; i++) await sleep(50);      // ждём кадра перерисовки
+      const quiet = { chip: document.getElementById('detChip').className, radio: s.radio.some((m) => /засёк|засечена/.test(m.text)) };
+      for (let w = 0; w < 8 && s.detectTold == null && s.phase === 'playing'; w++) {
+        s.integrity = 100; s.targets.forEach((q) => { q.alive = false; q.sinking = { since: s.time, dur: 18 }; if (q.gun) q.gun.next = s.time + 900; });
+        const was = s.wave; for (let i = 0; i < 400 && s.wave === was; i++) g.update(0.1);
+        s.targets.forEach((q) => { if (q.gun) q.gun.next = s.time + 900; });
+      }
+      for (let i = 0; i < 120 && document.getElementById('detChip').className !== 'det fresh'; i++) await sleep(50);   // мигает 8 с — кадр успеет
+      return { quiet, wave: s.wave, told: s.detectTold != null, events: ev.map((e) => !!e.late), radio: s.radio.filter((m) => /Батарея давно засечена/.test(m.text)).length,
+        toast: document.getElementById('toast').textContent, chip: document.getElementById('detChip').className };
+    });
+    if (late.quiet.chip !== 'hidden' || late.quiet.radio || !late.told || late.radio !== 1 || late.events.join() !== 'true' || !/БАТАРЕЯ ЗАСЕЧЕНА/.test(late.toast) || late.chip !== 'det fresh') fail('оборона: о давней засечке не сообщили с первой вооружённой волной: ' + JSON.stringify(late));
+    // 8з. пост ОГОНЬ, 740×360, левша, самые крупные надписи: объяснение темы не лежит на спуске, «ВИЛКЕ», «ОЧЕРЕДИ» и крышке цепи;
+    // зона касания строки «НОВОЕ · …» не ниже 36 px, касание над строкой показывает объяснение; вытесненное донесением — возвращается
+    await r.setViewportSize({ width: 740, height: 360 });
+    await r.evaluate(() => { const g = __arta.game; g.quit(); for (const t of g.TOPICS) if (t.id !== 'burst') g.learnTopic(t.id); g.setSetting('text', 1.3); g.setSetting('lefty', true); g.startMission(3); g.begin(); __arta.engine.gotoStation('fire', { instant: true }); });
+    await r.waitForFunction(() => { const g = __arta.game, s = g.state, t = s.targets.find((x) => x.alive && x.reported); g.update(0.1); if (!t) return false; if (!s.activeTarget) g.selectTarget(t.id);
+      s.lastReport = { targetId: s.activeTarget, over: 60, right: -40, text: 'x', time: s.time, observed: true };
+      return s.topic && s.topic.id === 'burst' && document.getElementById('hud').dataset.st === 'fire' && /show topic/.test(document.getElementById('radio').className) && document.getElementById('info').classList.contains('hastopic'); }, null, { timeout: 120000 }).catch(() => fail('тема «ОЧЕРЕДЬ» на посту ОГОНЬ не показана'));
+    await settled();
+    const fireBox = () => r.evaluate(() => { const { engine } = __arta, rd = document.getElementById('radio'), q = rd.getBoundingClientRect(), st = engine.stations.find((x) => x.id === 'fire'), V = new engine.THREE.Vector3(), cov = [];
+      const zs = getComputedStyle(document.getElementById('info'), '::after'), hint = document.getElementById('hint').getBoundingClientRect(), bb = document.getElementById('bottombar').getBoundingClientRect();
+      const zone = { l: bb.left + parseFloat(zs.left), t: bb.top + parseFloat(zs.top), w: parseFloat(zs.width), h: parseFloat(zs.height) };
+      for (const k of ['fireLever', 'burstSelector', 'bracketToggle', 'armCover', 'armToggle']) { const o = st.hotspots[k]; o.getWorldPosition(V); const sc = engine.input.toScreen(V, {});
+        if (sc.x > q.left - 4 && sc.x < q.right + 4 && sc.y > q.top - 4 && sc.y < q.bottom + 4) cov.push(k + ' под объяснением');
+        if (sc.x > zone.l - 4 && sc.x < zone.l + zone.w + 4 && sc.y > zone.t - 4 && sc.y < zone.t + zone.h + 4) cov.push(k + ' под зоной касания'); }
+      return { cls: rd.className, text: rd.textContent.slice(0, 40), box: [q.left, q.top, q.right, q.bottom].map(Math.round), top: document.getElementById('topbar').getBoundingClientRect().bottom, navTop: bb.top, w: innerWidth, cov,
+        zone, hint: { l: hint.left, t: hint.top, r: hint.right, b: hint.bottom }, crew: Math.round(document.getElementById('rcol').getBoundingClientRect().right) }; });
+    const fb = await fireBox();
+    if (!/show topic/.test(fb.cls) || fb.cov.length || fb.box[0] < fb.crew || fb.box[2] > fb.w / 2 || fb.box[1] < fb.top || fb.box[3] > fb.navTop) fail('левша, пост ОГОНЬ: объяснение темы закрывает органы или не помещается: ' + JSON.stringify(fb));
+    if (!(fb.zone.h >= 36) || fb.zone.l > fb.hint.l + 1 || fb.zone.l + fb.zone.w < fb.hint.r - 1 || fb.zone.t > fb.hint.t - 12 || fb.zone.t + fb.zone.h < fb.hint.b) fail('зона касания строки «НОВОЕ · …» мала или не накрывает строку: ' + JSON.stringify({ zone: fb.zone, hint: fb.hint }));
+    await r.screenshot({ path: shotOf('topic-fire-lefty') });
+    await r.evaluate(() => { document.getElementById('radio').className = ''; });
+    await r.touchscreen.tap((fb.hint.l + fb.hint.r) / 2, fb.hint.t - 11);          // на 11 px выше самой строки
+    await r.waitForFunction(() => /show topic/.test(document.getElementById('radio').className), null, { timeout: 5000 }).catch(() => fail('касание над строкой «НОВОЕ · …» не показало объяснение'));
+    const st0 = await r.evaluate(() => __arta.engine.current);
+    await r.touchscreen.tap((fb.hint.l + fb.hint.r) / 2, fb.hint.b + 12);           // ниже зоны — вкладка поста, как и раньше
+    await r.waitForFunction((was) => __arta.engine.current !== was, st0, { timeout: 8000 }).catch(() => fail('касание под строкой «НОВОЕ · …» не дошло до вкладки поста'));
+    // донесение сразу после показа: объяснение вытеснено (на экране было < 5 с) и возвращается, когда эфир освободится
+    await r.evaluate(() => { __arta.engine.gotoStation('fire', { instant: true }); document.getElementById('hint').click(); });
+    await r.waitForFunction(() => /show topic/.test(document.getElementById('radio').className));
+    await r.evaluate(() => __arta.game.scopeMark());
+    const pre = await r.evaluate(() => document.getElementById('radio').className + '|' + document.getElementById('radio').textContent.slice(0, 30));
+    await r.waitForFunction(() => /show topic/.test(document.getElementById('radio').className) && /ОЧЕРЕДЬ/.test(document.getElementById('radio').textContent), null, { timeout: 20000 }).catch(() => fail('объяснение темы, вытесненное донесением, не вернулось'));
+    if (/topic/.test(pre) || !/РАСЧЁТ/.test(pre)) fail('донесение не сменило объяснение темы: ' + pre);
+    // правша на том же экране: объяснение слева, органы открыты
+    await r.evaluate(() => { __arta.game.setSetting('lefty', false); document.getElementById('hint').click(); });
+    await r.waitForFunction(() => !document.body.classList.contains('lefty') && /show topic/.test(document.getElementById('radio').className));
+    await r.waitForFunction(() => document.getElementById('radio').getBoundingClientRect().left < innerWidth / 4);
+    await settled();
+    const fbR = await fireBox();
+    if (fbR.cov.length || fbR.box[2] > fbR.w / 2 || fbR.box[3] > fbR.navTop || !(fbR.zone.h >= 36) || fbR.zone.l + fbR.zone.w < fbR.hint.r - 1) fail('правша, пост ОГОНЬ: объяснение темы или зона касания: ' + JSON.stringify(fbR));
+    // 8и. инструктаж последнего задания: строки «НОВОЕ» — что это и что делать, а не «уже случилось»; тема только для «Командира» — только на нём
+    await r.evaluate(() => { const g = __arta.game; g.quit(); g.setSetting('text', 1); g.resetLearned(); g.setDifficulty(0); g.startMission(35); });
+    await r.waitForSelector('#briefNew');
+    const b36 = await r.evaluate(() => [...document.querySelectorAll('#briefNew li')].map((x) => x.textContent));
+    const b9 = await r.evaluate(() => { const g = __arta.game, out = {}; for (const d of [0, 1]) { g.quit(); g.setDifficulty(d); g.startMission(8); out[d] = g.briefTopics().map((x) => x.id); } g.quit(); g.setDifficulty(0); return out; });
+    if (b36.some((t) => /Отказал узел башни\.|Охотник бьёт по транспорту\.|Противник увидел вспышку|Точка прицеливания ближе 400 м от своего корабля\.$/.test(t)) || !b36.some((t) => /^ПОВРЕЖДЕНИЕ БАШНИ — Попадания могут вывести из строя/.test(t)))
+      fail('инструктаж задания 36: строки «НОВОЕ» читаются как свершившийся факт: ' + JSON.stringify(b36));
+    if (b9[0].includes('soundManual') || !b9[0].includes('sound') || !b9[1].includes('soundManual')) fail('тема «ЛИНИИ ПЕЛЕНГОВ ВРУЧНУЮ» в инструктаже не по сложности: ' + JSON.stringify(b9));
+    await r.setViewportSize({ width: 844, height: 390 });
+    console.log('review', JSON.stringify({ geo: geo.length, geoPairs: geoN, late, fire: fb.box, fireR: fbR.box, zone: fb.zone, b36: b36.slice(0, 3) }));
+    console.log('hints', JSON.stringify({ h1: h1.hint, h4a: h4a.hint, h4b: h4b.hint, box, h4d: h4d.learned, hAll: hAll.hint, seg, d0: d0.det, d1: d1.det, shot1 }));
+    await r.close();
   }
 
   console.log('errors', errs);

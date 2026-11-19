@@ -1,6 +1,7 @@
 // Игровая логика «АРТА: Башня». Чистый JS без DOM и THREE. Контракт — src/game/README.md.
 // Все отложенные действия — ДАННЫЕ ({ t, a: имя, p: аргументы }), а не замыкания: бой целиком сохраняется в JSON (snapshot/restore).
 import { solve, shoot, chargeRange, CHARGE_V0 } from './ballistics.js';
+import { TOPICS, topicById, nextStep as stepOf, describe, TOPIC_HOLD, TOPIC_MIN, STEP_MISSIONS } from './hints.js';
 import { CAMPAIGN, KINDS, FRIEND_KINDS, MAP, makeMap, coastAt, isLand, skirmishDef, soundPosts, survivalDef, survivalWave, dailyDef, rng } from './missions.js';
 
 const C = Object.freeze({ LOAD_ANGLE: 3, EL_MIN: -2, EL_MAX: 45, CHARGES: CHARGE_V0.length, MAP, RANGE_MIN: 0.01, RANGE_MAX: 22,
@@ -68,6 +69,9 @@ const PLANE_SPEED = 0.22, PLANE_START = 7, PLANE_DROP = 0.4, BOMB_DMG = 12, BOMB
 const AA_HEAT = 0.16, AA_COOL = 0.12, AA_UNJAM = 0.4, AA_RATE = 8;
 const AUTOSAVE = 15, SNAP_V = 1;
 const TEXT_SIZES = [1, 1.15, 1.3];
+const DETECT_FLASH = 8;       // с: батарею засекают в момент первого своего разрыва, но не позже этого после первого выстрела
+const HARASS_MIN = 0.6, HARASS_MAX = 2.5;      // км: куда ложатся снаряды беспокоящего огня (пока батарея не засечена)
+const HINT_MODES = ['new', 'all', 'off'];
 const FRIEND_ZONE = 0.4;      // км: свои ближе этого к точке прицеливания — «в зоне поражения»
 /** Настройки: значение по умолчанию и область допустимых значений. Логика их хранит и проверяет; применяет — интерфейс
  *  (кроме autosave и speed — их учитывает сама логика). */
@@ -79,7 +83,7 @@ const SETTINGS = {
   sens: { def: 1, ok: (v) => typeof v === 'number' && v >= 0.6 && v <= 1.6, fix: (v) => Math.round(v * 20) / 20 },
   invert: bool(false), lefty: bool(false), vibro: bool(true), vibroPower: oneOf('high', ['low', 'high']),
   // игра
-  hints: bool(true), autosave: bool(true), speed: oneOf(1, [1, 2]), confirmFriendly: bool(true), crewPanel: oneOf('full', ['full', 'compact', 'off']),
+  hints: oneOf('new', HINT_MODES), autosave: bool(true), speed: oneOf(1, [1, 2]), confirmFriendly: bool(true), crewPanel: oneOf('full', ['full', 'compact', 'off']),
   // звук
   volFx: vol(100), volAmb: vol(70), volRadio: vol(100),
   // экран
@@ -94,7 +98,7 @@ function loadSettings(st) {
   return o;
 }
 const freshSave = () => ({ unlocked: 1, stars: [], records: [], difficulty: 0, muted: false, xp: 0, survivalBest: null,
-  upgrades: {}, points: 0, settings: {}, daily: null, resume: null });
+  upgrades: {}, points: 0, settings: {}, daily: null, resume: null, learned: {} });
 
 const r2 = (v) => Math.round(v * 100) / 100;
 const r1 = (v) => Math.round(v * 10) / 10;
@@ -127,6 +131,7 @@ export function createGame(opts = {}) {
   const RADIO_KEEP = 150;
   // ---------- сохранение ----------
   const save = freshSave();
+  delete save.learned;      // есть ли в сохранении изученные темы — узнаём по самому сохранению (ниже)
   try { const raw = storage && storage.get('arta2.save'); if (raw) Object.assign(save, JSON.parse(raw)); } catch (e) { /* нет сохранения */ }
   if (!(save.xp >= 0)) save.xp = 0;
   if (!Array.isArray(save.stars)) save.stars = [];
@@ -142,9 +147,24 @@ export function createGame(opts = {}) {
     const st = save.settings && typeof save.settings === 'object' ? { ...save.settings } : {};
     if ('lefty' in st) st.lefty = !!st.lefty;
     if ('vibro' in st) st.vibro = st.vibro !== false;
+    // «подсказки обучения» были выключателем: вкл → «только новое», выкл → «нет»
+    if (st.hints === true) st.hints = 'new'; else if (st.hints === false) st.hints = 'off';
     save.settings = loadSettings(st);
     if (!save.daily || typeof save.daily !== 'object' || !save.daily.date) save.daily = null;
     if (!save.resume || typeof save.resume !== 'object' || !save.resume.snap) save.resume = null;
+    // изученные темы подсказок. Сохранение прежней версии (поля нет): знакомым считаем только то, что было в уже пройденных
+    // заданиях (и «общие» механики, если пройдено задание не раньше их появления); новые механики (fresh) — никому.
+    const L = save.learned && typeof save.learned === 'object' && !Array.isArray(save.learned) ? save.learned : null;
+    save.learned = {};
+    if (L) { for (const tp of TOPICS) if (L[tp.id] === true) save.learned[tp.id] = true; }
+    else {
+      save.stars.forEach((st2, i) => {
+        if (!(st2 > 0) || !CAMPAIGN[i]) return;
+        const d = describe(CAMPAIGN[i], save.difficulty);
+        for (const tp of TOPICS) if (!tp.fresh && !tp.menu && ((tp.intro && tp.intro(d)) || (tp.since != null && i >= tp.since))) save.learned[tp.id] = true;
+      });
+      if (UPG_IDS.some((id) => save.upgrades[id] > 0)) save.learned.upgrades = true;
+    }
   }
   const upg = (id) => save.upgrades[id] || 0;
   const spent = () => UPG_IDS.reduce((a, id) => a + UPG_COST.slice(0, upg(id)).reduce((x, y) => x + y, 0), 0);
@@ -169,12 +189,13 @@ export function createGame(opts = {}) {
     friends: [], raid: null, raidWarn: null,
     aa: { bearing: 0, elevation: 20, firing: false, heat: 0, jammed: false, ammo: C.AA_AMMO },
     crew: newCrew(), medkits: 0,
+    detected: false, detectedAt: null, detectTold: null, windChangedAt: null, topic: null,
     stats: { friendlyHits: 0, friendlyKills: 0, convoyLost: 0, convoyArrived: 0, planesDown: 0, bombs: 0 },
   });
   const state = { phase: 'menu', difficulty: save.difficulty, mission: null, ...freshBattle() };
   /** Служебное состояние боя — тоже только данные (уходит в снимок). */
   const freshSys = () => ({ events: [], flightId: 0, endScheduled: false, nextId: 1, waveBusy: false, waveIds: [], wavesCleared: 0,
-    pending: 0, planeId: 0, aaAcc: 0, nextAuto: AUTOSAVE });
+    pending: 0, planeId: 0, aaAcc: 0, nextAuto: AUTOSAVE, detectDue: false, harassSaid: false, topicAcc: 0 });
   let sys = freshSys();
   let drove = false;        // наводчик крутил маховики с прошлого такта
   const rankNow = () => rankIndex(save.xp);
@@ -425,6 +446,7 @@ export function createGame(opts = {}) {
   }
   function setWind(from, speed, prefix) {
     state.mission.wind = { speed, from: speed ? from : 0 };
+    state.windChangedAt = state.time;
     const c = state.computer;
     if (c.elevation != null) c.stale = true;
     radio('МЕТЕО', (prefix || 'Ветер ') + (speed ? String(Math.round(from)).padStart(3, '0') + '° (откуда дует), ' + speed + ' м/с.' : 'штиль.') + (c.stale ? ' Расчёт устарел — пересчитайте.' : ''), 'info');
@@ -457,7 +479,8 @@ export function createGame(opts = {}) {
     /** Снаряд противника долетел до батареи. */
     enemyShell(p) {
       if (!playing()) return;
-      if (!p.hit) { emit('batteryHit', { damage: 0, by: p.by }); return; }
+      // промах; пока батарея не засечена, попаданий не бывает вовсе (беспокоящий огонь наугад: miss — км от батареи)
+      if (!p.hit || !state.detected) { emit('batteryHit', { damage: 0, by: p.by, ...(p.blind ? { blind: true, miss: p.miss } : {}) }); return; }
       const dmg = Math.max(1, Math.round(p.dmg * DIFF[state.difficulty].dmg * (0.7 + Math.random() * 0.6) * armorK()));
       if (hitBattery(dmg, p.by, null, 'Батарея уничтожена огнём противника.')) breakSomething(dmg);
     },
@@ -484,6 +507,10 @@ export function createGame(opts = {}) {
       state.raidWarn = { from: p.from, until: state.time + 10 };
       emit('raid', { phase: 'warning', from: p.from, eta: 10 });
     },
+    /** Противник засёк батарею (не позже DETECT_FLASH с после первого выстрела; обычно раньше — по первому разрыву). */
+    detect() { detect(); },
+    /** «Бьют наугад» — только если к моменту доставки батарею ещё не засекли (иначе строка была бы неправдой). */
+    harass() { if (playing() && !state.detected) radio('ШТАБ', 'Противник ведёт беспокоящий огонь наугад — нас пока не видят.', 'info'); },
     raidStart(p) { raidStart(p.planes, p.from); },
     raidEnd() {
       const R = state.raid;
@@ -951,6 +978,8 @@ export function createGame(opts = {}) {
     // каждый наш выстрел помогает противнику засечь батарею
     // (осветительные и дымовые не в счёт)
     if (shellType !== 'illum' && shellType !== 'smoke') for (const e of state.targets) if (e.alive && e.gun) e.gun.p = Math.min(0.75, e.gun.p + 0.04);
+    // вспышка первого выстрела (любого снаряда) выдаёт батарею: засекут по первому разрыву, но не позже DETECT_FLASH с
+    if (!state.detected && !sys.detectDue) { sys.detectDue = true; at(DETECT_FLASH, 'detect'); }
     b.shell = null; b.rammed = false; b.charges = 0;
     state.fire.armed = false;
     emit('fired', { id: sh.id, n: sh.n, tof: sh.tof, shell: sh.shell, charges: sh.charges, salvo: twin, ids: twin ? [sh.id, sh2.id] : [sh.id] });
@@ -981,6 +1010,25 @@ export function createGame(opts = {}) {
     state.flight.push(sh);
     state.history.push({ n, time: r1(state.time), shell, charges, bearing: t.bearing, elevation: t.elevation, x: null, y: null, hit: false, targetId: null, reportText: null, pair: null });
     return sh;
+  }
+  /** Противник засёк батарею: с этого момента его орудия бьют прицельно (до конца боя; в обороне — на все волны). */
+  function detect() {
+    if (!playing() || state.detected) return;
+    state.detected = true; state.detectedAt = r1(state.time);
+    // прицельный огонь начинается не мгновенно: каждому орудию — новая задержка первого выстрела (не раньше уже назначенного)
+    for (const t of state.targets) if (t.alive && t.gun) t.gun.next = Math.max(t.gun.next, state.time + 6 + Math.random() * t.gun.period * 0.5);
+    // стрелять по батарее пока некому (первая волна обороны без орудий) — игроку скажем, когда появится первое орудие (detectNotice)
+    const armed = state.targets.some((t) => t.alive && t.gun);
+    if (armed) { state.detectTold = state.detectedAt; radio('ШТАБ', 'Противник засёк батарею по вспышке — ждите ответного огня.', 'bad'); }
+    emit('detected', { time: state.detectedAt, armed });
+    touch();
+  }
+  /** Батарею засекли, когда стрелять по ней было некому: о засечке сообщаем один раз — с появлением первой цели с орудиями. */
+  function detectNotice() {
+    if (!playing() || !state.detected || state.detectTold != null || !state.targets.some((t) => t.alive && t.gun)) return;
+    state.detectTold = r1(state.time);
+    radio('ШТАБ', 'Батарея давно засечена — орудия противника бьют прицельно с первого залпа.', 'bad');
+    emit('detected', { time: state.detectedAt, armed: true, late: true });
   }
   /** «Вилка»: залп двумя стволами с разносом ±0,15 км по дальности. */
   function setSalvo(v) { state.fire.salvo = !!v; changed(); return ok(); }
@@ -1198,10 +1246,11 @@ export function createGame(opts = {}) {
     return { o, r, q, L, dist: Math.hypot(ex, ey), over: Math.round(o / q) * q, right: Math.round(r / q) * q };
   }
   const sg = (v, n) => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(n);
-  const hint = (over, right, L) => (state.difficulty === 0 && (over || right)
+  const fixHint = (over, right, L) => (state.difficulty === 0 && (over || right)
     ? ' Поправка: дальность ' + sg(-over / 1000, 2) + ' км, пеленг ' + sg(-(right / (L * 1000)) / RAD, 1) + '°.' : '');
   /** Падение одного снаряда или пары («вилка»): урон, один доклад корректировщика, записи в журнал. */
   function impact(group) {
+    if (!state.detected) detect();       // первый свой разрыв — батарея засечена
     const night = state.mission.night, noSpotter = state.mission.noSpotter;
     let ref = active();
     const first = group[0];
@@ -1241,12 +1290,12 @@ export function createGame(opts = {}) {
         bracket = true;
         const q = near.q;
         over = Math.round((dv[0].o + dv[1].o) / 2 / q) * q; right = Math.round((dv[0].r + dv[1].r) / 2 / q) * q;
-        text = ref.label + ': ВИЛКА! Цель между разрывами' + (right ? ', ' + (right > 0 ? 'вправо ' : 'влево ') + Math.abs(right) : '') + '.' + hint(over, right, near.L);
+        text = ref.label + ': ВИЛКА! Цель между разрывами' + (right ? ', ' + (right > 0 ? 'вправо ' : 'влево ') + Math.abs(right) : '') + '.' + fixHint(over, right, near.L);
       } else {
         const parts = [];
         if (over) parts.push((over > 0 ? 'перелёт ' : 'недолёт ') + Math.abs(over));
         if (right) parts.push((right > 0 ? 'вправо ' : 'влево ') + Math.abs(right));
-        text = ref.label + ': ' + (parts.join(', ') || 'накрытие, без поражения') + '.' + hint(over, right, near.L);
+        text = ref.label + ': ' + (parts.join(', ') || 'накрытие, без поражения') + '.' + fixHint(over, right, near.L);
       }
       report = { targetId: ref.id, over, right, text, time: state.time, observed, bracket, dark, blind };
     }
@@ -1351,7 +1400,7 @@ export function createGame(opts = {}) {
     const destroyed = surv ? state.kills : state.targets.filter((t) => !t.alive && !t.escaped).length;
     const stats = { shots: state.shots, combatShots: combat, par, time: state.time, integrity: Math.round(state.integrity), destroyed, total: n,
       friendlyHits: S.friendlyHits, friendlyKills: S.friendlyKills, convoyLost: S.convoyLost, convoyArrived: S.convoyArrived,
-      convoyTotal: state.friends.filter((f) => f.convoy).length, planesDown: S.planesDown, bombs: S.bombs };
+      convoyTotal: state.friends.filter((f) => f.convoy).length, planesDown: S.planesDown, bombs: S.bombs, detectedAt: state.detectedAt };
     let record = null;
     if (won && idx != null) {
       const old = save.records[idx] || null;
@@ -1419,6 +1468,7 @@ export function createGame(opts = {}) {
     schedule(made);
     if (!(active() && active().alive)) state.activeTarget = null;
     radio('ШТАБ', 'Волна ' + state.wave + ' на подходе!', 'bad');
+    detectNotice();
     // каждая третья волна — с авиацией
     if (state.wave % 3 === 0) {
       const from = Math.round(300 + Math.random() * 120) % 360, planes = Math.min(4, 2 + Math.floor((state.wave - 3) / 3));
@@ -1526,11 +1576,19 @@ export function createGame(opts = {}) {
           if (t.locate === 'sound') soundReport(t);
           else if (night) flashReport(t);
           const ranging = t.firstSalvo; t.firstSalvo = false;
-          // РЛС противника наводит его огонь; дымовая завеса сбивает прицел
-          const spot = state.targets.some((q) => q.alive && q.spotter) ? 0.18 : 0;
-          const hit = !ranging && Math.random() < Math.min(0.9, t.gun.p + spot) * (smoked(t) ? SMOKE_K : 1);
-          emit('incoming', { by: t.id, eta: 2.4 });
-          at(2.4, 'enemyShell', { by: t.id, hit, dmg: t.gun.dmg });
+          if (!state.detected) {
+            // батарея не засечена: беспокоящий огонь наугад — снаряд ложится в 0,6–2,5 км, вреда нет; залп слышат звукометристы,
+            // вспышку видно ночью — всё как у настоящего выстрела
+            if (!sys.harassSaid) { sys.harassSaid = true; at(3, 'harass'); }
+            emit('incoming', { by: t.id, eta: 2.4, blind: true });
+            at(2.4, 'enemyShell', { by: t.id, hit: false, dmg: 0, blind: true, miss: r2(HARASS_MIN + Math.random() * (HARASS_MAX - HARASS_MIN)) });
+          } else {
+            // РЛС противника наводит его огонь; дымовая завеса сбивает прицел
+            const spot = state.targets.some((q) => q.alive && q.spotter) ? 0.18 : 0;
+            const hit = !ranging && Math.random() < Math.min(0.9, t.gun.p + spot) * (smoked(t) ? SMOKE_K : 1);
+            emit('incoming', { by: t.id, eta: 2.4 });
+            at(2.4, 'enemyShell', { by: t.id, hit, dmg: t.gun.dmg });
+          }
           if (t.relocateEvery && t.salvos % t.relocateEvery === 0) { relocate(t); track(t); }
           dirty = true;
         }
@@ -1546,6 +1604,8 @@ export function createGame(opts = {}) {
     if (state.raid || state.aa.firing || state.aa.heat > 0) { raidTick(dt); dirty = true; if (!playing()) return; }
     // расчёт
     crewTick(dt);
+    // подсказки: темы «НОВОЕ»
+    topicsTick(Math.min(dtReal, 0.25));
     // оборона: волна отбита?
     if (state.mission.survival && !sys.waveBusy && sys.waveIds.length && sys.waveIds.every((id) => { const q = target(id); return !q || !q.alive; })) waveCleared();
     // отложенные действия
@@ -1580,6 +1640,11 @@ export function createGame(opts = {}) {
     state.paused = false; state.aa.firing = false;
     if (![1, 2, 3].includes(state.speed)) state.speed = save.settings.speed;      // скорость — та, что была в момент записи
     if (typeof state.station !== 'string') state.station = 'plot';
+    // снимок прежней версии (без правила засечки): батарея, которая уже стреляла, считается засечённой
+    if (c.state.detected === undefined) { state.detected = state.shots > 0; state.detectedAt = state.detected ? r1(state.time) : null; }
+    // снимок до появления detectTold: если есть кому стрелять по батарее — о засечке уже сообщали
+    if (c.state.detectTold === undefined) state.detectTold = state.detected && state.targets.some((t) => t.alive && t.gun) ? state.detectedAt : null;
+    if (state.topic && !topicById(state.topic.id)) state.topic = null;
     drove = false;
     updateChecklist();
     emit('phase', state.phase); emit('restored', resumeInfo());
@@ -1673,6 +1738,114 @@ export function createGame(opts = {}) {
     return ok();
   }
 
+  // ---------- подсказки ----------
+  /** Что показывать в этом бою: 'steps' — процедура по шагам, 'topics' — только темы «НОВОЕ», 'off' — ничего. */
+  function hintMode() {
+    if (!playing()) return 'off';
+    const h = save.settings.hints;
+    if (h === 'off') return 'off';
+    if (h === 'all') return 'steps';
+    const i = state.mission.index;
+    return i != null && i < STEP_MISSIONS ? 'steps' : 'topics';
+  }
+  const topicCtx = () => ({ s: state, m: state.mission, t: state.time, a: active(), g: game, d: state.difficulty, since: state.topic ? state.topic.since : state.time });
+  const ask = (fn, c) => { try { return !!fn(c); } catch (e) { return false; } };
+  function learn(id) {
+    if (save.learned[id]) return;
+    save.learned[id] = true; persist();
+    emit('topic', { id, learned: true });
+  }
+  /** Темы «НОВОЕ»: одна на экране; гаснет по действию игрока, через TOPIC_HOLD с или когда механика ушла — и считается изученной. */
+  function topicsTick(dtReal) {
+    sys.topicAcc += dtReal;
+    if (state.topic) state.topic.shown += dtReal;
+    if (sys.topicAcc < 0.2) return;
+    sys.topicAcc = 0;
+    const mode = hintMode();
+    if (mode === 'off') { state.topic = null; return; }
+    const c = topicCtx();
+    const steps = mode === 'steps';
+    // пошаговые подсказки сами ведут игрока через часть механик (тема с steps): встретилась — знакома. Остальные темы
+    // (засечка, свой глаз, ремонт, аптечка, очередь…) шаги не объясняют — они показываются и в режиме шагов
+    if (steps) for (const q of TOPICS) if (q.steps && !save.learned[q.id] && ask(q.when, c)) learn(q.id);
+    // очередь: самая срочная из тех, чья механика сейчас перед игроком (опасность > наводка > удобство; дальше — порядок списка)
+    const pick = (minPri, urgent) => {
+      let best = null;
+      for (const q of TOPICS) if (!q.menu && !(steps && q.steps) && !save.learned[q.id] && (urgent ? q.urgent : q.pri > minPri) && (!best || q.pri > best.pri) && ask(q.when, c) && !(q.done && ask(q.done, c))) best = q;
+      return best;
+    };
+    const show = (q) => { state.topic = { id: q.id, since: state.time, shown: 0 }; emit('topic', { id: q.id, learned: false }); emit('state', state); };
+    const cur = state.topic, tp = cur && topicById(cur.id);
+    if (cur) {
+      const on = !!tp && !(steps && tp.steps) && ask(tp.when, c);
+      const over = !tp || (steps && tp.steps) || (tp.done && ask(tp.done, c)) || cur.shown >= Math.min(TOPIC_HOLD, tp.hold || TOPIC_HOLD) || (!on && cur.shown >= TOPIC_MIN);
+      if (!over) {
+        // более срочная тема не ждёт, пока догорит менее срочная: та уходит неизученной и вернётся позже.
+        // Тревога (urgent: налёт, свои под прицелом) вытесняет сразу и любую не-тревогу, даже того же приоритета (отказ узла,
+        // ранение); остальные — только более срочные и когда текущая пробыла на экране TOPIC_MIN
+        const up = (!tp.urgent && pick(0, true)) || pick(tp.pri);
+        if (up && (up.urgent || cur.shown >= TOPIC_MIN)) show(up);
+        return;
+      }
+      state.topic = null;
+      if (tp) learn(tp.id);
+      emit('state', state);
+    }
+    let best = pick(0);
+    // по шагам: пока игроку есть что делать по процедуре, новое не отвлекает — кроме опасности
+    if (best && steps && best.pri < 3 && ask(() => stepOf(game).st, c)) best = null;
+    if (best) show(best);
+  }
+  /** Тема «НОВОЕ», которая сейчас активна: { id, title, more, warn, dom, station } | null. В режиме шагов строка подсказки может
+   *  показывать шаг процедуры, а тема — идти только объяснением в строке радио. */
+  function topicInfo() {
+    if (hintMode() === 'off') return null;
+    const tp = state.topic && topicById(state.topic.id);
+    if (!tp) return null;
+    return { id: tp.id, title: tp.title, more: typeof tp.text === 'function' ? tp.text(topicCtx()) : tp.text, warn: tp.pri >= 3, dom: tp.dom || null, station: tp.st || null };
+  }
+  const noHint = () => ({ kind: null, id: null, title: null, text: '', more: '', station: null, hotspot: null, dom: null, warn: false });
+  /** Подсказка для экрана боя: { kind: 'step' | 'topic' | null, id, title, text, more, station, hotspot, dom, warn }.
+   *  ui (необязательно) — { hasHot(пост, имя) → bool, shellType() } от интерфейса: какие органы управления есть на постах. */
+  function hint(ui) {
+    const mode = hintMode();
+    if (mode === 'off') return noHint();
+    const tp = state.topic && topicById(state.topic.id);
+    if (mode === 'steps') {
+      const st = stepOf(game, ui);
+      // шаг есть — в строке он; игроку нечего делать (снаряд в полёте, ждём донесения) — строку занимает активная тема
+      if (st.st || !tp) return { ...noHint(), kind: 'step', id: (st.st || 'wait') + (st.hot ? ':' + st.hot : ''), text: st.text, station: st.st || null, hotspot: st.hot || null, warn: !!st.warn };
+    }
+    if (!tp) return noHint();
+    const c = topicCtx(), has = ui && ui.hasHot ? ui.hasHot : () => true;
+    let hot = null;
+    if (tp.st && tp.hot) { let names = []; try { names = typeof tp.hot === 'function' ? tp.hot(c) : tp.hot; } catch (e) { names = []; } hot = names.find((n) => has(tp.st, n)) || null; }
+    const more = typeof tp.text === 'function' ? tp.text(c) : tp.text;
+    return { kind: 'topic', id: tp.id, title: tp.title, text: 'НОВОЕ · ' + tp.title, more, station: tp.st || null, hotspot: hot, dom: tp.dom || null, warn: tp.pri >= 3 };
+  }
+  /** Следующий шаг процедуры выстрела (для пошаговых подсказок): { st, hot, text, warn? } | null вне боя. */
+  const nextStep = (ui) => (playing() ? stepOf(game, ui) : null);
+  /** Темы, которые вводит текущее задание и которых игрок ещё не знает — блок «НОВОЕ В ЭТОМ ЗАДАНИИ» инструктажа. */
+  function briefTopics() {
+    if (!state.mission || save.settings.hints === 'off') return [];
+    const d = describe(state, state.difficulty);
+    return TOPICS.filter((tp) => !tp.menu && tp.intro && !save.learned[tp.id] && ask(tp.intro, d)).map((tp) => ({ id: tp.id, title: tp.title, brief: tp.brief || '', text: typeof tp.text === 'string' ? tp.text : '' }));
+  }
+  /** Подсказка для меню (всплывающая строка): сейчас одна — «хватает очков на улучшение». → { id, title, text } | null. */
+  function menuHint() {
+    if (state.phase !== 'menu' || save.settings.hints === 'off' || save.learned.upgrades || save.resume) return null;
+    const pts = points();
+    if (!UPG_IDS.some((id) => upg(id) < UPG_MAX && UPG_COST[upg(id)] <= pts)) return null;
+    const tp = topicById('upgrades');
+    return { id: tp.id, title: tp.title, text: tp.text };
+  }
+  /** Отметить тему изученной (меню показало свою подсказку). */
+  function learnTopic(id) { if (!topicById(id)) return deny('learnTopic', 'Нет такой темы'); learn(id); return ok(); }
+  /** Игрок сам убрал тему с экрана — изучена. */
+  function dismissTopic() { const t = state.topic; if (!t) return deny('dismissTopic', 'Подсказки нет'); state.topic = null; if (topicById(t.id)) learn(t.id); changed(); return ok(); }
+  /** «Показать обучение заново»: все темы снова новые. */
+  function resetLearned() { save.learned = {}; state.topic = null; persist(); changed(); return ok(); }
+
   // ---------- свои в зоне поражения ----------
   /** Свои ближе FRIEND_ZONE км к точке прицеливания (замер выбранной цели, решение вычислителя, фактическая наводка
    *  заряженного орудия) → массив своих из state.friends, ближайший к прицелу — первым. Вид снаряда не учитывает. */
@@ -1730,6 +1903,9 @@ export function createGame(opts = {}) {
     settings, setSetting, resetSettings, resetProgress, SETTINGS: clone(Object.fromEntries(SETTING_KEYS.map((k) => [k, { def: SETTINGS[k].def, list: SETTINGS[k].list || null }]))),
     snapshot, restore, suspend, discardResume, resumeInfo,
     friendsInDanger, friendInDanger, FRIEND_ZONE,
+    // подсказки
+    hint, hintMode, topicInfo, nextStep, briefTopics, menuHint, learnTopic, dismissTopic, resetLearned,
+    TOPICS: TOPICS.map((tp) => ({ id: tp.id, pri: tp.pri, title: tp.title, station: tp.st || null, hot: Array.isArray(tp.hot) ? tp.hot.slice() : tp.hot ? ['pin1'] : [], dom: tp.dom || null, menu: !!tp.menu })),
   };
   return game;
 }

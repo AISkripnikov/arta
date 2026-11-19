@@ -32,6 +32,7 @@ const HOWTO = `
 <h3>КАРТА ПЛАНШЕТА</h3><p>После выстрела на карте видна трасса летящего снаряда, а после разрыва — круг с номером выстрела. Через пару секунд самолёт-разведчик присылает аэрофотоснимок района разрыва: воронка или всплеск, сама цель, дома и лес. Рассмотрите его под ЛУПОЙ — так видно, насколько снаряд лёг от цели.</p>
 <h3>НОВЫЕ ЦЕЛИ</h3><p>РЛС противника наводит его батареи — пока она цела, они бьют точнее. Подводная лодка через несколько километров погружается и уходит. Береговой форт — только бронебойными, три попадания. Танкер выдерживает три попадания.</p>
 <h3>КОНТРБАТАРЕЙНАЯ БОРЬБА</h3><p>Скрытые батареи противника не видит разведка. Их засекают по звуку залпа два поста звукометрии на берегу (ЗВ-1, ЗВ-2): каждый сообщает только пеленг. На планшете от постов проведены линии — батарея там, где они пересекаются. Кочующие батареи после нескольких залпов меняют позицию — ждите новой засечки. Каждый ваш выстрел помогает противнику точнее засечь «Утёс».</p>
+<h3>ЗАСЕЧКА БАТАРЕИ</h3><p>Пока «Утёс» молчит, противник не знает, где он: его орудия ведут беспокоящий огонь наугад и вреда не наносят (зелёный зачёркнутый глаз у полосы прочности). Вспышка первого выстрела выдаёт батарею — с первого разрыва, самое позднее через 8 секунд, противник бьёт прицельно до конца боя (глаз становится красным). Готовьте первый залп без спешки. Авиации это не касается.</p>
 <h3>ВЕТЕР</h3><p>Метеопост сообщает ветер в начале боя. Вычислитель сам учитывает его в угле возвышения и выдаёт поправку пеленга: на посту ПОВОРОТ счётчик «ЗАДАНО» показывает пеленг уже с поправкой, а строка внизу экрана — как он получен.</p>
 <h3>ЗАСЕЧКА НА «КОМАНДИРЕ»</h3><p>Линии пеленгов звукометрии вы прокладываете сами: коснитесь знака поста (ЗВ-1) на карте — на него переедет ось алидады, — поверните алидаду на сообщённый пеленг и нажмите «ЛИНИЯ». То же для второго поста. Коснитесь «УТЁС», чтобы вернуть ось на батарею перед замером.</p>
 <h3>ОЧЕРЕДЬ</h3><p>Переключатель «ОЧЕРЕДЬ» на посту ОГОНЬ: 2 или 3 выстрела подряд на одних установках — расчёт сам перезаряжает. Выгодно после пристрелки, когда снаряды ложатся у цели.</p>
@@ -51,6 +52,7 @@ const HOWTO = `
 <h3>СНАБЖЕНИЕ</h3><p>За каждые 150 опыта расчёт получает очко снабжения. В меню, кнопка «СНАБЖЕНИЕ»: шесть улучшений башни по три уровня (2, 3 и 4 очка) — быстрый элеватор, дальномер, второй корректировщик, броня, погреб, ремонтная партия. «СБРОСИТЬ» возвращает все очки.</p>
 <h3>ЗАДАНИЕ ДНЯ</h3><p>Каждый день — один бой, одинаковый у всех игроков. Попытки не ограничены, в зачёт идёт лучший счёт: звёзды, прочность батареи, время и расход снарядов; за огонь по своим — штраф.</p>
 <h3>СОХРАНЕНИЕ БОЯ</h3><p>Кнопка «СОХРАНИТЬ» вверху экрана боя: «СОХРАНИТЬ И ВЫЙТИ В МЕНЮ» — бой записан, в меню появится «ПРОДОЛЖИТЬ БОЙ», и вы вернётесь в ту же минуту; «СОХРАНИТЬ И ПРОДОЛЖИТЬ» — записать и воевать дальше. Кроме того, бой записывается сам каждые 15 секунд (отключается в настройках) и всегда — когда игру сворачивают.</p>
+<h3>ПОДСКАЗКИ</h3><p>В первых трёх заданиях кампании строка внизу экрана и кольцо ведут по шагам. Дальше подсказка «НОВОЕ» появляется, только когда в бою встречается что-то незнакомое, — один раз: объяснение идёт строкой вверху экрана, а пока тема на экране, касание строки «НОВОЕ» внизу покажет его снова. В настройках: «НОВОЕ», «ПО ШАГАМ» (шаги в каждом бою) или «ВЫКЛ».</p>
 <h3>НАСТРОЙКИ</h3><p>В меню и в паузе, пять вкладок. ИГРА: сложность, подсказки, автосохранение, скорость боя по умолчанию, вопрос «СВОИ В ЗОНЕ. ОГОНЬ?» перед выстрелом рядом со своими, значки расчёта. УПРАВЛЕНИЕ: чувствительность и инверсия маховиков, режим для левши, вибрация. ЗВУК: отдельная громкость эффектов, фона башни и радио. ЭКРАН: размер надписей, качество графики, 30 кадров в секунду для экономии батареи, сила красного света ночью, счётчик кадров. ДАННЫЕ: вступительный ролик, обучение заново, сброс улучшений, настройки по умолчанию и «СБРОСИТЬ ПРОГРЕСС» — стирает звёзды, звание, улучшения и рекорды; нужно подтвердить и две секунды удерживать красную кнопку.</p>`;
 
 const DIFF_HINT = [
@@ -77,13 +79,15 @@ export function createShell({ engine, game, stations = [], intro = null }) {
   let clickAt = -1e9, clickX = 0, clickY = 0, inClick = false, guardUntil = -1e9, shownId = 'loading';
   document.addEventListener('click', (e) => {
     if (!e.isTrusted) return;                          // программные click() (стенды, проверки) — не касания
-    const now = performance.now();
+    // время самого касания (e.timeStamp), а не время, когда до него дошла очередь: на медленном кадре (или пока первое
+    // нажатие ещё обрабатывается) второе касание доходит до страницы с опозданием больше TAP_GUARD и иначе проскакивало бы
+    const now = e.timeStamp > 0 ? e.timeStamp : performance.now();
     if (now < guardUntil && Math.hypot(e.clientX - clickX, e.clientY - clickY) <= TAP_NEAR) { e.stopPropagation(); e.preventDefault(); return; }
     clickAt = now; clickX = e.clientX; clickY = e.clientY;
     inClick = true; setTimeout(() => { inClick = false; }, 0);      // обработчики нажатия идут синхронно, до этого таймера
   }, true);
   function show(id) {
-    if (id !== shownId && inClick) guardUntil = performance.now() + TAP_GUARD;
+    if (id !== shownId && inClick) guardUntil = clickAt + TAP_GUARD;
     shownId = id;
     screens.forEach((n) => $(n).classList.toggle('show', n === id)); notebookOpen = id === 'notebook'; if (id !== 'dialog') dialogDismiss = null;
   }
@@ -157,7 +161,7 @@ export function createShell({ engine, game, stations = [], intro = null }) {
   }
 
   // ---------- вступительный ролик ----------
-  let introOn = false;
+  let introOn = false, menuNew = '';
   /** Показать ролик (если он есть); onDone — когда досмотрен или пропущен. → false, если ролика нет (onDone вызван сразу). */
   function playIntro(onDone) {
     let fin = false;
@@ -175,7 +179,10 @@ export function createShell({ engine, game, stations = [], intro = null }) {
   // ---------- меню ----------
   function refreshMenu() {
     document.querySelectorAll('#diffSeg button').forEach((b) => b.classList.toggle('on', +b.dataset.diff === s.difficulty));
-    $('diffHint').textContent = DIFF_HINT[s.difficulty];
+    // подсказка меню (один раз): хватает очков снабжения на улучшение — висит вместо строки о сложности, пока не откроют «СНАБЖЕНИЕ»
+    let mh = null; try { mh = !introOn && game.menuHint(); } catch (e) { mh = null; }
+    if (mh) { menuNew = 'НОВОЕ · ' + mh.text; game.learnTopic(mh.id); }
+    $('diffHint').textContent = menuNew || DIFF_HINT[s.difficulty]; $('diffHint').classList.toggle('new', !!menuNew);
     const rk = getRank();
     $('rankName').textContent = 'ЗВАНИЕ: ' + rk.name;
     $('rankXp').textContent = rk.next != null ? rk.xp + ' / ' + rk.next : rk.xp + ' · ВЫСШЕЕ';
@@ -226,8 +233,18 @@ export function createShell({ engine, game, stations = [], intro = null }) {
     if (fr.length) cond.push('<b>СВОИ В РАЙОНЕ</b> — ' + fr.map((f) => esc(f.name || f.label)).join(', ') + '. Разрыв ближе 250 м от своего корабля — попадание по своим, минус звезда за каждый потопленный.');
     if (m.survival) cond.push('<b>ОБОРОНА</b> — волна за волной. За отбитую волну: +25% прочности и снаряды. Прорыв цели: −25%.');
     return `<h2>${m.index != null ? 'ЗАДАНИЕ ' + (m.index + 1) + '. ' : m.daily && m.title ? esc(m.title) + '. ' : ''}${esc(m.name.toUpperCase())}</h2><p>${esc(m.brief || '')}</p>` +
-      (cond.length ? `<h3>УСЛОВИЯ</h3><ul>${cond.map((c) => `<li>${c}</li>`).join('')}</ul>` : '') +
+      (cond.length ? `<h3>УСЛОВИЯ</h3><ul>${cond.map((c) => `<li>${c}</li>`).join('')}</ul>` : '') + newTopicsHtml() +
       `<h3>${m.survival ? 'ПЕРВАЯ ВОЛНА' : 'ЦЕЛИ'}</h3><ul>${list}</ul><p class="dim">Боезапас: ${stock}. Ветер: ${windText(m.wind)}. Сложность: ${game.difficulties[s.difficulty]}. Звание расчёта: ${getRank().name.toLowerCase()}.</p>`;
+  }
+  /** «НОВОЕ В ЭТОМ ЗАДАНИИ»: механики задания, которых игрок ещё не встречал (название и одна строка — brief темы: что это и что
+   *  делать; текст самой темы написан для момента, когда механика уже случилась, и до боя читался бы как неправда). */
+  function newTopicsHtml() {
+    let list = []; try { list = game.briefTopics() || []; } catch (e) { list = []; }
+    if (!list.length) return '';
+    const line = (t) => { if (t.brief) return t.brief; const m = /^.*?[.!?](?=\s|$)/.exec(t.text || ''); return m ? m[0] : t.text || ''; };
+    const MAX = 6, more = list.length - MAX;
+    return '<div class="new-box" id="briefNew"><h3>НОВОЕ В ЭТОМ ЗАДАНИИ</h3><ul>' + list.slice(0, MAX).map((t) => `<li><b>${esc(t.title)}</b> — ${esc(line(t))}</li>`).join('') +
+      (more > 0 ? `<li class="dim">и ещё ${more} — подсказка появится в бою</li>` : '') + '</ul></div>';
   }
   function showBriefing() {
     $('hud').classList.add('hidden');
@@ -294,7 +311,8 @@ export function createShell({ engine, game, stations = [], intro = null }) {
   /** Строки итогов: конвой, огонь по своим, налёты. */
   function forcesRows(st) {
     const m = s.mission || {}, bad = (k, v) => `<tr><td>${k}</td><td class="bad">${v}</td></tr>`, row = (k, v) => `<tr><td>${k}</td><td>${v}</td></tr>`;
-    let h = '';
+    // засечка: строка есть, если у противника было чем стрелять по батарее
+    let h = (s.targets || []).some((t) => t.gun) ? row('Батарея засечена', st.detectedAt != null ? 'на ' + game.fmt.time(st.detectedAt) : 'нет — противник вас не увидел') : '';
     if (st.convoyTotal > 0) h += (st.convoyLost > 0 ? bad : row)('Конвой', (st.convoyArrived > 0 ? 'дошло ' + st.convoyArrived + ' из ' + st.convoyTotal : 'цело ' + (st.convoyTotal - (st.convoyLost || 0)) + ' из ' + st.convoyTotal) + (st.convoyLost > 0 ? ', потеряно ' + st.convoyLost : ''));
     if ((s.friends || []).length || st.friendlyHits > 0) h += (st.friendlyHits > 0 ? bad : row)('Попаданий по своим', st.friendlyHits || 0);
     if (st.friendlyKills > 0) h += bad('Своих потоплено вашим огнём', st.friendlyKills + ' (−' + st.friendlyKills + ' ★)');
@@ -365,106 +383,20 @@ export function createShell({ engine, game, stations = [], intro = null }) {
     goto(STATIONS[(i + dir + STATIONS.length) % STATIONS.length].id);
   }
 
-  const ang = (a, b) => { let d = ((a - b) % 360 + 360) % 360; if (d > 180) d -= 360; return d; };
   const loadingStation = stations.find((x) => x && x.id === 'loading');
   /** Следующий шаг процедуры: пост, текст подсказки и орган управления для подсветки. */
   const hasHot = (stId, name) => { const st = stations.find((x) => x && x.id === stId); return !!(st && st.hotspots && st.hotspots[name]); };
-  /** Первый существующий орган управления из списка (посты дописываются — имён может не быть). */
-  const pickHot = (stId, ...names) => names.find((n) => hasHot(stId, n)) || null;
-  const visible = (id) => { try { return !!game.visible(id); } catch (e) { return false; } };
-  const brgTo = (x, y) => { const bat = s.mission.battery; return ((Math.atan2(x - bat.x, y - bat.y) * 180 / Math.PI) + 360) % 360; };
   /** Свои рядом с точкой прицеливания (ближе 0.4 км) — считает логика: game.friendsInDanger(), ближайший первым. */
   function friendsInZone() { try { return game.friendsInDanger() || []; } catch (e) { return []; } }
-  /** Подсказка зенитного поста, пока идёт налёт (null — налёта нет или стрелять нечем). */
-  function raidStep() {
-    const rd = s.raid, aa = s.aa;
-    if (!rd || !aa || rd.phase !== 'inbound') return null;
-    const live = (rd.planes || []).filter((p) => p.alive && !p.attacked);
-    if (!live.length || aa.ammo <= 0) return null;
-    if (aa.jammed) return { st: 'aa', text: 'ЗЕНИТКА: клин — ствол перегрет! Отпустите гашетку, автомат остынет' };
-    const R = Math.PI / 180, cone = (game.C && game.C.AA_CONE) || 2.2;
-    const sep = (p) => Math.acos(Math.max(-1, Math.min(1, Math.sin(p.elevation * R) * Math.sin(aa.elevation * R) + Math.cos(p.elevation * R) * Math.cos(aa.elevation * R) * Math.cos((p.bearing - aa.bearing) * R)))) / R;
-    if (live.some((p) => sep(p) < cone)) return { st: 'aa', hot: pickHot('aa', 'aaFire', 'aaTrigger'), text: 'ЗЕНИТКА: самолёт в кольце — давите гашетку «ОГОНЬ»!' };
-    return { st: 'aa', hot: pickHot('aa', 'aaPad'), text: 'ВОЗДУХ! ЗЕНИТКА: ведите прицел пальцем — самолёт в кольцо, вторым пальцем давите гашетку' };
-  }
-  /** Снаряд в полёте: когда корректировщик не поможет, а цель видна в оптику — к трубе. */
-  function observeStep() {
-    const m = s.mission, lr = s.lastReport, at = s.targets.find((t) => t.id === s.activeTarget);
-    if (!s.flight.some((f) => f.shell !== 'illum' && f.shell !== 'smoke')) {
-      if (m.night && s.flight.some((f) => f.shell === 'illum')) return { st: null, text: 'Осветительный в полёте. Дальше: пост НАБЛЮДЕНИЕ — в свете цель и разрывы видны в трубу, поправка по сетке' };
-      return null;
-    }
-    if (!at || !at.alive || !(m.noSpotter || m.night || (lr && (lr.blind || lr.dark))) || !visible(at.id)) return null;
-    const off = Math.abs(ang(s.scope.bearing, brgTo(at.x, at.y)));
-    let fov = 16; try { fov = game.scopeFov(); } catch (e) { /* старая логика */ }
-    if (off > fov * 0.4) {
-      const btn = pickHot('observe', 'toTargetButton');
-      return { st: 'observe', hot: btn || pickHot('observe', 'scopeWheel'), text: 'НАБЛЮДЕНИЕ: наведите трубу на цель' + (btn ? ' (кнопка «НА ЦЕЛЬ» или маховик)' : ' маховиком') + ' — расчёт доложит, куда лёг снаряд' };
-    }
-    return { st: 'observe', text: 'НАБЛЮДЕНИЕ: труба на цели — ждите разрыва и снимите поправку по сетке' };
-  }
-  function nextStep() {
-    const c = s.checklist, b = s.breech, cp = s.computer;
-    const air = raidStep();
-    if (air) return air;
-    if (s.flight.length && !b.shell && !b.open && !(b.busy && b.busy.kind === 'auto')) return observeStep() || { st: null, text: 'Снаряд в полёте — следите за картой на ПЛАНШЕТЕ и ждите доклада' };
-    if (b.busy && b.busy.kind === 'auto') return { st: null, text: 'Очередь: расчёт перезаряжает орудие' };
-    if (!s.activeTarget) {
-      if (s.mission.survival && !s.targets.some((t) => t.alive)) return { st: null, text: 'Волна отбита — ждите следующую' };
-      if (s.targets.some((t) => t.alive && (t.reported || t.area))) return { st: null, text: 'Выберите цель: кнопка «ЦЕЛЬ ▸» вверху' };
-      return { st: null, text: 'Ждите донесения разведки или звукометрии' };
-    }
-    const at = s.targets.find((t) => t.id === s.activeTarget);
-    // ночь: о цели известен только квадрат (или грубая засечка по вспышке) — сначала осветительный
-    const blind = !!(s.mission.night && at && at.alive && at.locate !== 'sound' && !at.lit && (!at.reported || at.reported.rough));
-    const needIllum = blind && s.shells.illum + (b.shell === 'illum' ? 1 : 0) > 0 && !s.flight.some((f) => f.shell === 'illum');
-    const wantShell = at && at.armored ? 'ap' : needIllum ? 'illum' : at && at.kind === 'landing' && s.shells.shrap > 0 ? 'shrap' : 'he';
-    const rec = s.plot.recorded[s.activeTarget];
-    if (!c.measured) {
-      const pin = s.plot.pins[s.activeTarget];
-      const sound = at && at.reported && at.reported.sound;
-      if (!pin) return { st: 'plot', hot: 'pin' + s.activeTarget, text: sound ? 'ПЛАНШЕТ: перетащите фишку на пересечение пеленгов звукометрии'
-        : at && !at.reported && at.area ? 'НОЧЬ: цель не видна. ПЛАНШЕТ: поставьте фишку в центр квадрата — туда пойдёт осветительный снаряд'
-          : at && at.reported && at.reported.rough ? 'ПЛАНШЕТ: фишку — на засечку «по вспышке» (грубо, ±0,5 км)' : 'ПЛАНШЕТ: перетащите фишку на карту по координатам X и Y из донесения' };
-      if (s.plot.pivot) return { st: 'plot', text: 'ПЛАНШЕТ: коснитесь знака «УТЁС», чтобы вернуть ось алидады на батарею' };
-      const bat = s.mission.battery, A = s.plot.alidade, R = Math.PI / 180;
-      const sx = bat.x + A.range * Math.sin(A.bearing * R), sy = bat.y + A.range * Math.cos(A.bearing * R);
-      if (Math.hypot(sx - pin.x, sy - pin.y) > 0.03) return { st: 'plot', hot: 'sight', text: 'ПЛАНШЕТ: наведите визир алидады на фишку (тяните визир или крутите маховики)' };
-      return { st: 'plot', hot: 'btnRecord', text: 'ПЛАНШЕТ: нажмите «ЗАПИСАТЬ»' };
-    }
-    if (!c.computed) {
-      if (Math.abs(cp.range - rec.range) > 0.005) return { st: 'computer', hot: 'rangeWheel', text: 'ВЫЧИСЛИТЕЛЬ: маховиком наберите дальность ' + game.fmt.km(rec.range) + ' км' };
-      if (game.chargeStates()[cp.charge - 1] !== 'ok') return { st: 'computer', hot: 'chargeSelector', text: 'ВЫЧИСЛИТЕЛЬ: выберите заряд с зелёной лампой' };
-      return { st: 'computer', hot: 'computeLever', text: cp.stale && cp.elevation != null && s.mission.weather === 'storm' ? 'ВЫЧИСЛИТЕЛЬ: ветер сменился — потяните рычаг «ВЫЧИСЛИТЬ» ещё раз' : 'ВЫЧИСЛИТЕЛЬ: потяните рычаг «ВЫЧИСЛИТЬ» вниз' };
-    }
-    if (!c.loaded) {
-      if (!b.open && !b.shell && s.turret.elevation > game.C.LOAD_ANGLE) return { st: 'elevation', hot: 'loadAngleButton', text: 'ПОДЪЁМ: держите «НА УГОЛ ЗАРЯЖАНИЯ» — ствол должен опуститься до ' + game.C.LOAD_ANGLE + '°' };
-      if (!b.open && !b.shell) return { st: 'loading', hot: 'breechLever', text: 'ЗАРЯЖАНИЕ: откройте затвор рычагом' };
-      if (!b.shell) {
-        const why = wantShell === 'ap' ? ' (цель бронирована)' : wantShell === 'illum' ? ' — выпустите осветительный снаряд в район цели' : wantShell === 'shrap' ? ' (шрапнель — по десанту)' : '';
-        const picked = loadingStation && loadingStation.controls ? loadingStation.controls.shellType : null;
-        return { st: 'loading', hot: picked && picked !== wantShell ? 'shellSelector' : 'hoistButton', text: 'ЗАРЯЖАНИЕ: галетником выберите ' + shellName(wantShell) + ' и нажмите «ПОДАТЬ СНАРЯД»' + why };
-      }
-      if (!b.rammed) return { st: 'loading', hot: 'ramLever', text: 'ЗАРЯЖАНИЕ: дошлите снаряд рычагом «ДОСЛАТЬ»' };
-      if (b.charges < cp.charge) return { st: 'loading', hot: 'chargePlus', text: 'ЗАРЯЖАНИЕ: подайте заряды — нужно ' + cp.charge + ', подано ' + b.charges };
-      if (b.charges > cp.charge) return { st: 'loading', hot: 'chargeMinus', text: 'ЗАРЯЖАНИЕ: лишний заряд! Нужно ' + cp.charge };
-      return { st: 'loading', hot: 'breechLever', text: 'ЗАРЯЖАНИЕ: закройте затвор' };
-    }
-    if (b.charges !== cp.charge) return { st: 'loading', text: 'Заряжено ' + b.charges + ', а расчёт на заряд ' + cp.charge + ' — пересчитайте или перезарядите' };
-    if (!c.traversed) {
-      const want = ((rec.bearing + (cp.windBearing || 0)) % 360 + 360) % 360, err = ang(s.turret.bearing, want);
-      const wtxt = cp.windBearing ? ' (' + rec.bearing.toFixed(1) + '° ' + (cp.windBearing > 0 ? '+' : '−') + Math.abs(cp.windBearing).toFixed(1) + '° на ветер)' : '';
-      if (Math.abs(err) > 0.5) {
-        if (s.turret.brake) return { st: 'traverse', hot: 'brakeLever', text: 'ПОВОРОТ: снимите стопор' };
-        return { st: 'traverse', hot: Math.abs(err) > 3 && !s.faults.drive ? 'slewLever' : 'fineWheel', text: 'ПОВОРОТ: разверните башню на ' + want.toFixed(1) + '°' + wtxt };
-      }
-      return { st: 'traverse', hot: 'brakeLever', text: 'ПОВОРОТ: поставьте стопор' };
-    }
-    if (!c.elevated) return { st: 'elevation', hot: 'elevWheel', text: 'ПОДЪЁМ: поднимите ствол маховиком на ' + cp.elevation.toFixed(2) + '°' };
-    if (!c.armed) return { st: 'fire', hot: 'armCover', text: 'ОГОНЬ: откройте красную крышку и взведите цепь стрельбы' };
-    if (friendsInZone().length && b.shell !== 'illum' && b.shell !== 'smoke') return { st: 'fire', hot: 'fireLever', warn: true, text: 'ОГОНЬ: СВОИ В ЗОНЕ ПОРАЖЕНИЯ! Проверьте замер на ПЛАНШЕТЕ — или стреляйте на свой риск' };
-    return { st: 'fire', hot: 'fireLever', text: b.shell === 'illum' ? 'ОГОНЬ: осветительный в стволе — спуск вниз! Затем пост НАБЛЮДЕНИЕ → поправка по сетке' : blind && needIllum ? 'ОГОНЬ: цель не освещена — лучше сначала осветительный. Спуск — вниз' : 'ОГОНЬ: потяните спуск вниз!' };
-  }
+  // Подсказки считает логика (game/hints.js): game.hint(ui) → шаг процедуры, тема «НОВОЕ» или ничего — по настройке «ПОДСКАЗКИ»
+  // и номеру задания. Оболочка только сообщает, какие органы управления есть на постах, и рисует строку, плашку и кольцо.
+  const hintUi = { hasHot, shellType: () => (loadingStation && loadingStation.controls ? loadingStation.controls.shellType : null) };
+  const NO_HINT = { kind: null, id: null, title: null, text: '', more: '', station: null, hotspot: null, dom: null, warn: false };
+  function currentHint() { try { return game.hint(hintUi) || NO_HINT; } catch (e) { return NO_HINT; } }
+  /** Активная тема «НОВОЕ» ({ id, title, more, warn } | null): в режиме шагов строка подсказки может быть занята шагом, а тема идёт объяснением. */
+  function currentTopic() { try { return (game.topicInfo ? game.topicInfo() : null) || null; } catch (e) { return null; } }
+  /** Следующий шаг процедуры (для стендов и проверок): { st, hot, text }. */
+  function nextStep() { let st = null; try { st = game.nextStep(hintUi); } catch (e) { st = null; } return st || { st: null, text: '' }; }
 
   // ---------- подсветка органа управления ----------
   const hl = document.createElement('div');
@@ -476,7 +408,15 @@ export function createShell({ engine, game, stations = [], intro = null }) {
     const st = hlStep;
     const station = st && st.hot && stations.find((x) => x.id === st.st);
     const obj = station && station.hotspots && station.hotspots[st.hot];
-    if (!obj || !obj.getWorldPosition || engine.current !== st.st || engine.flying || s.phase !== 'playing' || s.paused) { hl.style.display = 'none'; return; }
+    if (!st || engine.flying || s.phase !== 'playing' || s.paused) { hl.style.display = 'none'; return; }
+    if (!obj || !obj.getWorldPosition || engine.current !== st.st) {
+      // тема «НОВОЕ» может указывать на элемент обвязки (плашка неисправности, значки расчёта, полоса прочности)
+      const el = st.dom && (!st.st || engine.current === st.st || !st.hot) ? $(st.dom) : null, r = el && el.offsetParent !== null ? el.getBoundingClientRect() : null;
+      if (!r || r.width < 2 || r.height < 2) { hl.style.display = 'none'; return; }
+      hl.style.display = 'block';
+      hl.style.left = (r.left + r.width / 2 - 32) + 'px'; hl.style.top = (r.top + r.height / 2 - 32) + 'px';
+      return;
+    }
     // фишку берут за ручку-диск — подсвечиваем её
     const handle = /^pin\d+$/.test(st.hot) && station.api && station.api.pinHandleWorld ? station.api.pinHandleWorld(+st.hot.slice(3)) : null;
     if (handle) _hv.copy(handle); else obj.getWorldPosition(_hv);
@@ -487,7 +427,8 @@ export function createShell({ engine, game, stations = [], intro = null }) {
     hl.style.left = (sc.x - 32) + 'px'; hl.style.top = (sc.y - 32) + 'px';
   }
 
-  const shellSeen = {}; let shKey = '', wxKey = '', windChangedAt = -1e9, obKey = '', forcesKey = '', raidOn = false;
+  const EYE = '<svg viewBox="0 0 17 12" aria-hidden="true"><path d="M1 6c2.2-3.2 4.7-4.8 7.5-4.8S13.800 2.800 16 6c-2.200 3.200-4.700 4.800-7.500 4.800S3.200 9.200 1 6z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.5" cy="6" r="2.1" fill="currentColor"/><path class="slash" d="M3 11.200 14 .8" stroke="currentColor" stroke-width="1.700" stroke-linecap="round"/></svg>';
+  const shellSeen = {}; let topicKey = '', topicWait = '', topicShownAt = 0, detFreshUntil = -1, radioFreeAt = 0, detKey = '', shKey = '', wxKey = '', windChangedAt = -1e9, obKey = '', forcesKey = '', raidOn = false;
   const DEV = (v, plus, minus) => (v > 0 ? plus : minus) + ' ' + Math.abs(Math.round(v)) + ' м';
   /** Коротко: что доложил корректировщик (state.lastReport). */
   function spotterBrief() {
@@ -557,15 +498,30 @@ export function createShell({ engine, game, stations = [], intro = null }) {
     renderForces();
     crewUi.render();
 
-    const step = nextStep(), hints = settingsUi.current.hints !== false && s.mission && (s.mission.tutorial || s.difficulty === 0);   // настройка «подсказки обучения»
-    $('hint').textContent = hints ? step.text : ''; $('hint').classList.toggle('warn', !!(hints && step.warn));
-    hlStep = hints ? step : null;
+    // подсказка: шаг процедуры (задания 1–3 или режим «по шагам»), тема «НОВОЕ» или ничего — решает логика
+    const h = currentHint(), hints = h.kind != null, topic = h.kind === 'topic';
+    const he = $('hint'); he.textContent = hints ? h.text : ''; he.classList.toggle('warn', !!(hints && h.warn && !topic)); he.classList.toggle('topic', topic);
+    hlStep = hints ? { st: h.station, hot: h.hotspot, dom: h.dom } : null;
+    // объяснение новой темы идёт в строке радио — когда та свободна (донесения важнее); строка «НОВОЕ · …» внизу остаётся напоминанием
+    const ti = topic ? { id: h.id, title: h.title, more: h.more, warn: h.warn } : currentTopic(), tk = ti ? ti.id : '';
+    const inf = $('info'); inf.classList.toggle('hastopic', topic); if (topic) inf.style.setProperty('--hintw', Math.max(120, Math.ceil(he.getBoundingClientRect().width)) + 'px');
+    if (tk !== topicKey) {
+      topicKey = tk; topicWait = tk;
+      // тема сменилась или ушла — её объяснение в строке радио больше не нужно
+      const rd = $('radio'); if (rd.classList.contains('topic')) { rd.className = ''; clearTimeout(radioTimer); radioFreeAt = 0; }
+    }
+    if (topicWait && ti && performance.now() >= radioFreeAt) { topicWait = ''; showTopicText(ti); }
+    // засечка батареи: значок-глаз в ячейке «ПРОЧНОСТЬ» есть, пока у противника есть чем стрелять по «Утёсу»; 8 с после засечки
+    // (или после сообщения о давней засечке — detFreshUntil) мигает
+    const dc = $('detChip'), armed = s.targets.some((t) => t.alive && t.gun);
+    const dk = !armed ? '' : !s.detected ? 'calm' : s.time - (s.detectedAt || 0) < 8 || s.time < detFreshUntil ? 'det fresh' : 'det';
+    if (dk !== detKey) { detKey = dk; const dt = s.detected ? 'ЗАСЕЧЕНЫ' : 'НАС НЕ ВИДЯТ'; dc.className = dk || 'hidden'; dc.innerHTML = EYE + '<span>' + dt + '</span>'; dc.setAttribute('aria-label', dt); }
     renderFaults();
     nav.querySelectorAll('button').forEach((b, i) => {
       const st = STATIONS[i];
       b.classList.toggle('on', engine.current === st.id);
       b.classList.toggle('done', !!(st.check && s.checklist[st.check]));
-      b.classList.toggle('next', hints && step.st === st.id);
+      b.classList.toggle('next', hints && h.station === st.id);
       b.classList.toggle('alarm', st.id === 'aa' && raidOn && engine.current !== 'aa');
     });
     const fc = $('flightChip');
@@ -625,6 +581,7 @@ export function createShell({ engine, game, stations = [], intro = null }) {
       (s.mission.night || s.mission.weather === 'fog' ? kv('Условия', [s.mission.night ? 'ночь' : '', s.mission.weather === 'fog' ? 'туман' : ''].filter(Boolean).join(', ')) : '') +
       ((s.lights || []).length ? kv('Осветительные горят', s.lights.map((l) => Math.max(0, Math.round(l.until - s.time)) + ' с').join(', ')) : '') +
       ((s.smokes || []).length ? kv('Дымовая завеса', s.smokes.map((l) => game.fmt.brg(l.bearing) + ' · ' + Math.max(0, Math.round(l.until - s.time)) + ' с').join(', ')) : '') +
+      kv('Противник', s.detected ? 'засёк батарею в ' + game.fmt.time(s.detectedAt || 0) + ' — бьёт прицельно' : 'нас не видит — до первого выстрела бьёт наугад') +
       kv('Расчёт', getRank().name.toLowerCase());
     // свои силы — известны точно
     const fr = s.friends || [];
@@ -647,6 +604,13 @@ export function createShell({ engine, game, stations = [], intro = null }) {
     $('nbRadio').innerHTML = s.radio.slice().reverse().map((m) => `<div class="nb-msg ${m.kind}"><span class="t">${game.fmt.time(m.time)}</span><b>${m.from}</b>${esc(m.text)}</div>`).join('') || '<div>Эфир молчит.</div>';
   }
 
+  const RADIO_MS = 7000, TOPIC_MS = 12000, TOPIC_REREAD_MS = 5000;
+  /** Объяснение темы «НОВОЕ» — в строке радио, на 12 с (следующее радиосообщение его сменит). */
+  function showTopicText(h) {
+    const el = $('radio'); el.innerHTML = `<b>НОВОЕ · ${esc(h.title)}</b>${esc(h.more)}`; el.className = 'show topic' + (h.warn ? ' warn' : '');
+    sfx('tick'); topicShownAt = performance.now(); radioFreeAt = topicShownAt + TOPIC_MS;
+    clearTimeout(radioTimer); radioTimer = setTimeout(() => { el.className = ''; dirty = true; }, TOPIC_MS);
+  }
   /** kind: 'ok' — спокойное сообщение (зелёная кромка); без него — тревожное (красное). */
   function toast(text, kind) {
     const el = $('toast'); el.textContent = text; el.className = 'show' + (kind ? ' ' + kind : '');
@@ -659,19 +623,36 @@ export function createShell({ engine, game, stations = [], intro = null }) {
   game.on('phase', (ph) => {
     if (ph === 'menu') showMenu();
     else if (ph === 'briefing') showBriefing();
-    else if (ph === 'playing') { closeAll(); $('hud').classList.remove('hidden'); $('hSave').classList.remove('hidden'); unread = 0; lastEnd = null; Object.keys(shellSeen).forEach((k) => delete shellSeen[k]); Object.keys(SH()).forEach((k) => { if (s.shells[k] > 0) shellSeen[k] = true; }); shKey = wxKey = obKey = forcesKey = ''; windChangedAt = -1e9; resetLog(); crewUi.render(true); $('radio').className = ''; engine.gotoStation(STATIONS.some((st) => st.id === s.station) ? s.station : 'plot', { instant: true });   /* новый бой — планшет; продолженный — пост, на котором сохранились */ sfx('ambient', true); dirty = true; }
+    else if (ph === 'playing') { closeAll(); $('hud').classList.remove('hidden'); $('hSave').classList.remove('hidden'); unread = 0; lastEnd = null; Object.keys(shellSeen).forEach((k) => delete shellSeen[k]); Object.keys(SH()).forEach((k) => { if (s.shells[k] > 0) shellSeen[k] = true; }); shKey = wxKey = obKey = forcesKey = ''; topicKey = detKey = '\u0000'; topicWait = ''; radioFreeAt = 0; topicShownAt = 0; detFreshUntil = -1; windChangedAt = -1e9; resetLog(); crewUi.render(true); $('radio').className = ''; engine.gotoStation(STATIONS.some((st) => st.id === s.station) ? s.station : 'plot', { instant: true });   /* новый бой — планшет; продолженный — пост, на котором сохранились */ sfx('ambient', true); dirty = true; }
   });
   game.on('missionEnd', (e) => { sfx('alarm', false); $('hSave').classList.add('hidden'); lastEnd = e; raidUntil = -1; sampleFriends(true); forcesKey = ''; renderForces(); nav.querySelectorAll('button.alarm').forEach((b) => b.classList.remove('alarm')); setTimeout(() => { if ((s.phase === 'won' || s.phase === 'lost') && lastEnd === e) showResult(e); }, 1400); });
   // прогресс стёрт (game.resetProgress) или настройки изменились — перерисовать то, что на экране
-  game.on('save', () => { if (s.phase === 'menu') refreshMenu(); });
+  game.on('save', () => { menuNew = ''; if (s.phase === 'menu') refreshMenu(); });
   game.on('settings', () => { dirty = true; forcesKey = ''; });
   game.on('wind', () => { windChangedAt = s.time; dirty = true; });
+  // противник засёк батарею: красная вспышка, строка, красный значок-глаз
+  // (e.late — засекли давно, когда стрелять по батарее было некому, а сообщают с появлением первых орудий: оборона)
+  game.on('detected', (e) => {
+    if (s.targets.some((t) => t.alive && t.gun)) { flash('det'); vibro('fault'); toast(e && e.late ? 'БАТАРЕЯ ЗАСЕЧЕНА — ОРУДИЯ ПРОТИВНИКА БЬЮТ ПРИЦЕЛЬНО' : 'ПРОТИВНИК ЗАСЁК БАТАРЕЮ — ЖДИТЕ ОТВЕТНОГО ОГНЯ'); if (e && e.late) detFreshUntil = s.time + 8; }
+    detKey = '\u0000'; dirty = true;
+  });
+  game.on('topic', () => { dirty = true; });
+  // касание строки «НОВОЕ · …» в нижней панели показывает объяснение темы ещё раз
+  // (зона касания шире строки: #info.hastopic::after — событие приходит на сам #info)
+  $('info').addEventListener('click', (ev) => {
+    if (s.phase !== 'playing' || !s.topic || (ev.target.id !== 'hint' && ev.target.id !== 'info')) return;
+    const h = currentHint(); if (h.kind === 'topic') showTopicText(h);
+  });
   game.on('wave', (w) => { if (w && w.cleared) flash('wave'); dirty = true; });
   game.on('radio', (m) => {
     sfx('radio');
     if (!notebookOpen) unread++;
-    const el = $('radio'); el.innerHTML = `<b>${m.from}</b>${esc(m.text)}`; el.className = 'show ' + m.kind;
-    clearTimeout(radioTimer); radioTimer = setTimeout(() => { el.className = ''; }, 7000);
+    const el = $('radio');
+    // донесение вытеснило объяснение темы, которое игрок не успел прочесть (меньше 5 с на экране) — покажем его снова, когда эфир освободится
+    if (el.classList.contains('topic') && el.classList.contains('show') && topicKey && topicKey !== '\u0000' && performance.now() - topicShownAt < TOPIC_REREAD_MS) topicWait = topicKey;
+    el.innerHTML = `<b>${m.from}</b>${esc(m.text)}`; el.className = 'show ' + m.kind;
+    radioFreeAt = performance.now() + RADIO_MS;
+    clearTimeout(radioTimer); radioTimer = setTimeout(() => { el.className = ''; dirty = true; }, RADIO_MS);
     dirty = true;
   });
   game.on('denied', (d) => { sfx('buzz'); toast(d.reason); });
@@ -740,7 +721,7 @@ export function createShell({ engine, game, stations = [], intro = null }) {
     campaign: showMissions,
     skirmish: () => game.startSkirmish(),
     daily: () => game.startDaily(todayKey()),
-    upgrades: () => upgradesUi.open(),
+    upgrades: () => { menuNew = ''; upgradesUi.open(); },
     settings: () => settingsUi.open(showMenu),
     resume: () => { const r = game.restore(); if (!r || !r.ok) { game.discardResume(); refreshMenu(); } },
     discardResume: () => { game.discardResume(); refreshMenu(); },

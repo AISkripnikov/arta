@@ -236,6 +236,7 @@ test('дым: орудия за завесой попадают заметно �
     const game = start(2, null, 1); const s = game.state; tick(game, 12);
     const g = s.targets.find((q) => q.gun), bat = s.mission.battery;
     g.gun.period = 1; g.gun.p = 0.5; g.gun.next = 0;
+    s.detected = true;      // прицельный огонь — только по засечённой батарее
     if (withSmoke) {
       const b = norm(Math.atan2(g.x - bat.x, g.y - bat.y) / RAD + 20);
       s.smokes.push({ x: bat.x, y: bat.y + 2, bearing: b, until: 1e9 });

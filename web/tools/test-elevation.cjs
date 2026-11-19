@@ -139,6 +139,15 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol;
   await ev('T.setEl(-1)');
   await turnWheel(-0.5);
   check('lower stop: exactly −2°', (await view()).el === -2, (await view()).el);
+  // на упоре маховик стоит и на вид — при любой чувствительности и с «инверсией маховиков» (раньше с инверсией проворачивался вдвое)
+  for (const [inv, sens, turns] of [[false, 1, -0.3], [true, 1, 0.3], [true, 1.6, 0.3], [false, 0.6, -0.3]]) {
+    await ev(`engine.settings.invert=${inv}; engine.settings.sens=${sens}`);
+    const z0 = await ev('return T.st.controls.wheel.wheel.rotation.z');
+    await turnWheel(turns);
+    const z1 = await ev('return T.st.controls.wheel.wheel.rotation.z');
+    check(`lower stop: wheel does not turn visually (invert ${inv}, sens ${sens})`, (await view()).el === -2 && Math.abs(z1 - z0) < 1e-6, { el: (await view()).el, dz: z1 - z0 });
+  }
+  await ev('engine.settings.invert=false; engine.settings.sens=1');
   await ev('T.step(30)');
   await shot('min-angle');
   check('hard stops give no denials', (await denied()).length === 0);

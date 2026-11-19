@@ -9,7 +9,7 @@
 //   quality, fps   → engine.setQuality, engine.setFrameCap
 //   showFps        → плашка #fpsMeter
 //   vibro, vibroPower → vibrate(kind)
-//   hints, confirmFriendly → читает оболочка (подсказка и кольцо; вопрос «СВОИ В ЗОНЕ. ОГОНЬ?»)
+//   hints ('new' | 'all' | 'off') → учитывает логика (game.hint()); confirmFriendly → читает оболочка (вопрос «СВОИ В ЗОНЕ. ОГОНЬ?»)
 // Вкладка «ДАННЫЕ»: ролик, обучение, сброс улучшений, настройки по умолчанию, сброс прогресса (два шага, удержание 2 с).
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
@@ -31,7 +31,8 @@ const ROWS = {
   game: [
     { id: 'setDiff', key: 'difficulty', type: 'num', label: 'СЛОЖНОСТЬ', lock: true, items: [[0, 'КУРСАНТ'], [1, 'КОМАНДИР']],
       note: 'Курсант: визир сам встаёт на фишку, готовые поправки, противник слабее. Командир: всё вручную.' },
-    { id: 'setHints', key: 'hints', type: 'bool', label: 'ПОДСКАЗКИ ОБУЧЕНИЯ', note: 'На «Курсанте» и в учебном задании: строка «что делать дальше» и кольцо вокруг нужного органа управления.' },
+    { id: 'setHints', key: 'hints', type: 'str', label: 'ПОДСКАЗКИ', items: [['new', 'НОВОЕ'], ['all', 'ПО ШАГАМ'], ['off', 'ВЫКЛ']],
+      note: 'Новое: по шагам — в первых трёх заданиях, дальше подсказка появляется, только когда в бою встретилось незнакомое. По шагам: строка «что делать дальше» и кольцо в каждом бою.' },
     { id: 'setAutosave', key: 'autosave', type: 'bool', label: 'АВТОСОХРАНЕНИЕ БОЯ', note: 'Запись боя каждые 15 секунд. Когда игру сворачивают, бой записывается всегда.' },
     { id: 'setSpeed', key: 'speed', type: 'num', label: 'СКОРОСТЬ БОЯ ПО УМОЛЧАНИЮ', items: [[1, '×1'], [2, '×2']], note: 'С какой скоростью времени начинается бой. В бою её меняет кнопка «×» вверху.' },
     { id: 'setConfirm', key: 'confirmFriendly', type: 'bool', label: 'ПОДТВЕРЖДАТЬ ВЫСТРЕЛ ПО СВОИМ', note: 'Свой корабль ближе 400 м от точки прицеливания — спуск сперва спросит: «СВОИ В ЗОНЕ. ОГОНЬ?»' },
@@ -57,11 +58,11 @@ const ROWS = {
       note: 'Чёткость картинки и видов в смотровой щели и окуляре. Ниже качество — меньше греется телефон.' },
     { id: 'setFps', key: 'fps', type: 'num', label: 'ОГРАНИЧЕНИЕ КАДРОВ', items: [[60, '60'], [30, '30']], note: '30 кадров в секунду берегут батарею.' },
     { id: 'setNight', key: 'nightTint', type: 'str', label: 'КРАСНЫЙ СВЕТ НОЧЬЮ', items: [['normal', 'ОБЫЧНЫЙ'], ['soft', 'СЛАБЫЙ']], note: 'Яркость красного фильтра в ночных боях.' },
-    { id: 'setShowFps', key: 'showFps', type: 'bool', label: 'СЧЁТЧИК КАДРОВ', note: 'Число кадров в секунду в углу экрана.' },
+    { id: 'setShowFps', key: 'showFps', type: 'bool', label: 'СЧЁТЧИК КАДРОВ', note: 'Число кадров в секунду — в бою, слева внизу над полосой постов.' },
   ],
   data: [
     { id: 'setIntro', act: 'intro', type: 'act', label: 'ВСТУПИТЕЛЬНЫЙ РОЛИК', btn: 'ПОСМОТРЕТЬ РОЛИК', lock: true, note: 'Как лейтенант принял башню батареи «Утёс».' },
-    { id: 'setTutorial', act: 'tutorial', type: 'act', label: 'ОБУЧЕНИЕ', btn: 'ПОКАЗАТЬ ЗАНОВО', lock: true, note: 'Включит подсказки и откроет учебное задание «Пристрелка».' },
+    { id: 'setTutorial', act: 'tutorial', type: 'act', label: 'ОБУЧЕНИЕ', btn: 'ПОКАЗАТЬ ЗАНОВО', lock: true, note: 'Включит подсказки, покажет заново всё «НОВОЕ» и откроет учебное задание «Пристрелка».' },
     { id: 'setUpReset', act: 'upreset', type: 'act', label: 'УЛУЧШЕНИЯ БАШНИ', btn: 'СБРОСИТЬ УЛУЧШЕНИЯ', lock: true, note: 'Снять все улучшения и вернуть очки снабжения.' },
     { id: 'setDefaults', act: 'defaults', type: 'act', label: 'НАСТРОЙКИ', btn: 'ВОССТАНОВИТЬ ПО УМОЛЧАНИЮ', note: 'Вернуть все настройки к исходным. Прогресс и сложность не меняются.' },
     { id: 'setWipe', act: 'wipe', type: 'act', label: 'ПРОГРЕСС', btn: 'СБРОСИТЬ ПРОГРЕСС', danger: true, lock: true, note: 'Стереть звёзды, звание, улучшения, рекорды и сохранённый бой.' },
@@ -76,7 +77,7 @@ const ALL = [].concat(...TABS.map(([t]) => ROWS[t]));
  */
 export function createSettings({ game, engine, show, sfx, dialog, hooks = {} }) {
   let back = null, battle = false, tab = 'game', built = false, ambTimer = 0, fpsTimer = 0, version = '';
-  let cur = { sens: 1, invert: false, lefty: false, vibro: true, vibroPower: 'high', hints: true, autosave: true, speed: 1, confirmFriendly: true, crewPanel: 'full',
+  let cur = { sens: 1, invert: false, lefty: false, vibro: true, vibroPower: 'high', hints: 'new', autosave: true, speed: 1, confirmFriendly: true, crewPanel: 'full',
     volFx: 100, volAmb: 70, volRadio: 100, text: 1, quality: 'high', fps: 60, nightTint: 'normal', showFps: false };
   const read = () => { try { cur = Object.assign(cur, game.settings()); } catch (e) { /* старая логика без настроек */ } return cur; };
   const call = (obj, name, ...a) => { try { if (obj && typeof obj[name] === 'function') return obj[name](...a); } catch (e) { /* не критично */ } return undefined; };
@@ -243,7 +244,10 @@ export function createSettings({ game, engine, show, sfx, dialog, hooks = {} }) 
     intro: () => { if (battle || !hooks.playIntro) return; const b = back; hooks.playIntro(() => { back = b; battle = false; reopen(); }); },
     tutorial: () => {
       if (battle || !hooks.startTutorial) return;
-      game.setSetting('hints', true); apply();
+      // выключенные подсказки включаем («НОВОЕ»), а всё изученное снова становится новым
+      if (read().hints === 'off') game.setSetting('hints', 'new');
+      try { game.resetLearned(); } catch (e) { /* старая логика */ }
+      apply();
       back = null; hooks.startTutorial();
     },
     upreset: () => ask('<h2>СБРОСИТЬ УЛУЧШЕНИЯ?</h2><p>Все улучшения башни будут сняты, потраченные очки снабжения вернутся полностью.</p>', [

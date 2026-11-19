@@ -6,7 +6,7 @@ import { RAD, tick, noWind, start } from './bot.js';
 
 const mem = (init) => { const m = {}; if (init) m['arta2.save'] = JSON.stringify(init); return { mem: m, get: (k) => m[k] || null, set: (k, v) => { m[k] = v; } }; };
 const stored = (st) => JSON.parse(st.mem['arta2.save']);
-const DEF = { sens: 1, invert: false, lefty: false, vibro: true, vibroPower: 'high', hints: true, autosave: true, speed: 1, confirmFriendly: true,
+const DEF = { sens: 1, invert: false, lefty: false, vibro: true, vibroPower: 'high', hints: 'new', autosave: true, speed: 1, confirmFriendly: true,
   crewPanel: 'full', volFx: 100, volAmb: 70, volRadio: 100, text: 1, quality: 'high', fps: 60, nightTint: 'normal', showFps: false };
 /** Сохранение с прогрессом во всех полях. */
 const rich = (extra) => ({ unlocked: 12, stars: [3, 2, 1, 3, 3, 3, 3, 3, 3, 3, 3], records: [{ stars: 3, shots: 2, time: 50, integrity: 100, difficulty: 0 }],
@@ -19,11 +19,11 @@ test('настройки: полный набор по умолчанию и о�
   assert.deepEqual(Object.keys(g.SETTINGS).sort(), Object.keys(DEF).sort());
   for (const k of Object.keys(DEF)) assert.deepEqual(g.SETTINGS[k].def, DEF[k], k);
   const good = { sens: [0.6, 1.6, 1.2], invert: [true, false], lefty: [true, false], vibro: [false, true], vibroPower: ['low', 'high'],
-    hints: [false, true], autosave: [false, true], speed: [2, 1], confirmFriendly: [false, true], crewPanel: ['compact', 'off', 'full'],
+    hints: ['all', 'off', 'new'], autosave: [false, true], speed: [2, 1], confirmFriendly: [false, true], crewPanel: ['compact', 'off', 'full'],
     volFx: [0, 100, 35], volAmb: [0, 100, 35], volRadio: [0, 100, 35], text: [1.15, 1.3, 1], quality: ['mid', 'low', 'high'], fps: [30, 60],
     nightTint: ['soft', 'normal'], showFps: [true, false] };
   const bad = { sens: ['1', NaN, null], invert: [1, 'да', null], lefty: [1, 0], vibro: ['1', undefined], vibroPower: ['mid', true, 1],
-    hints: [0, 'off'], autosave: [1, null], speed: [3, 0, '2', 1.5], confirmFriendly: ['true', 2], crewPanel: ['hidden', true, 0],
+    hints: [0, true, false, 'on', null], autosave: [1, null], speed: [3, 0, '2', 1.5], confirmFriendly: ['true', 2], crewPanel: ['hidden', true, 0],
     volFx: [-1, 101, '50', NaN, null], volAmb: [-0.5, 100.5, Infinity], volRadio: [1000, 'громко'], text: [1.2, '1', 2], quality: ['ultra', 2, null],
     fps: [45, '30', 120], nightTint: ['off', true], showFps: [1, 'да'] };
   assert.deepEqual(Object.keys(good).sort(), Object.keys(DEF).sort()); assert.deepEqual(Object.keys(bad).sort(), Object.keys(DEF).sort());
@@ -49,7 +49,7 @@ test('настройки: неизвестный ключ — отказ с со
 test('настройки: сохраняются между запусками; событие settings несёт копию', () => {
   const st = mem(); const g = createGame({ storage: st });
   const ev = []; g.on('settings', (e) => ev.push(e));
-  const want = { invert: true, vibroPower: 'low', hints: false, autosave: false, speed: 2, confirmFriendly: false, crewPanel: 'compact', volFx: 40, volAmb: 0,
+  const want = { invert: true, vibroPower: 'low', hints: 'off', autosave: false, speed: 2, confirmFriendly: false, crewPanel: 'compact', volFx: 40, volAmb: 0,
     volRadio: 55, quality: 'low', fps: 30, nightTint: 'soft', showFps: true };
   for (const k of Object.keys(want)) assert.ok(g.setSetting(k, want[k]).ok);
   assert.equal(ev.length, Object.keys(want).length);
@@ -96,7 +96,7 @@ test('resetProgress: стирает каждое поле прогресса, н
   assert.ok(g.startMission(0).ok); g.begin(); tick(g, 5); assert.ok(g.suspend().ok); g.quit({ keep: true });
   assert.ok(g.resumeInfo()); assert.ok(g.points() > 0); assert.equal(g.rank().index > 0, true);
   const ev = []; for (const n of ['save', 'upgrades', 'settings', 'phase', 'state']) g.on(n, () => ev.push(n));
-  const mine = { ...DEF, sens: 1.4, quality: 'low', volFx: 10, hints: false };
+  const mine = { ...DEF, sens: 1.4, quality: 'low', volFx: 10, hints: 'off' };      // прежний выключатель false → 'off'
   assert.deepEqual(g.resetProgress(), { ok: true });
   assert.deepEqual(ev, ['save', 'upgrades', 'state']);
   const sv = g.save;

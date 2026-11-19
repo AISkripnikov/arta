@@ -1,23 +1,23 @@
 {
- "version": 29917278,
+ "version": 29918036,
  "minApp": 3,
  "orientation": "landscape",
  "confirm": true,
  "files": [
   {
    "path": "app.js",
-   "size": 1401103,
-   "sha256": "0b038b75c3d294cc157449f4bec72082f8b6ccdf9559006e5ee6023bc260027a"
+   "size": 1470818,
+   "sha256": "27b4f22d624be5c8532bd8876b3caf0ef3a973e2351b9349462ed090ba5da403"
   },
   {
    "path": "index.html",
-   "size": 6999,
-   "sha256": "b93d28ea478e13134b779ed00c2711900127c0f73be4b445650a448004640a11"
+   "size": 7074,
+   "sha256": "ee316880bb89e31a7cbd82af262b7619be7b3b68ac26699dd07ff8bcd90d95c6"
   },
   {
    "path": "style.css",
-   "size": 43128,
-   "sha256": "e95f8ee757a69a421838b4ef237a1cd9f6b23fe14a3d2c236c93b354cd475cb5"
+   "size": 47934,
+   "sha256": "fe3e8342904dfa489f04551b7744b9d47ebf4ef6b5a84ec543464bee6e2d3f20"
   }
  ]
 }
