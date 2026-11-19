@@ -165,13 +165,14 @@ export function makeKit(ctx, { seed = 1, lite = false, noise = null } = {}) {
   /** Удар-«тело»: синус с падением высоты (вес выстрела, упора, разрыва). */
   k.thump = (t, o = {}) => k.tone(t, o.dur || 0.2, { f: o.f || 100, f2: o.f2 || (o.f || 100) * 0.45, gain: o.gain == null ? 0.6 : o.gain, attack: o.attack == null ? 0.003 : o.attack, dest: o.dest });
   /** Короткий щелчок: шум верхних частот. */
-  k.click = (t, o = {}) => k.noise(t, o.dur || 0.008, { type: o.type || 'highpass', f: o.f || 3000, q: o.q == null ? 0.7 : o.q, gain: o.gain == null ? 0.3 : o.gain, attack: 0.0008, dest: o.dest });
+  k.click = (t, o = {}) => k.noise(t, o.dur || 0.008, { type: o.type || 'bandpass', f: Math.min(o.f || 3000, 3500), q: o.q == null ? 0.8 : o.q, gain: o.gain == null ? 0.3 : o.gain, attack: 0.0012, dest: o.dest });
   /** Дребезг: n щелчков со случайными промежутками и убывающей силой. o: n, gap [мин, макс], f [мин, макс], q, gain. */
   k.rattle = (t, o = {}) => {
     const n = lite ? Math.min(3, o.n || 6) : (o.n || 6), gap = o.gap || [0.05, 0.14], fr = o.f || [1800, 4500];
     let x = t;
     for (let i = 0; i < n; i++) {
-      k.noise(x, o.len || 0.03, { type: 'bandpass', f: rv(fr[0], fr[1]), q: o.q || 6, gain: (o.gain || 0.1) * (1 - 0.7 * i / n) * rv(0.6, 1), attack: 0.001, dest: o.dest });
+      // незакреплённое железо: маленькие модальные удары (брусок), а не всплески шума
+      k.modal(x, { ratios: BAR, n: 2, f: rv(fr[0], fr[1]) * 0.6, decay: (o.len || 0.03) * 1.5, gain: (o.gain || 0.1) * 0.8 * (1 - 0.7 * i / n) * rv(0.6, 1), attack: 0.0015, dest: o.dest });
       x += rv(gap[0], gap[1]) * (o.slow ? 1 + i * o.slow : 1);
     }
     return x;
@@ -182,7 +183,7 @@ export function makeKit(ctx, { seed = 1, lite = false, noise = null } = {}) {
     for (let i = 0; i < n; i++) {
       const x = t + span * Math.pow((i + rnd()) / n, 1.5), g = (o.gain || 0.08) * (1 - 0.6 * i / n);
       k.modal(x, { ratios: BAR, n: 3, f: rv(fr[0], fr[1]), decay: rv(0.04, 0.1), gain: g, dest: o.dest });
-      k.click(x, { f: 2500, gain: g * 0.8, dest: o.dest });
+      k.click(x, { f: 2000, gain: g * 0.5, dest: o.dest });
     }
   };
   /** «Медный» голос (фанфара, рожок): две пилы с расстройкой → фильтр, яркость следует за громкостью. */

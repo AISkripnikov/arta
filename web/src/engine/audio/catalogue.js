@@ -57,10 +57,15 @@
 // │ drip         │ 0.25×3 │ капля: два восходящих чирпа                                                            │
 // │ foghorn      │ 3.2    │ ревун в тумане: пилы 82 и 123 Гц через НЧ-фильтр, вибрато                              │
 // │ farThunder   │ 4.0    │ дальний гром: раскат НЧ-шума с тремя волнами · синус 38                                │
-// │ rainLoop     │ петля  │ капли по броне: 70 капель на 2.4 с (шум + звон листа)                                  │
+// │ gearLoop     │ петля  │ шестерни: 32 зуба на круг 1 с (модальный тик + стук), скорость = playbackRate          │
+// │ alarmLoop    │ петля  │ ревун: тоны 370/466 Гц (гладкие гармоники), пульс 1.6 Гц                              │
+// │ *Bed         │ петля  │ фон (beds.js): тёмный шум, гул на сетке 12.5 Гц — просчёт в JS, 8 кГц                  │
+// │ theme        │ 64 с   │ тема меню целиком (аккорды, литавры, рожок), просчёт один раз                          │
 // │ uiTap … daily│        │ интерфейс: см. рецепты ниже (фанфара — «медные» голоса k.brass, литавра, колокольчики) │
 // │ intro*       │        │ ролик: дверь, заставка, морзянка, клавиша, свист                                       │
 // └──────────────┴────────┴──────────────────────────────────────────────────────────────────────────────────────┘
+
+import { BEDS } from './beds.js';
 
 const N4 = { D2: 73.42, A2: 110, D3: 146.83, F3: 174.61, G3: 196, A3: 220, C4: 261.63, D4: 293.66, E4: 329.63, F4: 349.23, G4: 392, A4: 440, D5: 587.33, F5: 698.46, A5: 880 };
 
@@ -88,7 +93,7 @@ function radioRecipe(cls, urgent) {
     fn(k, t, dest) {
       const reps = urgent ? 2 : 1, mul = urgent ? 1.335 : 1, len = urgent ? 0.82 : 0.62;
       k.click(t, { f: 2000, gain: 0.5, dur: 0.012, dest });
-      k.noise(t + 0.01, len, { f: 1900, q: 0.8, gain: 0.16, attack: 0.02, hold: len - 0.05, rel: 0.03, dest });
+      k.noise(t + 0.01, len, { type: 'lowpass', f: 1400, q: 0.6, gain: 0.05, attack: 0.03, hold: len - 0.06, rel: 0.03, dest });
       let x = t + 0.07;
       for (let r = 0; r < reps; r++) {
         for (const [f, dur, pause, f2] of P.seq) {
@@ -105,57 +110,57 @@ function radioRecipe(cls, urgent) {
 }
 
 function aaShotLayers(k, t, dest, sat, ringF, lvl) {
-  k.tone(t, 0.07, { f: 150, f2: 60, gain: 1.0 * lvl, attack: 0.001, dest: sat });
-  k.noise(t, 0.07, { f: 1500, f2: 420, q: 0.7, gain: 0.7 * lvl, attack: 0.001, dest: sat });
-  k.click(t, { f: 2600, gain: 0.35 * lvl, dur: 0.012, dest });
-  k.modal(t, { ratios: k.BAR, n: 3, f: ringF, decay: 0.16, gain: 0.14 * lvl, dest });
-  k.click(t + 0.055, { f: 2500, gain: 0.16 * lvl, dest });
+  k.tone(t, 0.08, { f: 150, f2: 60, gain: 1.0 * lvl, attack: 0.002, dest: sat });
+  k.noise(t, 0.06, { type: 'lowpass', f: 1500, f2: 420, q: 0.7, gain: 0.8 * lvl, attack: 0.002, dest: sat });
+  k.noise(t, 0.012, { f: 2200, q: 1, gain: 0.25 * lvl, attack: 0.0015, dest });
+  k.modal(t, { ratios: k.BAR, n: 3, f: ringF, decay: 0.16, gain: 0.14 * lvl, attack: 0.002, dest });
+  k.modal(t + 0.055, { ratios: k.BAR, n: 2, f: ringF * 2.1, decay: 0.03, gain: 0.05 * lvl, attack: 0.002, dest });   // затвор
 }
 function caseTinkle(k, t, dest, gain) {
-  const f = k.rv(3500, 5400);
+  const f = k.rv(2600, 3600);
   let x = t, g = gain;
   for (let b = 0; b < 3; b++) { k.modal(x, { ratios: k.BELL, n: 4, f, decay: 0.05, gain: g, dest }); x += k.rv(0.05, 0.09) * (1 - b * 0.25); g *= 0.5; }
 }
 
 export const CAT = {
   // ---------------- главный калибр и снаряды ----------------
-  gun: { d: 0.9, v: 3, g: 2.4, sp: 'big', pr: 2, jit: 0.02,
+  gun: { d: 0.9, sr: 0.5, v: 3, g: 2.4, sp: 'big', pr: 2, jit: 0.02,
     fn(k, t, dest, vi) {
-      const sat = k.shaper(2.6, dest);
-      k.tone(t, 0.85, { f: 58 + vi * 2, f2: 30, gain: 0.32, attack: 0.003, dest: sat });
-      k.tone(t, 0.7, { f: 41, f2: 27, gain: 0.22, attack: 0.006, dest: sat });
-      k.noise(t, 0.75, { type: 'lowpass', f: 2600 + vi * 200, f2: 260, q: 0.5, gain: 0.8, attack: 0.003, dest: sat });
-      k.noise(t, 0.55, { f: 900 + vi * 60, f2: 320, q: 0.6, gain: 3.0, attack: 0.002, dest });              // «мясо» выстрела: слышно и в маленьком динамике
-      k.tone(t, 0.3, { type: 'sawtooth', f: 230, f2: 80, gain: 0.5, attack: 0.002, dest: sat });
-      k.noise(t + 0.004, 0.22, { f: 1700 + vi * 90, f2: 600, q: 0.7, gain: 1.1, attack: 0.002, dest });      // хлёсткий «бах» в середине: телефонный динамик
-      k.noise(t, 0.09, { type: 'highpass', f: 1200, gain: 1.0, attack: 0.001, dest });
-      k.noise(t, 0.03, { f: 3000, q: 1, gain: 0.6, attack: 0.0008, dest });
-      k.modal(t + 0.012, { ratios: k.PLATE, n: 6, f: k.rv(200, 240), decay: 0.5, gain: 0.12, dest });   // лязг казённика при откате
-      k.fm(t + 0.02, 0.16, { fc: 150, ratio: 1.41, index: 5, index2: 0, gain: 0.15, dest });
+      // тело: глубокий удар (два синуса с падением высоты, мягкое насыщение только на первых 0.3 с — слышно в телефоне)
+      const sat = k.shaper(1.6, dest);
+      k.tone(t, 0.85, { f: 58 + vi * 2, f2: 30, gain: 0.34, attack: 0.003, dest: sat });
+      k.tone(t, 0.7, { f: 41, f2: 27, gain: 0.24, attack: 0.006, dest: sat });
+      k.tone(t, 0.32, { type: 'triangle', f: 210 + vi * 8, f2: 70, gain: 0.8, attack: 0.002, dest });          // середина тела
+      k.tone(t, 0.22, { f: 420 + vi * 15, f2: 140, gain: 0.5, attack: 0.002, dest });
+      // короткий треск (≤ 0.12 с) и тёмный «бах» (НЧ-шум 0.35 с, быстро темнеет)
+      k.noise(t, 0.12, { f: 1500 + vi * 90, f2: 500, q: 0.7, gain: 1.4, attack: 0.0015, dest });
+      k.noise(t, 0.35, { type: 'lowpass', f: 1400, f2: 160, q: 0.5, gain: 1.6, attack: 0.002, dest });
+      k.noise(t, 0.025, { f: 2800, q: 1, gain: 0.35, attack: 0.0015, dest });
+      // звон металла: казённик и броня, затухает
+      k.modal(t + 0.012, { ratios: k.PLATE, n: 7, f: k.rv(200, 240), decay: 0.9, damp: 0.9, gain: 0.2, dest });
+      k.modal(t + 0.02, { ratios: k.BAR, n: 3, f: k.rv(640, 700), decay: 0.4, gain: 0.06, dest });
     } },
-  gunTail: { d: 2.6, sr: 0.5, g: 0.9, sp: 'big', pr: 2, jit: 0.02,
+  gunTail: { d: 2.6, sr: 0.34, g: 0.9, sp: 'big', pr: 2, jit: 0.02, tail: 1.1,
     fn(k, t, dest) {
       k.modal(t, { ratios: k.PLATE, n: 10, f: 142, decay: 1.7, damp: 0.8, gain: 0.3, attack: 0.01, dest });        // звон брони
       k.modal(t, { ratios: k.PLATE, n: 6, f: 610, decay: 0.9, gain: 0.1, attack: 0.006, dest });
       const cb = k.comb(dest, { f: 240, fb: 0.5 });
       k.rattle(t + 0.12, { n: 8, gap: [0.05, 0.14], f: [1800, 4500], gain: 0.16, dest: cb, slow: 0.12 });           // незакреплённое железо
       k.noise(t + 0.1, 2.2, { type: 'lowpass', f: 260, f2: 60, gain: 0.4, attack: 0.25, dest });                    // раскат
-      k.noise(t + 0.05, 1.6, { f: 520, f2: 260, q: 0.5, gain: 0.35, attack: 0.15, dest });
-      k.tone(t, 1.5, { f: 4150, gain: 0.02, attack: 0.05, dest });                                                 // звон в ушах
-      k.tone(t, 1.3, { f: 6230, gain: 0.008, attack: 0.06, dest });
+      k.noise(t + 0.05, 1.4, { type: 'lowpass', f: 480, f2: 200, q: 0.5, gain: 0.3, attack: 0.15, dest });
     } },
   whoosh: { d: 1.2, sr: 0.5, g: 0.34, sp: 'out', pr: 6,
     fn(k, t, dest) {
-      const g = k.noise(t, 1.05, { f: 1800, f2: 300, q: 1.3, gain: 0.6, attack: 0.04, dest });
-      k.lfo(g.gain, 31, 0.12, t, t + 1.1);
-      k.tone(t, 1.0, { f: 500, f2: 180, gain: 0.08, attack: 0.05, dest });
+      const g = k.noise(t, 0.9, { type: 'lowpass', f: 1100, f2: 220, q: 0.9, gain: 0.5, attack: 0.05, dest });
+      k.lfo(g.gain, 31, 0.08, t, t + 0.95);
+      k.tone(t, 1.0, { f: 500, f2: 180, gain: 0.14, attack: 0.05, dest });
     } },
   impWater: { d: 1.6, sr: 0.5, v: 2, g: 0.36, sp: 'out', pr: 6,
     fn(k, t, dest) {
       k.thump(t, { f: 70, f2: 35, dur: 0.4, gain: 0.45, dest });
       k.noise(t, 0.2, { f: 500, f2: 250, q: 0.8, gain: 0.5, attack: 0.003, dest });
-      k.noise(t, 1.2, { f: 1500, f2: 500, q: 0.6, gain: 0.6, attack: 0.12, dest });
-      k.noise(t + 0.2, 1.0, { type: 'highpass', f: 3500, gain: 0.16, attack: 0.3, dest });
+      k.noise(t, 1.1, { type: 'lowpass', f: 1100, f2: 300, q: 0.6, gain: 0.6, attack: 0.12, dest });           // столб воды
+      k.noise(t + 0.2, 0.9, { f: 1300, q: 0.8, gain: 0.08, attack: 0.3, dest });                                  // брызги оседают
     } },
   impLand: { d: 1.6, sr: 0.5, v: 2, g: 0.4, sp: 'out', pr: 6,
     fn(k, t, dest) {
@@ -185,19 +190,19 @@ export const CAT = {
       }
     } },
   // ---------------- попадания по батарее ----------------
-  nearMiss: { d: 2.6, sr: 0.5, v: 2, g: 0.95, sp: 'big', pr: 5,
+  nearMiss: { d: 2.6, sr: 0.34, v: 2, g: 0.72, sp: 'big', pr: 5, tail: 1.0,
     fn(k, t, dest) {
       const sat = k.shaper(2.4, dest);
       k.tone(t, 0.8, { f: 52, f2: 22, gain: 0.35, attack: 0.003, dest: sat });
       k.noise(t, 0.7, { type: 'lowpass', f: 2200, f2: 220, gain: 0.8, attack: 0.002, dest: sat });
       k.noise(t, 0.5, { f: 700, f2: 260, q: 0.6, gain: 1.7, attack: 0.002, dest });
       k.noise(t, 0.06, { type: 'highpass', f: 1500, gain: 0.6, attack: 0.001, dest });
-      k.noise(t + 0.3, 2.0, { type: 'highpass', f: 2500, gain: 0.05, attack: 0.35, dest });                       // пыль
+      k.noise(t + 0.3, 1.6, { type: 'lowpass', f: 700, f2: 250, gain: 0.08, attack: 0.35, dest });                       // пыль
       const cb = k.comb(dest, { f: 205, fb: 0.55 });
       k.rattle(t + 0.14, { n: 10, gap: [0.05, 0.15], f: [1800, 5000], gain: 0.14, dest: cb, slow: 0.1 });
       for (let i = 0; i < 2; i++) k.modal(t + k.rv(0.2, 0.6), { ratios: k.BAR, n: 4, f: k.rv(900, 1500), decay: 0.15, gain: 0.08, dest });
     } },
-  turretHit: { d: 3.2, sr: 0.5, v: 2, g: 1.1, sp: 'big', pr: 5,
+  turretHit: { d: 3.2, sr: 0.34, v: 2, g: 1.0, sp: 'big', pr: 5, tail: 0.25,
     fn(k, t, dest, vi) {
       const sat = k.shaper(2.2, dest);
       k.noise(t, 0.05, { type: 'highpass', f: 1400, gain: 0.4, attack: 0.001, dest });
@@ -206,21 +211,20 @@ export const CAT = {
       k.noise(t, 0.35, { f: 700, f2: 260, q: 0.7, gain: 0.8, attack: 0.002, dest });
       k.modal(t, { ratios: k.PLATE, n: 12, f: 96 + vi * 9, decay: 2.6, damp: 0.6, tilt: 0.4, gain: 0.9, dest });  // огромный лязг
       k.modal(t + 0.004, { ratios: k.PLATE, n: 8, f: 233, decay: 1.4, gain: 0.55, dest });
-      k.fm(t, 0.3, { fc: 180, ratio: 1.41, index: 8, index2: 0, gain: 0.6, dest });
+      k.fm(t, 0.25, { fc: 180, ratio: 1.41, index: 4, index2: 0, gain: 0.4, dest });
       k.debris(t + 0.4, { n: 14, span: 2.2, gain: 0.09, dest });
     } },
-  fault: { d: 1.5, v: 2, g: 0.36, sp: 'in', pr: 6,
+  fault: { d: 1.5, sr: 0.5, v: 2, g: 0.26, sp: 'in', pr: 6,
     fn(k, t, dest) {
       let x = t;
       const n = k.lite ? 3 : Math.round(k.rv(5, 7));
       for (let i = 0; i < n; i++) {
         const d = k.rv(0.015, 0.045);
-        k.fm(x, d, { fc: 120, ratio: 7.3, index: 30, index2: 12, gain: 0.5, type: 'sawtooth', attack: 0.001, hold: d, rel: 0.004, dest });
-        k.noise(x, d, { f: 3000, q: 2, gain: 0.5, attack: 0.001, hold: d, rel: 0.004, dest });
+        k.fm(x, d, { fc: 120, ratio: 7.3, index: 10, index2: 4, gain: 0.5, attack: 0.002, hold: d, rel: 0.006, dest });
+        k.noise(x, d, { f: 2200, q: 2, gain: 0.3, attack: 0.002, hold: d, rel: 0.006, dest });
         x += d + k.rv(0.02, 0.09);
       }
-      k.noise(t + 0.12, 1.2, { type: 'highpass', f: 4000, f2: 2500, gain: 0.3, attack: 0.08, dest });               // пар
-      k.noise(t + 0.12, 1.0, { f: 6000, q: 1.5, gain: 0.15, attack: 0.1, dest });
+      k.noise(t + 0.12, 0.9, { f: 2400, f2: 1600, q: 1.2, gain: 0.18, attack: 0.08, hold: 0.3, rel: 0.5, dest });               // пар
     } },
   // ---------------- заряжание ----------------
   breechOpen: { d: 1.1, sr: 0.5, v: 2, g: 0.42, sp: 'in', pr: 4,
@@ -257,7 +261,7 @@ export const CAT = {
       const cb = k.comb(dest, { f: 310, fb: 0.45 });
       for (let i = 0; i < 10; i++) {
         const x = t + i * 0.096;
-        k.noise(x, 0.022, { f: k.rv(1400, 2000), q: 3, gain: 0.4 * k.rv(0.8, 1), attack: 0.001, dest: cb });
+        k.noise(x, 0.02, { f: k.rv(1100, 1500), q: 3, gain: 0.3 * k.rv(0.8, 1), attack: 0.002, dest: cb });
         k.modal(x, { ratios: k.BAR, n: 2, f: k.rv(1700, 2100), decay: 0.03, gain: 0.1, dest });
         k.thump(x, { f: 180, f2: 110, dur: 0.03, gain: 0.12, dest });
       }
@@ -270,15 +274,15 @@ export const CAT = {
       const cb = k.comb(dest, { f: 310, fb: 0.45 });
       k.rattle(t + 0.07, { n: 3, gap: [0.07, 0.1], f: [1300, 1900], q: 3, gain: 0.2, dest: cb, slow: 0.5 });
     } },
-  ram: { d: 1.0, v: 2, g: 0.46, sp: 'in', pr: 4,
+  ram: { d: 1.0, sr: 0.5, v: 2, g: 0.46, sp: 'in', pr: 4,
     fn(k, t, dest) {
-      k.click(t, { f: 4000, gain: 0.3, dur: 0.015, dest });
-      k.noise(t, 0.42, { f: 3000, f2: 700, q: 0.8, gain: 0.45, attack: 0.03, dest });
+      k.click(t, { f: 2500, gain: 0.25, dur: 0.012, dest });
+      k.noise(t, 0.4, { f: 1600, f2: 450, q: 0.9, gain: 0.35, attack: 0.03, dest });
       k.tone(t, 0.36, { type: 'sawtooth', f: 60, f2: 140, gain: 0.05, attack: 0.05, dest });
       k.thump(t + 0.38, { f: 85, f2: 36, dur: 0.3, gain: 1.0, dest });
       k.noise(t + 0.38, 0.1, { type: 'lowpass', f: 600, gain: 0.5, dest });
       k.modal(t + 0.38, { ratios: k.PLATE, n: 6, f: 180, decay: 0.5, gain: 0.2, dest });
-      k.noise(t + 0.55, 0.4, { type: 'highpass', f: 3000, gain: 0.12, attack: 0.08, dest });
+      k.noise(t + 0.55, 0.35, { f: 1200, q: 0.8, gain: 0.06, attack: 0.08, dest });
     } },
   charge: { d: 0.4, sr: 0.5, v: 2, g: 0.3, sp: 'in', pr: 4,
     fn(k, t, dest) {
@@ -360,7 +364,7 @@ export const CAT = {
     } },
   buzz: { d: 0.36, sr: 0.5, g: 0.17, sp: 'in', pr: 2, gap: 0.25, jit: 0,
     fn(k, t, dest) {
-      const bp = k.filter('bandpass', 900, 0.9, dest), sat = k.shaper(3, bp), am = k.gain(0.65, sat);
+      const bp = k.filter('bandpass', 750, 0.6, dest), am = k.gain(0.65, bp);
       k.tone(t, 0.3, { type: 'sawtooth', f: 112, gain: 0.6, attack: 0.008, hold: 0.28, rel: 0.03, dest: am });
       k.tone(t, 0.3, { type: 'square', f: 168, gain: 0.3, attack: 0.008, hold: 0.28, rel: 0.03, dest: am });
       k.lfo(am.gain, 56, 0.35, t, t + 0.34, 'square');
@@ -372,7 +376,7 @@ export const CAT = {
     } },
   paper: { d: 0.3, v: 2, g: 0.065, sp: 'dry', pr: 5, gap: 0.08,
     fn(k, t, dest) {
-      const g = k.noise(t, 0.2, { f: 2500, f2: 4000, q: 0.5, gain: 0.5, attack: 0.06, dest });
+      const g = k.noise(t, 0.18, { f: 1800, f2: 2600, q: 0.6, gain: 0.4, attack: 0.05, dest });
       k.lfo(g.gain, 43, 0.15, t, t + 0.28);
       k.noise(t, 0.2, { type: 'lowpass', f: 600, gain: 0.2, attack: 0.05, dest });
     } },
@@ -384,25 +388,25 @@ export const CAT = {
     } },
   loupe: { d: 0.25, g: 0.06, sp: 'dry', pr: 5, gap: 0.1,
     fn(k, t, dest) {
-      k.noise(t, 0.1, { type: 'highpass', f: 5000, gain: 0.25, attack: 0.03, dest });
+      k.noise(t, 0.08, { f: 2500, q: 0.8, gain: 0.12, attack: 0.03, dest });
       k.click(t + 0.1, { f: 3200, gain: 0.4, dest });
       k.modal(t + 0.1, { ratios: k.BELL, n: 5, f: 2600, decay: 0.12, gain: 0.3, dest });
     } },
   // ---------------- радио ----------------
   sqOpen: { d: 0.12, sr: 0.34, g: 0.12, bus: 'radio', sp: 'in', pr: 3, gap: 0.08,
-    fn(k, t, dest) { k.click(t, { f: 2000, gain: 0.5, dur: 0.01, dest }); k.noise(t + 0.01, 0.08, { f: 1900, q: 0.8, gain: 0.3, attack: 0.03, dest }); } },
+    fn(k, t, dest) { k.click(t, { f: 2000, gain: 0.5, dur: 0.01, dest }); k.noise(t + 0.01, 0.08, { f: 1400, q: 0.8, gain: 0.15, attack: 0.03, dest }); } },
   sqClose: { d: 0.18, sr: 0.34, g: 0.09, bus: 'radio', sp: 'in', pr: 3, gap: 0.08,
     fn(k, t, dest) {
-      k.noise(t, 0.06, { f: 1900, q: 0.8, gain: 0.35, attack: 0.004, dest });
+      k.noise(t, 0.06, { f: 1400, q: 0.8, gain: 0.18, attack: 0.004, dest });
       k.click(t + 0.07, { f: 2000, gain: 0.4, dur: 0.01, dest });
       k.tone(t + 0.07, 0.04, { f: 300, f2: 120, gain: 0.3, dest });
     } },
   // ---------------- зенитка и воздух ----------------
-  aaShot: { d: 0.4, v: 3, g: 0.72, sp: 'big', pr: 4, gap: 0.07, jit: 0.03,
-    fn(k, t, dest, vi) { aaShotLayers(k, t, dest, k.shaper(2.2, dest), 730 + vi * 30, 1); } },
-  aaLoop: { d: 1.3, loop: 0.88, g: 0.48, sp: 'big', pr: 4,
+  aaShot: { d: 0.4, sr: 0.5, v: 3, g: 0.72, sp: 'big', pr: 4, gap: 0.07, jit: 0.03,
+    fn(k, t, dest, vi) { aaShotLayers(k, t, dest, dest, 730 + vi * 30, 1); } },
+  aaLoop: { d: 1.3, loop: 0.88, sr: 0.5, g: 0.48, sp: 'big', pr: 4,
     fn(k, t, dest) {
-      const sat = k.shaper(2.2, dest);
+      const sat = dest;
       for (let i = 0; i < 8; i++) {
         const x = t + i * 0.11;
         aaShotLayers(k, x, dest, sat, i % 2 ? 790 : 730, k.rv(0.85, 1));
@@ -415,11 +419,10 @@ export const CAT = {
       for (let i = 0; i < (k.lite ? 2 : 5); i++) caseTinkle(k, t + k.rv(0.05, 0.6), dest, 0.14);
       k.noise(t, 0.6, { type: 'lowpass', f: 500, f2: 150, gain: 0.3, attack: 0.05, dest });
     } },
-  overheat: { d: 1.6, g: 0.24, sp: 'in', pr: 6, gap: 0.5,
+  overheat: { d: 1.6, sr: 0.5, g: 0.24, sp: 'in', pr: 6, gap: 0.5,
     fn(k, t, dest) {
-      k.noise(t, 1.5, { type: 'highpass', f: 3500, gain: 0.5, attack: 0.05, hold: 0.6, rel: 0.85, dest });
-      k.noise(t, 1.2, { f: 7000, q: 1.5, gain: 0.25, attack: 0.05, hold: 0.4, rel: 0.8, dest });
-      for (let i = 0; i < (k.lite ? 3 : 12); i++) k.click(t + k.rv(0.02, 1.0), { f: k.rv(2500, 6000), gain: k.rv(0.1, 0.3), dur: 0.004, dest });
+      k.noise(t, 1.3, { f: 2200, q: 0.9, gain: 0.3, attack: 0.08, hold: 0.4, rel: 0.8, dest });
+      for (let i = 0; i < (k.lite ? 3 : 10); i++) k.modal(t + k.rv(0.05, 1.2), { ratios: k.BAR, n: 2, f: k.rv(1800, 3200), decay: 0.03, gain: k.rv(0.06, 0.14), attack: 0.002, dest });
     } },
   jam: { d: 0.5, sr: 0.5, v: 2, g: 0.42, sp: 'in', pr: 6, gap: 0.2,
     fn(k, t, dest) {
@@ -430,7 +433,7 @@ export const CAT = {
       k.modal(t + 0.12, { ratios: k.PLATE, n: 4, f: 430, decay: 0.15, gain: 0.15, dest });
       k.click(t + 0.12, { f: 2000, gain: 0.2, dest });
     } },
-  bombBurst: { d: 2.8, sr: 0.5, v: 2, g: 0.54, sp: 'big', pr: 6, gap: 0.2,
+  bombBurst: { d: 2.8, sr: 0.34, v: 2, g: 0.54, sp: 'big', pr: 6, gap: 0.2, tail: 1.0,
     fn(k, t, dest) {
       const sat = k.shaper(2.6, dest);
       k.tone(t, 1.0, { f: 64, f2: 24, gain: 0.55, attack: 0.003, dest: sat });
@@ -444,9 +447,9 @@ export const CAT = {
   // ---------------- случайные звуки фона ----------------
   creak: { d: 1.0, sr: 0.5, v: 3, g: 0.05, bus: 'amb', sp: 'in', pr: 7, jit: 0.1,
     fn(k, t, dest) {
-      const bp = k.filter('bandpass', k.rv(900, 1500), 12, dest), am = k.gain(0.5, bp);
-      k.tone(t, 0.75, { type: 'sawtooth', f: k.rv(70, 110), f2: k.rv(80, 130), gain: 0.8, attack: 0.15, hold: 0.45, rel: 0.2, dest: am });
-      k.lfo(am.gain, k.rv(14, 22), 0.5, t, t + 0.85, 'sawtooth');
+      const bp = k.filter('bandpass', k.rv(500, 900), 8, dest), am = k.gain(0.5, bp);
+      k.tone(t, 0.75, { type: 'triangle', f: k.rv(70, 110), f2: k.rv(80, 130), gain: 1.2, attack: 0.15, hold: 0.45, rel: 0.2, dest: am });
+      k.lfo(am.gain, k.rv(14, 22), 0.4, t, t + 0.85);
       k.tone(t, 0.7, { f: 140, f2: 120, gain: 0.08, attack: 0.2, dest });
     } },
   drip: { d: 0.25, v: 3, g: 0.035, bus: 'amb', sp: 'in', pr: 7, jit: 0.12,
@@ -464,28 +467,20 @@ export const CAT = {
     } },
   farThunder: { d: 4.0, sr: 0.25, g: 0.07, bus: 'amb', sp: 'out', pr: 7, jit: 0.1,
     fn(k, t, dest) {
-      for (const [dt, lv] of [[0, 1], [0.5, 0.7], [1.3, 0.5]]) k.noise(t + dt, 2.2, { type: 'lowpass', f: 380, f2: 60, gain: 0.6 * lv, attack: 0.12, dest });
+      for (const [dt, lv] of [[0, 1], [0.5, 0.7], [1.3, 0.5]]) k.noise(t + dt, 2.6, { type: 'lowpass', f: 380, f2: 60, gain: 0.6 * lv, attack: 0.12, dest });
       k.tone(t, 1.6, { f: 38, f2: 26, gain: 0.4, attack: 0.1, dest });
-    } },
-  rainLoop: { d: 2.8, loop: 2.4, sr: 0.5, g: 0.035, bus: 'amb', sp: 'in', pr: 7,
-    fn(k, t, dest) {
-      for (let i = 0; i < 70; i++) {
-        const x = t + k.rnd() * 2.4, g = k.rv(0.2, 1);
-        k.noise(x, 0.006, { f: k.rv(2500, 6000), q: 3, gain: 0.5 * g, attack: 0.0008, dest });
-        if (i % 3 === 0) k.modal(x, { ratios: k.PLATE, n: 2, f: k.rv(1800, 3000), decay: 0.025, gain: 0.2 * g, dest });
-      }
     } },
   // ---------------- интерфейс ----------------
   uiTap: { d: 0.06, g: 0.06, sp: 'ui', pr: 0, gap: 0.03, jit: 0.02,
     fn(k, t, dest) { k.tone(t, 0.014, { type: 'triangle', f: 1500, gain: 0.5, attack: 0.001, dest }); k.click(t, { f: 3500, gain: 0.3, dur: 0.005, dest }); k.tone(t, 0.02, { f: 330, gain: 0.2, attack: 0.001, dest }); } },
   dlgOpen: { d: 0.25, sr: 0.5, g: 0.06, sp: 'ui', pr: 3, gap: 0.1, jit: 0,
     fn(k, t, dest) {
-      k.noise(t, 0.12, { f: 1800, f2: 3200, q: 0.6, gain: 0.2, attack: 0.04, dest });
+      k.noise(t, 0.1, { f: 1500, f2: 2200, q: 0.7, gain: 0.07, attack: 0.04, dest });
       k.tone(t, 0.09, { f: 520, gain: 0.5, attack: 0.004, dest }); k.tone(t + 0.07, 0.14, { f: 780, gain: 0.4, attack: 0.004, dest });
     } },
   dlgClose: { d: 0.22, sr: 0.5, g: 0.055, sp: 'ui', pr: 3, gap: 0.1, jit: 0,
     fn(k, t, dest) {
-      k.noise(t, 0.1, { f: 3000, f2: 1600, q: 0.6, gain: 0.2, attack: 0.03, dest });
+      k.noise(t, 0.09, { f: 2200, f2: 1400, q: 0.7, gain: 0.07, attack: 0.03, dest });
       k.tone(t, 0.08, { f: 700, gain: 0.5, attack: 0.004, dest }); k.tone(t + 0.06, 0.12, { f: 470, gain: 0.4, attack: 0.004, dest });
     } },
   toast: { d: 0.3, sr: 0.5, g: 0.06, sp: 'ui', pr: 3, gap: 0.15, jit: 0,
@@ -509,7 +504,6 @@ export const CAT = {
     fn(k, t, dest) {
       timpani(k, t, dest, 73.4, 0.6);
       for (const f of [N4.D3, N4.D3 * 1.5, N4.D3 * 1.06 * 2]) k.brass(t, 0.5, { f, gain: 0.16, attack: 0.02, rel: 0.5, bright: 5, dest });   // ре-ля-ми♭: тревожное созвучие
-      k.noise(t, 0.3, { f: 800, f2: 3000, q: 1, gain: 0.1, attack: 0.2, dest });
     } },
   won: { d: 3.6, sr: 0.5, g: 0.3, sp: 'ui', pr: 8, gap: 1, jit: 0,
     fn(k, t, dest) {
@@ -531,7 +525,6 @@ export const CAT = {
       k.brass(t, 0.22, { f: N4.A3, gain: 0.3, attack: 0.03, rel: 0.1, dest });
       for (const f of [N4.D4, N4.F4 * 1.0595, N4.A4]) k.brass(t + 0.3, 1.0, { f, gain: 0.22, attack: 0.04, rel: 0.3, vib: 0.004, dest });
       k.modal(t + 0.3, { ratios: k.BELL, n: 6, f: 2349, decay: 0.9, tilt: 0.5, gain: 0.08, dest });
-      k.noise(t + 0.3, 0.05, { type: 'highpass', f: 2500, gain: 0.12, dest });
     } },
   daily: { d: 1.4, sr: 0.5, g: 0.1, sp: 'ui', pr: 8, gap: 1, jit: 0,
     fn(k, t, dest) { [1046.5, 1318.5, 1568, 2093].forEach((f, i) => k.modal(t + i * 0.09, { ratios: k.BELL, n: 6, f, decay: 0.7, tilt: 0.5, gain: 0.4, dest })); } },
@@ -569,7 +562,67 @@ export const CAT = {
     fn(k, t, dest) {
       k.tone(t, 0.5, { f: 1900, f2: 420, gain: 0.4, attack: 0.08, dest });
       k.tone(t, 0.5, { f: 1950, f2: 432, gain: 0.25, attack: 0.1, dest });
-      k.noise(t, 0.5, { f: 2600, f2: 700, q: 3, gain: 0.5, attack: 0.1, dest });
+      k.noise(t, 0.5, { f: 1800, f2: 600, q: 3, gain: 0.2, attack: 0.1, dest });
     } },
 };
 for (const cls of RADIO_CLASSES) { CAT['radio_' + cls] = radioRecipe(cls, false); CAT['radio_' + cls + '_u'] = radioRecipe(cls, true); }
+
+// ---------------- петли фона (просчёт в JS, beds.js) ----------------
+// sr 1/6 — 8 кГц: в тёмном фоне выше 3–4 кГц ничего нет, буфер 10 с занимает 320 КБ. g — уровень слоя на шине фона.
+const bed = (pcm, g, o) => Object.assign({ pcm, d: 10, sr: 1 / 6, g, bus: 'amb', sp: 'dry', pr: 3, bed: 1 }, o);
+Object.assign(CAT, {
+  roomBed: bed(BEDS.roomBed, 0.5),
+  machineBed: bed(BEDS.machineBed, 0.24),
+  airBed: bed(BEDS.airBed, 0.42),
+  stormBed: bed(BEDS.stormBed, 0.55),
+  tensionBed: bed(BEDS.tensionBed, 0.4),
+  etherBed: bed(BEDS.etherBed, 0.02, { d: 6, bus: 'radio', sp: 'in', pr: 8 }),
+  windBed: bed(BEDS.windBed, 0.3, { bus: 'fx', sp: 'intro', pr: 9 }),
+  // ревун неисправности: два тона 370/466 Гц (гладкие гармоники), пульсация 1.6 Гц — круг 2.5 с (4 пульса; тоны кратны 0.4 Гц)
+  alarmLoop: { d: 2.5, loop: 2.5, sr: 0.34, g: 0.17, sp: 'in', pr: 3, lp: 2400,
+    fn(k, t, dest) {
+      const pulse = k.gain(0.6, dest);
+      for (const [f, a] of [[370, 0.5], [466, 0.4]]) for (let h = 1; h <= 6; h++) k.tone(t, 2.5, { f: f * h, gain: a * Math.pow(h, -1.1) * 0.6, attack: 0.001, hold: 2.5, rel: 0.001, dest: pulse });
+      k.lfo(pulse.gain, 1.6, 0.4, t, t + 2.6);
+    } },
+  // шестерни маховика: 32 зуба на круг 1 с (скорость — playbackRate петли): модальный тик + мягкий стук зацепления
+  gearLoop: { d: 1.2, loop: 1, sr: 0.34, g: 0.2, sp: 'in', pr: 4, lp: 3000,
+    fn(k, t, dest) {
+      for (let i = 0; i < 32; i++) {
+        const x = t + i / 32, g = k.rv(0.8, 1);
+        k.modal(x, { ratios: k.BAR, n: 2, f: k.rv(620, 700), decay: 0.012, gain: 0.16 * g, attack: 0.003, dest });
+        k.tone(x, 0.02, { f: 170, f2: 120, gain: 0.3 * g, attack: 0.003, dest });
+      }
+    } },
+  // тема меню целиком, один круг 64 с (хвост последнего аккорда заворачивается в начало): просчитывается один раз, лениво
+  theme: { d: 68.6, loop: 64, sr: 1 / 6, g: 0.25, bus: 'music', sp: 'out', pr: 10, jit: 0, lp: 2600,
+    fn(k, t, dest) {
+      for (const [at, notes] of THEME.chords) themeChord(k, t + at, notes, dest);
+      for (const [at, f, g] of THEME.drums) timpani(k, t + at, dest, f, g * 0.16);
+      for (const [at, f, d] of THEME.horn) k.brass(t + at, d, { f, gain: 0.03, attack: 0.16, rel: 0.5, bright: 2.4, vib: 0.003, dest });
+    } },
+});
+
+// Тема меню: четыре аккорда по 16 с (ре минор — си-бемоль — соль минор — ля без терции), литавры, рожок.
+const THEME = {
+  chords: [[0, [73.42, 110, 174.61, 220]], [16, [58.27, 87.31, 146.83, 233.08]], [32, [49, 98, 146.83, 196]], [48, [55, 82.41, 110, 164.81]]],
+  drums: [[0, 73.42, 0.5], [15, 73.42, 0.25], [15.5, 73.42, 0.35], [16, 58.27, 0.5], [32, 49, 0.5], [40, 49, 0.25], [47.5, 55, 0.3], [48, 55, 0.5], [60, 55, 0.3], [62, 55, 0.4]],
+  horn: [
+    [6, 220, 2], [8.2, 293.66, 2.4], [10.8, 261.63, 1.2], [12.1, 220, 3],
+    [22, 174.61, 2], [24.2, 233.08, 2.4], [26.8, 220, 1.2], [28.1, 174.61, 3],
+    [38, 196, 2], [40.2, 233.08, 2.4], [42.8, 220, 1.2], [44.1, 196, 3],
+    [52, 164.81, 2.4], [54.6, 220, 2.6], [57.6, 329.63, 4],
+  ],
+};
+/** «Струнные»: по две расстроенные пилы на ноту через НЧ-фильтр, атака 3 с, уход 4.5 с (перекрывается следующим аккордом). */
+function themeChord(k, t, notes, dest) {
+  const dur = 16, g = k.gain(0, dest), lp = k.filter('lowpass', 380, 0.8, g);
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.055, t + 3); g.gain.setValueAtTime(0.055, t + dur - 0.5); g.gain.linearRampToValueAtTime(0, t + dur + 4);
+  lp.frequency.setValueAtTime(330, t); lp.frequency.linearRampToValueAtTime(620, t + 8); lp.frequency.linearRampToValueAtTime(330, t + dur + 4);
+  notes.forEach((f, i) => {
+    for (const det of [-7, 6]) {
+      const v = k.tone(t, dur + 4, { type: 'sawtooth', f, gain: i === 0 ? 0.5 : 0.36, attack: 0.01, hold: dur + 3.98, rel: 0.01, dest: lp });
+      v.osc.detune.value = det + i * 1.5;
+    }
+  });
+}

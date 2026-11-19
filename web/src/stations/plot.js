@@ -216,7 +216,9 @@ export function createPlotStation(ctx) {
   plane.position.z = PLANE_Z;
   board.add(plane);
 
-  const chartCanvas = TX.makeCanvas(CHART.PX, CHART.PX);
+  // холст карты: 2048 (на «экономном» качестве — 1024: вчетверо меньше памяти и выгрузки в GPU; рисунок тот же, масштабом)
+  const chartPx = (q) => (q && q.tier === 'low' ? CHART.PX / 2 : CHART.PX);
+  const chartCanvas = TX.makeCanvas(chartPx(engine.quality), chartPx(engine.quality));
   const chartTex = TX.canvasTexture(chartCanvas, { aniso: 8 });
   const chartMat = new THREE.MeshBasicMaterial({ map: chartTex, color: 0xd9d6cf });
   const sheet = new THREE.Mesh(new THREE.PlaneGeometry(SHEET, SHEET), chartMat);
@@ -232,6 +234,13 @@ export function createPlotStation(ctx) {
     drawChart(chartCanvas, mission || null, label);
     chartTex.needsUpdate = true;
   }
+  disposers.push(engine.on('quality', (q) => {
+    const px = chartPx(q);
+    if (chartCanvas.width === px) return;
+    chartCanvas.width = chartCanvas.height = px;
+    chartTex.dispose();                                   // размер изменился — текстуру в GPU создать заново
+    redrawChart(chartMission);
+  }));
 
   const kmU = (x) => (x - CHART.X0) * K - SHEET / 2;
   const kmV = (y) => (y - CHART.Y0) * K - SHEET / 2;

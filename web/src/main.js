@@ -24,6 +24,12 @@ const storage = {
   try {
     const game = createGame({ storage });
     const engine = await createEngine(document.getElementById('stage'), {});
+    // качество — до постов: их текстуры-виды и наборы текстур сразу строятся под нужный уровень (без смены уровня через секунды)
+    try {
+      const q = game.settings().quality;
+      if (q === 'auto') engine.probeDevice();
+      engine.setQuality(q);
+    } catch (e) { console.error('[main] качество графики:', e); }
     const ctx = { engine, THREE: engine.THREE, ui: engine.ui, mat: engine.mat, audio: engine.audio, game };
     const stations = [createPlotStation, createComputerStation, createLoadingStation, createTraverseStation, createElevationStation, createFireStation,
       createObserveStation, createAAStation]

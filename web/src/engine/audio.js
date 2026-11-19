@@ -8,30 +8,32 @@
 //   bank.js       предварительный просчёт рецептов в буферы (OfflineAudioContext), в фоне после первого касания
 //   loops.js      живые петли и параметрические звуки (привод, шестерни, элеватор, очередь, самолёт, сирена, свист)
 //   ambience.js   фон башни: слои по посту, погоде, ночи, напряжению боя + редкие случайные звуки
-//   music.js      тема меню (строится на ходу)
-//   space.js      импульсные отклики «стальная комната» и «открытое море», кривая ограничителя
+//   beds.js       петли фона, просчитанные в JS: тёмный шум, медленное движение, гул на сетке 12.5 Гц
+//   music.js      тема меню: один раз просчитанный буфер-петля (лениво, в очереди банка последняя)
+//   space.js      импульсный отклик «стальная комната» (0.75 с), кривая ограничителя
 //
-// ТРАКТ: голос → вход пространства шины → { сухой → громкость шины ; посылы → две свёрточные реверберации }
-//        fx: → мягкий компрессор шины;  radio: → полоса «динамика» 350–3200 Гц;  amb, music: без компрессии
-//        всё → срез инфразвука 22 Гц → общая громкость/«звук выкл» → лимитер → мягкий ограничитель (потолок −1.9 дБ)
-// Пространства (сухой / комната / море): in 1/0.4/0 · big 1/0.5/0.3 · out 0.75/0.05/0.6 · ui 1/0.05/0.04 · dry 1/0/0.
-// Голоса: не больше 28 разом (лишний — самый тихий и старый — гаснет за 10 мс); каждый разовый звук останавливает
+// ТРАКТ: голос → вход пространства шины → { сухой → громкость шины ; посыл → ОДНА короткая свёрточная реверберация }
+//        radio: → полоса «динамика» 350–3200 Гц (без искажения);  fx, amb, music: без компрессии
+//        всё → общая громкость/«звук выкл» → лимитер → мягкий ограничитель (потолок −1.9 дБ); инфразвук срезан в самих буферах
+// Пространства (сухой / комната): in 1/0.4 · big 1/0.55 · out 0.8/0.3 · ui 1/0.05 · dry 1/0.
+// УРОВЕНЬ ЗВУКА (setTier, следует за качеством графики движка): high — всё; mid — фон до 3 слоёв; low — без реверберации,
+//   фон до 2 слоёв, без панорамы (моно), голосов не больше 8. Слабый телефон не должен «хрипеть» от перегрузки звукового потока.
+// Голоса: не больше 12 разом (лишний — самый тихий и старый — гаснет за 10 мс); каждый разовый звук останавливает
 // свои источники по времени и отсоединяет узлы после отзвучки (уборка раз в 1.5 с и при каждом новом звуке).
 //
 // ПАНОРАМА: необязательный аргумент pan −1 (слева) … 0 … +1 (справа) у «уличных» и тяжёлых звуков.
 import { makeKit, makeNoise, satCurve, rng } from './audio/kit.js';
-import { steelRoomIR, openSeaIR, clipCurve } from './audio/space.js';
+import { steelRoomIR, clipCurve } from './audio/space.js';
 import { CAT, RADIO_CLASSES } from './audio/catalogue.js';
 import { createBank } from './audio/bank.js';
 import { createLoops } from './audio/loops.js';
 import { createAmbience } from './audio/ambience.js';
 import { createMusic } from './audio/music.js';
 
-const SPACES = { in: [1, 0.4, 0], big: [1, 0.5, 0.3], out: [0.75, 0.05, 0.6], ui: [1, 0.05, 0.04], dry: [1, 0, 0], intro: [1, 0.15, 0.4] };
+const SPACES = { in: [1, 0.4], big: [1, 0.55], out: [0.8, 0.3], ui: [1, 0.05], dry: [1, 0], intro: [1, 0.3] };
 const BUSES = ['fx', 'amb', 'radio', 'music'];
-const MAX_VOICES = 28;
-// Компрессор WebAudio сам добавляет «компенсирующее» усиление; эти множители возвращают тихим звукам единичный уровень.
-const FX_COMP = { threshold: -12, knee: 10, ratio: 2.5, attack: 0.004, release: 0.22, makeup: 0.7 };
+const MAX_VOICES = { high: 12, mid: 12, low: 8 };
+const FX_GAIN = 0.62;                    // шина эффектов: постоянное усиление (компрессора шины больше нет — лишняя нагрузка)
 const LIMITER = { threshold: -5, knee: 0, ratio: 20, attack: 0.002, release: 0.14, makeup: 0.82 };
 const LIVE_GAIN = 0.55;                  // рецепт вживую не нормирован — приглушить до уровня буфера
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -45,7 +47,7 @@ export function createAudio(opts = {}) {
   const offline = opts.context ? opts.context.length / opts.context.sampleRate : 0;
   const shared = opts.shared || {};
   const rnd = opts.seed != null ? rng(opts.seed) : Math.random;
-  let ctx = null, out = null, pre = null, noise = null, bank = null, roomConv = null, seaConv = null;
+  let ctx = null, out = null, pre = null, noise = null, bank = null, roomConv = null, roomRet = null, tier = 'high';
   const vol = {};                          // шина → [сухой, посыл в комнату, посыл в море] (GainNode)
   const inputs = {};                       // 'шина/пространство' → входной узел
   const bus = { fx: 1, amb: 1, radio: 1, music: 1 };
@@ -63,6 +65,7 @@ export function createAudio(opts = {}) {
     get ctx() { return ctx; }, get noise() { return noise; }, get bank() { return bank; },
     offline, rnd,
     input, play, trash(nodes, end) { const bin = { end, nodes }; garbage.push(bin); return bin; },
+    get tier() { return tier; },
     kit: (seed) => makeKit(ctx, { seed: seed || Math.floor(rnd() * 1e9), noise }),
     recipeGain: (name) => (CAT[name] ? CAT[name].g : 0),
     whenReady(name, cb) { (ready[name] || (ready[name] = [])).push(cb); },
@@ -79,43 +82,37 @@ export function createAudio(opts = {}) {
       else {
         const AC = window.AudioContext || window.webkitAudioContext;
         if (!AC) { failed = true; return false; }
-        ctx = new AC({ latencyHint: 'interactive' });
+        ctx = new AC({ latencyHint: 'playback' });       // крупнее буфер вывода: без заиканий на слабом телефоне
       }
       const rate = ctx.sampleRate;
       noise = shared.noise || makeNoise(ctx, 2, rate, 7);
       // выход: срез инфразвука → громкость → лимитер → мягкий ограничитель
       pre = ctx.createGain();
-      const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 22; hp.Q.value = 0.7;
       out = ctx.createGain(); out.gain.value = muted ? 0 : volume;
       const lim = ctx.createDynamicsCompressor();
       lim.threshold.value = LIMITER.threshold; lim.knee.value = LIMITER.knee; lim.ratio.value = LIMITER.ratio; lim.attack.value = LIMITER.attack; lim.release.value = LIMITER.release;
       const post = ctx.createGain(); post.gain.value = LIMITER.makeup * 0.5;
       const clip = ctx.createWaveShaper(); clip.curve = clipCurve(0.6, 0.8);
-      pre.connect(hp); hp.connect(out); out.connect(lim); lim.connect(post); post.connect(clip); clip.connect(ctx.destination);
-      // реверберации
-      roomConv = ctx.createConvolver(); seaConv = ctx.createConvolver();
-      const roomRet = ctx.createGain(), seaRet = ctx.createGain(); roomRet.gain.value = 1.4; seaRet.gain.value = 1.1;
-      roomConv.connect(roomRet); roomRet.connect(pre); seaConv.connect(seaRet); seaRet.connect(pre);
+      pre.connect(out); out.connect(lim); lim.connect(post); post.connect(clip); clip.connect(ctx.destination);
+      // реверберация: одна короткая свёртка (стальная комната 0.75 с); на уровне low отключена
+      roomConv = ctx.createConvolver();
+      roomRet = ctx.createGain(); roomRet.gain.value = 1.5;
+      roomConv.connect(roomRet); roomRet.connect(pre);
       const irs = () => {
         irTimer = 0;
         try {
           roomConv.buffer = shared.irRoom || steelRoomIR(ctx, rate);
-          seaConv.buffer = shared.irSea || openSeaIR(ctx, rate);
-          extra = (roomConv.buffer.length + seaConv.buffer.length) * 2 * 4 + noise.length * 4;
+          extra = roomConv.buffer.length * 2 * 4 + noise.length * 4;
         } catch (e) { /* без реверберации */ }
       };
       if (offline) irs(); else irTimer = setTimeout(irs, 80);
       // шины
       for (const name of BUSES) {
-        const v = vol[name] = [ctx.createGain(), ctx.createGain(), ctx.createGain()];
+        const v = vol[name] = [ctx.createGain(), ctx.createGain()];
         v.forEach((g) => { g.gain.value = lvl(name); });
-        v[1].connect(roomConv); v[2].connect(seaConv);
-        if (name === 'fx') {
-          const c = ctx.createDynamicsCompressor(), cg = ctx.createGain();
-          c.threshold.value = FX_COMP.threshold; c.knee.value = FX_COMP.knee; c.ratio.value = FX_COMP.ratio; c.attack.value = FX_COMP.attack; c.release.value = FX_COMP.release;
-          cg.gain.value = FX_COMP.makeup;
-          v[0].connect(c); c.connect(cg); cg.connect(pre);
-        } else v[0].connect(pre);
+        if (tier !== 'low') v[1].connect(roomConv);
+        if (name === 'fx') { const cg = ctx.createGain(); cg.gain.value = FX_GAIN; v[0].connect(cg); cg.connect(pre); }
+        else v[0].connect(pre);
       }
       // банк
       bank = shared.bank || createBank(ctx, noise, {
@@ -145,9 +142,9 @@ export function createAudio(opts = {}) {
     s.forEach((lvl, i) => { if (lvl > 0) { const g = ctx.createGain(); g.gain.value = lvl; inp.connect(g); g.connect(v[i]); } });
     let head = inp;
     if (busName === 'radio') {             // «динамик» радиостанции: узкая полоса и лёгкое искажение
-      const h = ctx.createBiquadFilter(), l = ctx.createBiquadFilter(), sh = ctx.createWaveShaper();
-      h.type = 'highpass'; h.frequency.value = 350; h.Q.value = 0.8; l.type = 'lowpass'; l.frequency.value = 3200; l.Q.value = 0.9; sh.curve = satCurve(1.5);
-      h.connect(l); l.connect(sh); sh.connect(inp); head = h;
+      const h = ctx.createBiquadFilter(), l = ctx.createBiquadFilter();
+      h.type = 'highpass'; h.frequency.value = 350; h.Q.value = 0.8; l.type = 'lowpass'; l.frequency.value = 3200; l.Q.value = 0.8;
+      h.connect(l); l.connect(inp); head = h;
     }
     return (inputs[key] = head);
   }
@@ -193,7 +190,7 @@ export function createAudio(opts = {}) {
     if (rec.gap && !o.force) { if (now + when - (last[name] == null ? -9 : last[name]) < rec.gap) return 0; last[name] = now + when; }
     sweep(now);
     const live = voices.reduce((n, v) => n + (v.dying ? 0 : 1), 0);
-    if (live >= MAX_VOICES) steal(now);
+    if (live >= MAX_VOICES[tier]) steal(now);
     const t = now + 0.005 + when;
     const dest = o.dest || input(o.bus || rec.bus || 'fx', o.space || rec.sp || 'in');
     const jit = rec.jit == null ? 0.03 : rec.jit;
@@ -201,7 +198,7 @@ export function createAudio(opts = {}) {
     const gain = rec.g * (o.gain == null ? 1 : Math.max(0, +o.gain || 0)) * (0.9 + 0.1 * rnd());
     const nodes = [], g = ctx.createGain(); nodes.push(g);
     let tail = g, head = g;
-    if (o.pan && ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = clamp(+o.pan || 0, -1, 1); g.connect(p); tail = p; nodes.push(p); }
+    if (o.pan && Math.abs(+o.pan || 0) > 0.05 && tier !== 'low' && ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = clamp(+o.pan || 0, -1, 1); g.connect(p); tail = p; nodes.push(p); }
     tail.connect(dest);
     if (o.lp) { const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = clamp(+o.lp, 60, 16000); f.Q.value = 0.5; f.connect(g); head = f; nodes.push(f); }
     const v = { nodes, g, prio: gain, end: 0 };
@@ -259,6 +256,20 @@ export function createAudio(opts = {}) {
       mul[name] = f;
       try { if (ctx) { const t = ctx.currentTime; for (const g of vol[name]) { g.gain.cancelScheduledValues(t); g.gain.setTargetAtTime(lvl(name), t, 0.1); } } } catch (e) { /* тихо */ }
     },
+    /**
+     * Уровень звука под телефон: 'high' | 'mid' | 'low' (как engine.quality.tier). low — без реверберации, фон из двух слоёв,
+     * без панорамы, не больше 8 голосов; mid — фон из трёх слоёв. Можно звать когда угодно (и до первого касания).
+     */
+    setTier(t) {
+      t = t === 'low' || t === 'mid' ? t : 'high';
+      if (t === tier) return;
+      tier = t;
+      try {
+        if (ctx) for (const name of BUSES) { const v = vol[name][1]; try { v.disconnect(); } catch (e) { /* уже */ } if (tier !== 'low') v.connect(roomConv); }
+        amb.retier();
+      } catch (e) { /* тихо */ }
+    },
+    get tier() { return tier; },
     /** Текущие громкости шин { fx, amb, radio, music }. */
     get buses() { return { fx: bus.fx, amb: bus.amb, radio: bus.radio, music: bus.music }; },
     /** Узел шины (GainNode) для подключения своих источников: 'fx' | 'amb' | 'radio' | 'music'; null, пока звук не разбужен. */
@@ -286,7 +297,7 @@ export function createAudio(opts = {}) {
         voices: voices.reduce((n, v) => n + (v.dying ? 0 : 1), 0), dying: voices.reduce((n, v) => n + (v.dying ? 1 : 0), 0), nodes: voices.reduce((n, v) => n + v.nodes.length, 0) + garbage.reduce((n, v) => n + v.nodes.length, 0),
         inputs: Object.keys(inputs).length, bankBytes: bank ? bank.bytes : 0, bankPending: bank ? bank.pending : 0, bankTotal: bank ? bank.total : 0,
         bufferBytes: (bank ? bank.bytes : 0) + extra, state: ctx ? ctx.state : 'none', rate: ctx ? ctx.sampleRate : 0, paused,
-        music: music.playing, ambient: amb.state.on, loops: loops.state(), duck: Object.assign({}, mul),
+        music: music.playing, ambient: amb.state.on, loops: loops.state(), duck: Object.assign({}, mul), tier,
       };
     },
 
@@ -472,9 +483,6 @@ export function createAudio(opts = {}) {
   const mk = () => {
     const n = { nodes: [], srcs: [] };
     n.gain = (v, dest) => { const g = ctx.createGain(); g.gain.value = v; if (dest) g.connect(dest); n.nodes.push(g); return g; };
-    n.flt = (type, f, q, dest) => { const x = ctx.createBiquadFilter(); x.type = type; x.frequency.value = f; x.Q.value = q; x.connect(dest); n.nodes.push(x); return x; };
-    n.noise = (dest, rate) => { const s = ctx.createBufferSource(); s.buffer = noise; s.loop = true; s.playbackRate.value = rate || 1; s.connect(dest); s.start(0, rnd() * 1.7); n.nodes.push(s); n.srcs.push(s); return s; };
-    n.osc = (type, f, dest) => { const o = ctx.createOscillator(); o.type = type; o.frequency.value = f; o.connect(dest); o.start(); n.nodes.push(o); n.srcs.push(o); return o; };
     return n;
   };
   /** Громкость шины ролика 0..1. */
@@ -482,41 +490,34 @@ export function createAudio(opts = {}) {
     introVol = clamp(+v || 0, 0, 1);
     try { if (ctx && introBus) { introBus.gain.setTargetAtTime(introVol, ctx.currentTime, 0.05); introDry.gain.setTargetAtTime(introVol, ctx.currentTime, 0.05); } } catch (e) { /* тихо */ }
   };
+  // петля банка для ролика: один источник и одно усиление; null, пока буфер не готов (тогда — тишина)
+  const introLoop = (name, dest) => {
+    const buf = bank && bank.get(name, 0); if (!buf) return null;
+    const n = mk(); n.g = n.gain(0, dest);
+    const s = ctx.createBufferSource(); s.buffer = buf; s.loop = true; s.connect(n.g); s.start(0, rnd() * buf.duration); n.nodes.push(s); n.srcs.push(s);
+    return n;
+  };
   /** Ветер с моря: level 0..1 (0 — затихает и освобождается). Можно вызывать каждый кадр. */
   api.introWind = function (level) {
     try {
       level = clamp(+level || 0, 0, 1);
       if (!ctx || (level > 0 && !core.audible())) return;
-      if (level > 0 && !introWindNode) {
-        const n = mk(); n.g = n.gain(0, ibus());
-        const f = n.flt('bandpass', 420, 0.9, n.g); n.noise(f);
-        n.osc('sine', 0.13, n.gain(170, f.frequency));
-        const hi = n.gain(0.25, n.g), hf = n.flt('bandpass', 1500, 4, hi); n.noise(hf, 1.3);          // свист в снастях
-        n.osc('sine', 0.21, n.gain(400, hf.frequency)); n.osc('sine', 0.17, n.gain(0.2, hi.gain));
-        n.noise(n.flt('lowpass', 900, 0.5, n.gain(0.35, n.g)), 0.5);                                   // прибой
-        introWindNode = n;
-      }
+      if (level > 0 && !introWindNode) introWindNode = introLoop('windBed', ibus());
       if (!introWindNode) return;
       const t = ctx.currentTime;
-      introWindNode.g.gain.setTargetAtTime(0.42 * level, t, 0.4);
+      introWindNode.g.gain.setTargetAtTime(CAT.windBed.g * level, t, 0.4);
       if (level <= 0) { const n = introWindNode; introWindNode = null; stopSrcs(n, t + 1.5); }
     } catch (e) { /* тихо */ }
   };
-  /** Шипение эфира: level 0..1 (0 — выключить). */
+  /** Эфир в наушниках радиста: level 0..1 (0 — выключить). Тёмный тихий шорох, не шипение. */
   api.introHiss = function (level) {
     try {
       level = clamp(+level || 0, 0, 1);
       if (!ctx || (level > 0 && !core.audible())) return;
-      if (level > 0 && !introHissNode) {
-        const n = mk(); n.g = n.gain(0, ibus());
-        n.noise(n.flt('bandpass', 2300, 0.7, n.g));
-        const cg = n.gain(0, n.g); n.noise(n.flt('highpass', 3000, 0.7, cg), 0.6); n.osc('sawtooth', 6.1, n.gain(0.35, cg.gain));
-        const o = n.osc('sine', 1420, n.gain(0.12, n.g)); n.osc('sine', 0.7, n.gain(60, o.frequency));
-        introHissNode = n;
-      }
+      if (level > 0 && !introHissNode) introHissNode = introLoop('etherBed', ibus());
       if (!introHissNode) return;
       const t = ctx.currentTime;
-      introHissNode.g.gain.setTargetAtTime(0.1 * level, t, 0.15);
+      introHissNode.g.gain.setTargetAtTime(0.05 * level, t, 0.15);
       if (level <= 0) { const n = introHissNode; introHissNode = null; stopSrcs(n, t + 0.8); }
     } catch (e) { /* тихо */ }
   };
@@ -577,7 +578,7 @@ export function createAudio(opts = {}) {
 const E = (id, cat, win, dur, fn, args, x) => Object.assign({ id, cat, win, dur, fn: fn || id, args: args || [] }, x);
 export const CATALOGUE = [
   // главный калибр и снаряды
-  E('fire', 'gun', 6, [2.5, 6]),
+  E('fire', 'gun', 6, [2, 6]),
   E('shellWhoosh', 'far', 4, [0.6, 4]),
   E('impact:water', 'far', 5, [1, 5], 'impact', [{ range: 6, kind: 'water', delay: 0 }]),
   E('impact:land', 'far', 5, [1, 5], 'impact', [{ range: 6, kind: 'land', delay: 0 }]),
@@ -585,7 +586,7 @@ export const CATALOGUE = [
   E('thunder', 'far', 5, [1, 5], 'thunder', [1]),
   E('enemyGun', 'far', 6, [1.5, 6], 'enemyGun', [{ range: 9 }]),
   E('whistle', 'far', 5, [1.6, 5], 'whistle', [2.2]),
-  E('impactNear', 'hit', 6, [2, 6]),
+  E('impactNear', 'hit', 6, [1.6, 6]),
   E('impactFar', 'far', 5, [1, 5]),
   E('turretHit', 'hit', 7, [2.5, 7]),
   E('fault', 'machine', 3, [0.8, 3]),
@@ -618,7 +619,7 @@ export const CATALOGUE = [
   E('planeDrone', 'air', 3, [2.8, 3], 'planeDrone', [0.9, 0.5], { loop: 1 }),
   E('flyby', 'air', 8, [3, 7.5], 'flyby', [{ dur: 4 }]),
   E('bombWhistle', 'far', 4, [1, 4], 'bombWhistle', [1.4]),
-  E('bombBurst', 'hit', 7, [2, 7]), E('bombHit', 'hit', 7, [2, 7]),
+  E('bombBurst', 'hit', 7, [1.6, 7]), E('bombHit', 'hit', 7, [1.6, 7]),
   E('siren', 'air', 8, [4, 8]),
   E('sirenRun', 'air', 4, [3.5, 4], 'sirenRun', [true], { loop: 1 }),
   // фон
@@ -634,13 +635,13 @@ export const CATALOGUE = [
   E('ambient:loadstorm', 'amb', 4, [3.8, 4], 'ambient', [true], { loop: 1, pre: ['ambience', { station: 'loading', weather: 'storm', tension: 1 }] }),
   E('creak', 'ambfx', 3, [0.3, 2.6]), E('drip', 'ambfx', 2, [0.02, 1.5]), E('foghorn', 'ambfx', 8, [2.5, 8]), E('farThunder', 'ambfx', 9, [2.5, 9]),
   // интерфейс
-  E('uiTap', 'ui', 1.2, [0.005, 0.5]), E('dialogOpen', 'ui', 1.5, [0.1, 1]), E('dialogClose', 'ui', 1.5, [0.1, 1]), E('toast', 'ui', 1.5, [0.1, 1]),
-  E('saveDone', 'ui', 2, [0.3, 1.5]), E('hintNew', 'ui', 2.5, [0.3, 2]), E('friendlyFire', 'ui', 2.5, [0.5, 1.8]), E('detected', 'ui', 3.5, [0.8, 3.2]),
-  E('missionWon', 'ui', 6, [2.6, 5.5]), E('missionLost', 'ui', 7, [3, 6.5]), E('rankUp', 'ui', 4, [1.2, 3.6]), E('dailyRecord', 'ui', 3.5, [0.8, 3]),
+  E('uiTap', 'ui', 1.2, [0.005, 0.5]), E('dialogOpen', 'ui', 1.5, [0.1, 1]), E('dialogClose', 'ui', 1.5, [0.1, 1]), E('toast', 'ui', 1.5, [0.05, 1]),
+  E('saveDone', 'ui', 2, [0.3, 1.5]), E('hintNew', 'ui', 2.5, [0.2, 2]), E('friendlyFire', 'ui', 2.5, [0.5, 1.8]), E('detected', 'ui', 3.5, [0.8, 3.2]),
+  E('missionWon', 'ui', 6, [2.6, 5.5]), E('missionLost', 'ui', 7, [3, 6.5]), E('rankUp', 'ui', 4, [1.2, 3.6]), E('dailyRecord', 'ui', 3.5, [0.4, 3]),
   // музыка
   E('music', 'music', 72, [70, 72], 'music', [true], { loop: 1 }),
   // ролик
-  E('introGuns', 'intro', 6, [1.5, 6]), E('introWhistle', 'intro', 4, [0.3, 4]), E('introBlast', 'intro', 6, [2, 6], 'introBlast', [1]),
+  E('introGuns', 'intro', 6, [1.5, 6]), E('introWhistle', 'intro', 4, [0.3, 4]), E('introBlast', 'intro', 6, [1.6, 6], 'introBlast', [1]),
   E('introDoor', 'intro', 4, [1, 4]), E('introMorse', 'intro', 3, [1.2, 2.2]), E('introKey', 'intro', 1.2, [0.005, 0.5]), E('introTitle', 'intro', 6, [2, 6]),
   E('introWind', 'intro', 3, [2.8, 3], 'introWind', [0.75], { loop: 1 }), E('introHiss', 'intro', 3, [2.8, 3], 'introHiss', [0.85], { loop: 1 }),
 ];

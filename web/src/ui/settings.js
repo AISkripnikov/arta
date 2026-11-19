@@ -78,10 +78,13 @@ const ALL = [].concat(...TABS.map(([t]) => ROWS[t]));
  * hooks (все необязательны): dialog(html, buttons, dismiss), toast(text), menu() — показать главное меню, hasIntro(), playIntro(), startTutorial(),
  * afterWipe({ settings }), stats() → { stars, starsMax, unlocked, rank, xp, upLevels, records, resume }.
  */
+const FPS_CHOSEN = 'arta2.fpsChosen';
+const fpsChosen = () => { try { return localStorage.getItem(FPS_CHOSEN) === '1'; } catch (e) { return false; } };
+
 export function createSettings({ game, engine, show, sfx, dialog, hooks = {} }) {
   let back = null, battle = false, tab = 'game', built = false, ambTimer = 0, fpsTimer = 0, version = '';
   let cur = { sens: 1, invert: false, lefty: false, vibro: true, vibroPower: 'high', hints: 'new', autosave: true, speed: 1, confirmFriendly: true, crewPanel: 'full',
-    volFx: 100, volAmb: 70, volRadio: 100, volMusic: 60, text: 1, quality: 'auto', qualityChosen: false, fps: 60, nightTint: 'normal', showFps: false, shake: true };
+    volFx: 100, volAmb: 50, volRadio: 100, volMusic: 60, text: 1, quality: 'auto', qualityChosen: false, fps: 60, nightTint: 'normal', showFps: false, shake: true };
   const read = () => { try { cur = Object.assign(cur, game.settings()); } catch (e) { /* старая логика без настроек */ } return cur; };
   const call = (obj, name, ...a) => { try { if (obj && typeof obj[name] === 'function') return obj[name](...a); } catch (e) { /* не критично */ } return undefined; };
   /** Значение строки: настройки + два «чужих» ключа (сложность и общий звук хранятся в сохранении отдельно). */
@@ -105,7 +108,8 @@ export function createSettings({ game, engine, show, sfx, dialog, hooks = {} }) 
     call(engine.audio, 'setBus', 'radio', st.volRadio / 100);
     call(engine.audio, 'setBus', 'music', st.volMusic / 60);
     call(engine, 'setQuality', st.quality);
-    call(engine, 'setFrameCap', st.fps === 30 ? 30 : 0);
+    // частота: пока игрок сам её не выбирал, на «экономном» уровне движок держит 30 к/с (батарея и нагрев слабых телефонов)
+    call(engine, 'setFrameCap', st.fps === 30 ? 30 : 0, fpsChosen());
     const fm = $('fpsMeter');
     if (fm) {
       fm.classList.toggle('hidden', !st.showFps);
@@ -166,6 +170,7 @@ export function createSettings({ game, engine, show, sfx, dialog, hooks = {} }) 
 
   // ---------- изменение ----------
   function set(key, val) {
+    if (key === 'fps') { try { localStorage.setItem(FPS_CHOSEN, '1'); } catch (e) { /* нет хранилища */ } }
     if (key === 'difficulty') { if (battle) return; game.setDifficulty(val); }
     else if (key === 'sound') { game.setMuted(!val); sfx('setMuted', game.save.muted); }
     else { const r = game.setSetting(key, val); if (r && r.ok === false) return; }
@@ -259,7 +264,7 @@ export function createSettings({ game, engine, show, sfx, dialog, hooks = {} }) 
       { text: 'ОТМЕНА', ghost: true, fn: reopen },
     ]),
     defaults: () => ask('<h2>НАСТРОЙКИ ПО УМОЛЧАНИЮ?</h2><p>Все настройки игры, управления, звука и экрана вернутся к исходным. Прогресс и сложность не изменятся.</p>', [
-      { text: 'ВОССТАНОВИТЬ', primary: true, fn: () => { game.resetSettings(); sfx('setMuted', game.save.muted); apply(); reopen(); } },
+      { text: 'ВОССТАНОВИТЬ', primary: true, fn: () => { try { localStorage.removeItem(FPS_CHOSEN); } catch (e) { /* нет хранилища */ } game.resetSettings(); sfx('setMuted', game.save.muted); apply(); reopen(); } },
       { text: 'ОТМЕНА', ghost: true, fn: reopen },
     ]),
     wipe: () => {

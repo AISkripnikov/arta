@@ -345,9 +345,11 @@ export function createAAStation(ctx) {
     const L = lookFor(m);
     if (L !== look || mode !== info.mode) applyLook(L, mode);
     const su = skyMat.uniforms;
-    su.uAim.value.set(a.bearing, a.elevation); su.uTime.value = time;
+    // «экономное» качество: облака и мерцание неба сдвигаются 5 раз в секунду — неподвижная зенитка не перерисовывает кадр 60 раз/с
+    const tSky = engine.quality && engine.quality.tier === 'low' ? Math.floor(time * 5) / 5 : time;
+    su.uAim.value.set(a.bearing, a.elevation); su.uTime.value = tSky;
     { const wd = m.wind || {}, to = ((wd.from || 0) + 180) * DEG, cs = (L.storm ? 0.012 : 0.004) * (1 + (wd.speed || 0) / 8);
-      su.uCloudOff.value.set(L.cloudSeed + Math.sin(to) * time * cs, L.cloudSeed * 0.7 - Math.cos(to) * time * cs); }
+      su.uCloudOff.value.set(L.cloudSeed + Math.sin(to) * tSky * cs, L.cloudSeed * 0.7 - Math.cos(to) * tSky * cs); }
     su.uPixAng.value = DEG / (M * 900);
     // солнце для самолётов: из мира задания в систему неба за проёмом, затем в мировые координаты сцены башни
     { const B = a.bearing * DEG, E = a.elevation * DEG, sd = L.sunDir;

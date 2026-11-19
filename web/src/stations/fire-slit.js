@@ -194,7 +194,9 @@ export function createSlitView(ctx, o) {
       const b = game.state.turret ? game.state.turret.bearing : 0;
       const gap = vt - last;
       const anim = !!muzzle || world.splashes > 0 || info.hot;
-      if (last < 0 || (dirty && gap >= 0.03) || (b !== lastBearing && gap >= 0.03) || gap >= (anim ? 0.045 : 0.16)) {
+      // «экономное» качество: вид в щели 4 раза в секунду (6–15 — при всплесках и повороте башни)
+      const low = q && q.tier === 'low', g0 = low ? 0.066 : 0.03;
+      if (last < 0 || (dirty && gap >= g0) || (b !== lastBearing && gap >= g0) || gap >= (anim ? (low ? 0.16 : 0.045) : (low ? 0.25 : 0.16))) {
         draw(last < 0 ? dt : Math.min(gap, 0.5));
         info.splashes = world.splashes;
       }

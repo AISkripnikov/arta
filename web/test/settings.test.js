@@ -7,7 +7,7 @@ import { RAD, tick, noWind, start } from './bot.js';
 const mem = (init) => { const m = {}; if (init) m['arta2.save'] = JSON.stringify(init); return { mem: m, get: (k) => m[k] || null, set: (k, v) => { m[k] = v; } }; };
 const stored = (st) => JSON.parse(st.mem['arta2.save']);
 const DEF = { sens: 1, invert: false, lefty: false, vibro: true, vibroPower: 'high', hints: 'new', autosave: true, speed: 1, confirmFriendly: true,
-  crewPanel: 'full', volFx: 100, volAmb: 70, volRadio: 100, volMusic: 60, text: 1, quality: 'auto', qualityChosen: false, fps: 60, nightTint: 'normal', showFps: false,
+  crewPanel: 'full', volFx: 100, volAmb: 50, volRadio: 100, volMusic: 60, text: 1, quality: 'auto', qualityChosen: false, fps: 60, nightTint: 'normal', showFps: false,
   shake: true };
 /** Сохранение с прогрессом во всех полях. */
 const rich = (extra) => ({ unlocked: 12, stars: [3, 2, 1, 3, 3, 3, 3, 3, 3, 3, 3], records: [{ stars: 3, shots: 2, time: 50, integrity: 100, difficulty: 0 }],

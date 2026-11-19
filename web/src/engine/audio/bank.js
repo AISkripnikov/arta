@@ -2,10 +2,16 @@
 // моно-буфером. Проигрывание такого звука — один источник и один-два узла: дёшево и без заиканий на телефоне.
 // Просчёт идёт в фоне по одному звуку с паузами (сам рендер браузер выполняет в своём потоке); пока буфера нет,
 // audio.js играет тот же рецепт вживую в облегчённом виде. Запрошенный, но ещё не готовый звук идёт вне очереди.
-import { makeKit } from './kit.js';
+import { makeKit, rng } from './kit.js';
 import { CAT } from './catalogue.js';
+import { openSeaIR } from './space.js';
 
 const PEAK = 0.98;
+// срез верхов по пространству (Гц), если у рецепта нет своего lp
+const LP = { in: 5500, big: 5500, out: 2400, ui: 8000, dry: 7000, intro: 5000 };
+
+const irs = {};
+function seaIR(oc, r) { return irs[r] || (irs[r] = openSeaIR(oc, r, 2.5)); }
 
 function finish(ctx, rendered, rec, rate) {
   const src = rendered.getChannelData(0);
@@ -45,21 +51,43 @@ export function createBank(ctx, noise, o = {}) {
   for (const name of names) for (let v = 0; v < (CAT[name].v || 1); v++) queue.push({ name, v });
   const total = queue.length;
 
+  function store1(name, buf) {
+    (store[name] || (store[name] = [])).push(buf);
+    bytes += buf.length * 4;
+    if (o.onReady) { try { o.onReady(name); } catch (e) { /* тихо */ } }
+  }
   function renderOne(job) {
     const rec = CAT[job.name];
-    const r = Math.max(8000, Math.min(rate, Math.round(rate * (rec.sr || 1))));
-    const oc = new OAC(1, Math.ceil((rec.d + 0.06) * r), r);
+    // далёкие звуки (над морем) темнее и с долгим хвостом: хватает 8 кГц; хвост «открытого моря» запекается сюда же
+    const far = rec.sp === 'out' && !rec.pcm && rec.bus !== 'music', tail = rec.tail != null ? rec.tail : far ? 0.6 : 0;
+    const r = Math.max(8000, Math.min(rate, Math.round(rate * Math.min(rec.sr || 1, far ? 1 / 6 : 1))));
     let seed = 1000 + job.v * 7919;
     for (let i = 0; i < job.name.length; i++) seed = (seed * 31 + job.name.charCodeAt(i)) | 0;
+    if (rec.pcm) {                        // петля фона, просчитанная прямо в JS (beds.js): уже бесшовная
+      const d = rec.pcm(r, rng(seed >>> 0), job.v);
+      let peak = 0; for (let i = 0; i < d.length; i++) { const a = Math.abs(d[i]); if (a > peak) peak = a; }
+      let mean = 0; for (let i = 0; i < d.length; i++) mean += d[i]; mean /= d.length;
+      const k = peak > 1e-6 ? PEAK / (peak + Math.abs(mean)) : 0, buf = ctx.createBuffer(1, d.length, r), out = buf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) out[i] = (d[i] - mean) * k;
+      store1(job.name, buf);
+      return Promise.resolve();
+    }
+    const oc = new OAC(1, Math.ceil((rec.d + (tail ? 2.6 : 0) + 0.06) * r), r);
     const kit = makeKit(oc, { seed, noise });
-    rec.fn(kit, 0.002, oc.destination, job.v);
+    // общий срез верхов: сталь башни глушит верх (нет ничего выше ~5.5 кГц, кроме коротких щелчков органов управления)
+    const lpf = rec.lp === 0 ? 0 : Math.min(r * 0.4, rec.lp || LP[rec.sp || 'in'] || 5500);
+    let dest = oc.destination;
+    if (tail) {                          // хвост: свёртка просчитывается здесь, один раз — в игре свёртки «моря» нет
+      const cv = oc.createConvolver(), wet = oc.createGain(), dry = oc.createGain(), inp = oc.createGain();
+      cv.normalize = true; cv.buffer = seaIR(oc, r); wet.gain.value = tail; dry.gain.value = 1;
+      inp.connect(dry); inp.connect(cv); cv.connect(wet); dry.connect(dest); wet.connect(dest); dest = inp;
+    }
+    if (lpf) { const a = oc.createBiquadFilter(), b = oc.createBiquadFilter(); a.type = b.type = 'lowpass'; a.frequency.value = b.frequency.value = lpf; a.Q.value = 0.6; b.Q.value = 0.55; a.connect(b); b.connect(dest); dest = a; }
+    rec.fn(kit, 0.002, dest, job.v);
     const done = (rendered) => {
       kit.dispose();
       if (dead) return;
-      const buf = finish(ctx, rendered, rec, r);
-      (store[job.name] || (store[job.name] = [])).push(buf);
-      bytes += buf.length * 4;
-      if (o.onReady) { try { o.onReady(job.name); } catch (e) { /* тихо */ } }
+      store1(job.name, finish(ctx, rendered, rec, r));
     };
     const p = oc.startRendering();
     if (p && p.then) return p.then(done);

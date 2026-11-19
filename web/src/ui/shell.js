@@ -407,17 +407,26 @@ export function createShell({ engine, game, stations = [], intro = null }) {
   document.getElementById('hud').appendChild(hl);
   const _hv = new engine.THREE.Vector3(), _hs = {};
   let hlStep = null;
+  // подсветка ставится каждый кадр: в DOM пишем только изменения (иначе — пересчёт стилей и вёрстки в каждом кадре)
+  const hlNow = { on: null, x: NaN, y: NaN };
+  function hlSet(x, y) {
+    const on = x != null;
+    if (on !== hlNow.on) { hlNow.on = on; hl.style.display = on ? 'block' : 'none'; }
+    if (!on) return;
+    x = Math.round(x); y = Math.round(y);
+    if (x !== hlNow.x) { hlNow.x = x; hl.style.left = x + 'px'; }
+    if (y !== hlNow.y) { hlNow.y = y; hl.style.top = y + 'px'; }
+  }
   function placeHighlight() {
     const st = hlStep;
     const station = st && st.hot && stations.find((x) => x.id === st.st);
     const obj = station && station.hotspots && station.hotspots[st.hot];
-    if (!st || engine.flying || s.phase !== 'playing' || s.paused) { hl.style.display = 'none'; return; }
+    if (!st || engine.flying || s.phase !== 'playing' || s.paused) { hlSet(null); return; }
     if (!obj || !obj.getWorldPosition || engine.current !== st.st) {
       // тема «НОВОЕ» может указывать на элемент обвязки (плашка неисправности, значки расчёта, полоса прочности)
       const el = st.dom && (!st.st || engine.current === st.st || !st.hot) ? $(st.dom) : null, r = el && el.offsetParent !== null ? el.getBoundingClientRect() : null;
-      if (!r || r.width < 2 || r.height < 2) { hl.style.display = 'none'; return; }
-      hl.style.display = 'block';
-      hl.style.left = (r.left + r.width / 2 - 32) + 'px'; hl.style.top = (r.top + r.height / 2 - 32) + 'px';
+      if (!r || r.width < 2 || r.height < 2) { hlSet(null); return; }
+      hlSet(r.left + r.width / 2 - 32, r.top + r.height / 2 - 32);
       return;
     }
     // фишку берут за ручку-диск — подсвечиваем её
@@ -425,9 +434,8 @@ export function createShell({ engine, game, stations = [], intro = null }) {
     if (handle) _hv.copy(handle); else obj.getWorldPosition(_hv);
     const sc = engine.input.toScreen(_hv, _hs);
     const W = window.innerWidth, H = window.innerHeight;
-    if (sc.behind || sc.x < -20 || sc.y < -20 || sc.x > W + 20 || sc.y > H + 20) { hl.style.display = 'none'; return; }
-    hl.style.display = 'block';
-    hl.style.left = (sc.x - 32) + 'px'; hl.style.top = (sc.y - 32) + 'px';
+    if (sc.behind || sc.x < -20 || sc.y < -20 || sc.x > W + 20 || sc.y > H + 20) { hlSet(null); return; }
+    hlSet(sc.x - 32, sc.y - 32);
   }
 
   const EYE = '<svg viewBox="0 0 17 12" aria-hidden="true"><path d="M1 6c2.2-3.2 4.7-4.8 7.5-4.8S13.800 2.800 16 6c-2.200 3.200-4.700 4.800-7.500 4.800S3.200 9.200 1 6z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8.5" cy="6" r="2.1" fill="currentColor"/><path class="slash" d="M3 11.200 14 .8" stroke="currentColor" stroke-width="1.700" stroke-linecap="round"/></svg>';
@@ -469,24 +477,28 @@ export function createShell({ engine, game, stations = [], intro = null }) {
     const cc = $('convoyChip'); cc.classList.toggle('hidden', !conv.length);
     if (conv.length) cc.innerHTML = '<span>КОНВОЙ</span>' + conv.map((f) => `<i class="${!f.alive ? 'lost' : f.arrived ? 'home' : f.hp < f.maxHp ? 'dmg' : ''}"></i>`).join('');
   }
+  // строки HUD перерисовываются ~9 раз в секунду: пишем в DOM только изменившийся текст
+  const txtNow = new Map();
+  let memoKey = null;
+  function txt(id, v) { v = String(v); if (txtNow.get(id) === v) return; txtNow.set(id, v); $(id).textContent = v; }
   function renderHud() {
     // пост — в атрибуте HUD: на посту ОГОНЬ строка радио уходит влево, чтобы не закрывать смотровую щель
     const hudEl = $('hud'); if (hudEl.dataset.st !== engine.current) hudEl.dataset.st = engine.current || '';
-    $('hTime').textContent = game.fmt.time(s.time);
-    const hi = $('hInt'); hi.style.width = Math.max(0, s.integrity) + '%'; hi.className = s.integrity <= 35 ? 'crit' : s.integrity <= 65 ? 'warn' : '';
+    txt('hTime', game.fmt.time(s.time));
+    const hi = $('hInt'); const iw = Math.max(0, s.integrity) + '%', ic = s.integrity <= 35 ? 'crit' : s.integrity <= 65 ? 'warn' : ''; if (hi.style.width !== iw) hi.style.width = iw; if (hi.className !== ic) hi.className = ic;
     // снаряды: только те типы, что есть (или были) в этом бою
     const keys = Object.keys(SH());
     keys.forEach((k) => { if (s.shells[k] > 0) shellSeen[k] = true; });
     const shHtml = keys.filter((k) => shellSeen[k]).map((k) => `<span${s.shells[k] > 0 ? '' : ' class="zero"'}><b>${shellName(k)}</b> ${s.shells[k] || 0}</span>`).join('');
     if (shHtml !== shKey) { shKey = shHtml; $('hShells').innerHTML = shHtml; }
-    $('hTimeK').textContent = s.mission.survival ? 'ВОЛНА ' + (s.wave || 1) : 'ВРЕМЯ';
+    txt('hTimeK', s.mission.survival ? 'ВОЛНА ' + (s.wave || 1) : 'ВРЕМЯ');
     const m = s.mission, wxHtml = (m.night ? '<i class="night">НОЧЬ</i>' : '') + (WX[m.weather] ? `<i class="${m.weather}">${WX[m.weather]}</i>` : '') || 'ВЕТЕР';
     if (wxHtml !== wxKey) { wxKey = wxHtml; $('hWx').innerHTML = wxHtml; }
-    $('hWind').textContent = windText(m.wind).toUpperCase(); $('hWind').classList.toggle('chg', s.time < windChangedAt + 12);
+    txt('hWind', windText(m.wind).toUpperCase()); $('hWind').classList.toggle('chg', s.time < windChangedAt + 12);
     const a = s.targets.find((t) => t.id === s.activeTarget);
-    $('hTarget').textContent = a ? a.label + ' · ' + a.name.toUpperCase() : '—';
-    $('hSpeed').textContent = '×' + s.speed; $('hSpeed').classList.toggle('on', s.speed > 1);
-    $('hUnread').style.display = unread ? 'block' : 'none'; $('hUnread').textContent = unread;
+    txt('hTarget', a ? a.label + ' · ' + a.name.toUpperCase() : '—');
+    txt('hSpeed', '×' + s.speed); $('hSpeed').classList.toggle('on', s.speed > 1);
+    { const ud = unread ? 'block' : 'none'; if ($('hUnread').style.display !== ud) $('hUnread').style.display = ud; } txt('hUnread', unread);
 
     const rec = a ? s.plot.recorded[a.id] : null, cp = s.computer, parts = [];
     if (rec) {
@@ -496,7 +508,7 @@ export function createShell({ engine, game, stations = [], intro = null }) {
     if (cp.elevation != null) parts.push(`<b>ЗАРЯД</b> ${cp.charge} <b>УГОЛ</b> ${cp.elevation.toFixed(2)}° <b>ПОЛЁТ</b> ${cp.tof.toFixed(1)} с${cp.stale ? ' <b>(УСТАРЕЛО)</b>' : ''}`);
     const fr = s.fire || {};
     if (fr.salvo || fr.burst > 1) parts.push((fr.salvo ? '<b>ВИЛКА</b> ±150 м' : '') + (fr.salvo && fr.burst > 1 ? ' ' : '') + (fr.burst > 1 ? `<b>ОЧЕРЕДЬ</b> ${fr.burstLeft > 0 ? fr.burstLeft + '/' : ''}${fr.burst}` : ''));
-    $('memo').innerHTML = parts.join(' &nbsp;·&nbsp; ') || '<b>ЗАМЕРОВ НЕТ</b>';
+    { const mh = parts.join(' &nbsp;·&nbsp; ') || '<b>ЗАМЕРОВ НЕТ</b>'; if (mh !== memoKey) { memoKey = mh; $('memo').innerHTML = mh; } }
     const ob = reportBrief(); if (ob !== obKey) { obKey = ob; $('obs').innerHTML = ob; }
     renderForces();
     crewUi.render();
@@ -693,7 +705,7 @@ export function createShell({ engine, game, stations = [], intro = null }) {
   const baseExposure = engine.renderer.toneMappingExposure || 1;
   let flick = 0, nightOn = false;
   engine.onFrame((dt) => {
-    if (s.phase === 'playing') { placeHighlight(); sampleFriends(false); } else hl.style.display = 'none';
+    if (s.phase === 'playing') { placeHighlight(); sampleFriends(false); } else hlSet(null);
     // отказ освещения: в башне темно, аварийный свет мигает
     const dark = s.phase === 'playing' && s.faults && s.faults.lights;
     flick = Math.max(0, flick - dt);

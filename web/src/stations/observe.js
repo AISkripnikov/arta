@@ -82,7 +82,9 @@ function createScopeView(ctx) {
       if (!here && lastRender >= 0) return;
       const sc = game.state.scope;
       const gap = vt - lastRender;
-      if (lastRender >= 0 && gap < 0.03 && !(sc && (sc.bearing !== lastB || 32 / sc.zoom !== lastFov) && gap >= 0.015)) return;
+      // «экономное» качество: окуляр 5 раз в секунду, пока труба стоит, и до 15 — пока её наводят
+      const low = engine.quality && engine.quality.tier === 'low', moving = sc && (sc.bearing !== lastB || 32 / sc.zoom !== lastFov);
+      if (lastRender >= 0 && gap < (low ? 0.2 : 0.03) && !(moving && gap >= (low ? 0.066 : 0.015))) return;
       if (syncWorld(lastRender < 0 ? dt : Math.min(gap, 0.5))) render();
     },
     dispose() {

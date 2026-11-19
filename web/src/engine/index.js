@@ -11,6 +11,7 @@ import { createRoom, ROOM } from './room.js';
 import { createUI } from './controls/index.js';
 import { createPost } from './post.js';
 import { createFx } from './fx.js';
+import { probeDevice } from './device.js';
 
 export { ROOM };
 export const DEFAULT_CAMERA = { position: [0, 1.42, 1.25], target: [0, 1.08, 0], fov: 46 };
@@ -139,12 +140,12 @@ export async function createEngine(canvas, opts = {}) {
   const QUALITY = {
     high: { tier: 'high', pixelRatio: opts.maxPixelRatio || 2, rtScale: 1, samples: 4, shadow: 1024, postfx: true, bloom: 2, grain: true, particles: 1 },
     mid: { tier: 'mid', pixelRatio: Math.min(opts.maxPixelRatio || 2, 1.5), rtScale: 0.75, samples: 4, shadow: 512, shadowSoft: 0.9, postfx: true, bloom: 1, grain: false, particles: 0.5 },
-    low: { tier: 'low', pixelRatio: 1, rtScale: 0.5, samples: 0, shadow: 0, postfx: false, bloom: 0, grain: false, particles: 0 },
+    low: { tier: 'low', pixelRatio: 1, rtScale: 0.5, samples: 0, shadow: 0, postfx: false, bloom: 0, grain: false, particles: 0, fpsCap: 30, renderScale: 0.75 },
   };
   const TIERS = ['low', 'mid', 'high'];
   let quality = QUALITY.high, maxPixelRatio = quality.pixelRatio;
   const post = createPost(renderer);
-  let frameCap = 0;                              // 0 — без ограничения; 30 — «экономия батареи»
+  let frameCap = 0, frameCapChosen = false;      // 0 — без ограничения; 30 — «экономия батареи»; chosen — частоту выбрал игрок
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x050607);
@@ -407,7 +408,8 @@ export async function createEngine(canvas, opts = {}) {
   // --- размер ---
   function checkResize(force) {
     const w = canvas.clientWidth || canvas.width, h = canvas.clientHeight || canvas.height;
-    const pr = Math.min(window.devicePixelRatio || 1, maxPixelRatio);
+    // renderScale (< 1 на «экономном»): холст рисуется в уменьшенном буфере, браузер растягивает его; DOM-оболочка остаётся чёткой
+    const pr = Math.min(window.devicePixelRatio || 1, maxPixelRatio) * ((quality && quality.renderScale) || 1);
     if (!w || !h) return;
     if (force || w !== width || h !== height || pr !== pixelRatio) {
       width = w; height = h; pixelRatio = pr;
@@ -417,6 +419,7 @@ export async function createEngine(canvas, opts = {}) {
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       emit('resize', w, h);
+      rod.need = Math.max(rod.need, 2);
     }
   }
 
@@ -432,7 +435,7 @@ export async function createEngine(canvas, opts = {}) {
   };
   function step(dt, render = true) {
     const t0 = performance.now();
-    time += dt;
+    time += dt; rod.inMain = false;
     checkResize(false);
     for (const fn of Array.from(frameFns)) {
       try { fn(dt, time); } catch (e) { console.error('[engine] ошибка в onFrame:', e); }
@@ -442,7 +445,13 @@ export async function createEngine(canvas, opts = {}) {
     for (const st of stations) if (st.group.visible) safeCall(st, 'update', dt, time);
     engine.fx._resize(height * pixelRatio, camera.fov);
     engine.fx._update(dt, time);
+    if (render === 'auto') {
+      render = wantRender();
+      if (!render) { rod.drew = false; rod.skipped++; engine.input._stale = true; }
+    }
     if (render) {
+      rod.drew = true; rod.n++; rod.rendered++; rod.last = time; rod.rt = false; if (rod.need > 0) rod.need--;
+      rod.inMain = true;
       try {
         updateShadows();
         mainC0 = renderer.info.render.calls; mainT0 = renderer.info.render.triangles;
@@ -460,21 +469,146 @@ export async function createEngine(canvas, opts = {}) {
         degrade('ошибка кадра', e);
         try { renderer.setRenderTarget(null); renderer.render(scene, camera); grabStats(); } catch (e2) { console.error('[engine] кадр не нарисован:', e2); }
       }
-    } else scene.updateMatrixWorld();
+      rod.inMain = false;
+    } else if (render === false) scene.updateMatrixWorld();
     const ms = performance.now() - t0;
     stats.frameMs += (ms - stats.frameMs) * (stats.frames < 5 ? 1 : 0.08);
     stats.frames++;
   }
+  // Пропущенный кадр не трогает холст, и некоторые сборки Chromium (headless) тогда реже зовут requestAnimationFrame.
+  // Чтобы логика боя шла с прежней частотой, после пропущенного кадра взводится таймер: если rAF не пришёл за ~33 мс,
+  // шаг делается по таймеру (на телефоне rAF приходит раньше, таймер снимается).
+  let wd = 0;
+  const WD_MS = 34;
+  function watchdog() {
+    wd = 0;
+    if (!running) return;
+    const drew = tick(performance.now());
+    if (running && onDemand && !drew && !wd) wd = setTimeout(watchdog, WD_MS);
+  }
   function frame(now) {
     if (!running) return;
     raf = requestAnimationFrame(frame);
-    // ограничение кадров: лишние кадры пропускаем целиком, dt следующего — полное время с прошлого отрисованного
-    if (frameCap && lastT && now - lastT < 1000 / frameCap - 3) return;
-    const dt = lastT ? Math.min(0.05, Math.max(0, (now - lastT) / 1000)) : 0;
-    if (lastT) { fpsT += now - lastT; fpsN++; if (fpsT >= 500) { stats.fps = fpsN * 1000 / fpsT; fpsT = 0; fpsN = 0; } autoSample(now - lastT); }
-    lastT = now;
-    step(dt);
+    if (wd) { clearTimeout(wd); wd = 0; }
+    const drew = tick(now);
+    if (onDemand && !drew && !wd) wd = setTimeout(watchdog, WD_MS);
   }
+  function tick(now) {
+    // ограничение кадров: лишние кадры пропускаем целиком, dt следующего — полное время с прошлого отрисованного
+    const cap = effCap();
+    if (cap && lastT && now - lastT < 1000 / cap - 3) return false;
+    const dt = lastT ? Math.min(0.05, Math.max(0, (now - lastT) / 1000)) : 0;
+    if (lastT) {
+      fpsT += now - lastT; fpsN++;
+      if (fpsT >= 500) { stats.fps = fpsN * 1000 / fpsT; stats.renderFps = rod.n * 1000 / fpsT; fpsT = 0; fpsN = 0; rod.n = 0; }
+      // «АВТО» меряет только интервал после нарисованного кадра: пропущенный кадр (сцена стоит) ничего не говорит о GPU
+      if (rod.drew) autoSample(now - lastT);
+    }
+    lastT = now;
+    step(dt, onDemand ? 'auto' : true);
+    return rod.drew;
+  }
+
+  // --- рисование по требованию: башня большую часть времени неподвижна. Кадр рисуется, только если что-то изменилось:
+  //     камера (перелёт, тряска), ввод (палец на органе управления), свет (мигание, вспышка, ночь), частицы, виды постов
+  //     (их renderer.render в свою цель), перерисованные текстуры, сдвинутые или перекрашенные меши (сверка «подписи» сцены),
+  //     engine.invalidate(seconds) от постов, смена размера и качества; плюс страховочный кадр раз в секунду.
+  //     Логика (onFrame, update постов, эффекты) идёт каждый кадр как раньше. ---
+  let onDemand = opts.onDemand !== false;
+  const rod = { need: 3, until: 0, rt: false, sig: NaN, last: -1, drew: true, n: 0, skipped: 0, rendered: 0, frameNo: 0, inMain: false };
+  {
+    const render0 = renderer.render;
+    renderer.render = function (sc, cam) {
+      if (!rod.inMain && sc !== scene) rod.rt = true;          // пост обновил свой вид (щель, окуляр, ПВО, карта)
+      return render0.call(this, sc, cam);
+    };
+  }
+  const sigStack = [];
+  function texSig(t) { return t ? t.version * 1.31 + t.id * 0.0173 + t.offset.x * 3.7 + t.offset.y * 4.3 + t.repeat.x * 0.9 + t.repeat.y * 1.1 + t.rotation * 2.9 : 0; }
+  function matSig(m) {
+    if (m.__rodF === rod.frameNo) return m.__rodV;
+    let s = m.version * 1.3 + m.opacity * 2.1 + (m.visible ? 0.7 : 0) + m.id * 0.0011;
+    if (m.color) s += m.color.r * 1.7 + m.color.g * 2.3 + m.color.b * 2.9;
+    if (m.emissive) s += m.emissive.r * 3.1 + m.emissive.g * 3.7 + m.emissive.b * 4.1 + (m.emissiveIntensity || 0) * 4.7;
+    if (m.map) s += texSig(m.map);
+    if (m.emissiveMap) s += texSig(m.emissiveMap) * 0.7;
+    if (m.alphaMap) s += texSig(m.alphaMap) * 0.5;
+    if (m.size !== undefined) s += m.size * 1.9;
+    const u = m.uniforms;
+    if (u) {
+      let k = 1;
+      for (const n in u) {
+        const v = u[n] && u[n].value; k += 0.37;
+        if (typeof v === 'number') s += v * k;
+        else if (v === true) s += k;
+        else if (v && typeof v === 'object') {
+          if (v.isTexture) s += texSig(v) * k;
+          else if (v.isColor) s += (v.r + v.g * 1.3 + v.b * 1.7) * k;
+          else if (v.x !== undefined) s += (v.x + v.y * 1.3 + (v.z || 0) * 1.7 + (v.w || 0) * 2.1) * k;
+          else if (v.elements) { const e = v.elements; for (let i = 0; i < e.length; i++) s += e[i] * (i + 1) * 0.01 * k; }
+          else if (v.length !== undefined && v.length < 64) for (let i = 0; i < v.length; i++) { const x = v[i]; s += (typeof x === 'number' ? x : x && x.x !== undefined ? x.x + x.y * 1.3 + (x.z || 0) * 1.7 : 0) * (i + 1) * 0.1 * k; }
+        }
+      }
+    }
+    m.__rodF = rod.frameNo; m.__rodV = s;
+    return s;
+  }
+  /** «Подпись» того, что видно: позы видимых объектов, материалы, версии геометрий и текстур, свет, камера, постобработка. */
+  function sceneSig() {
+    rod.frameNo++;
+    let s = 0, k = 1;
+    const ce = camera.matrixWorld.elements;
+    for (let i = 0; i < 16; i++) s += ce[i] * (i + 1) * 0.37;
+    s += camera.fov * 3.3 + camera.aspect * 1.7 + (scene.environment ? scene.environment.id * 0.1 : 0) + scene.environmentRotation.y * 2.3
+      + Math.round(renderer.toneMappingExposure * 2000) * 0.0019 + renderer.toneMapping * 0.7;   // экспозиция (оболочка: отказ света, ночь) — с шагом, без «вечного» дрожания
+    s += post.night * 5.1 + post.bloom * 2.9 + post.vignette * 1.3 + post.grade * 1.1 + post.contrast * 0.7 + post.grain * 0.3
+      + post.flash.x * 0.11 + post.flash.y * 0.13 + post.flash.z * 0.17 + post.flash.w * 7.3 + (post.active ? 1 : 0);
+    const st = sigStack; st.length = 0; st.push(scene);
+    while (st.length) {
+      const o = st.pop();
+      k++;
+      if (!o.visible) { s += k * 0.0131; continue; }
+      const w = 1 + (k % 97) * 0.0101;
+      if (o.matrixAutoUpdate) {
+        const p = o.position, q = o.quaternion, c = o.scale;
+        s += (p.x * 1.1 + p.y * 1.3 + p.z * 1.7 + q.x * 2.3 + q.y * 2.9 + q.z * 3.1 + q.w * 3.7 + c.x * 4.1 + c.y * 4.3 + c.z * 4.7) * w;
+      } else {
+        const m = o.matrix.elements;
+        s += (m[0] + m[1] * 3.7 + m[2] * 4.1 + m[5] * 1.3 + m[10] * 1.7 + m[12] * 2.3 + m[13] * 2.9 + m[14] * 3.1) * w;
+      }
+      if (o.material) {
+        const g = o.geometry;
+        if (g) {
+          const a = g.attributes;
+          for (const n in a) s += a[n].version * 0.71 * w;
+          if (g.index) s += g.index.version * 0.53;
+          s += g.id * 0.0007 + g.drawRange.start * 0.3 + Math.min(g.drawRange.count, 1e7) * 0.0003;
+          if (g.morphAttributes && o.morphTargetInfluences) for (let i = 0; i < o.morphTargetInfluences.length; i++) s += o.morphTargetInfluences[i] * (i + 2);
+        }
+        if (o.isInstancedMesh) s += o.instanceMatrix.version * 1.9 + o.count * 0.7 + (o.instanceColor ? o.instanceColor.version * 1.3 : 0);
+        const mt = o.material;
+        if (Array.isArray(mt)) { for (let i = 0; i < mt.length; i++) s += matSig(mt[i]) * (i + 1) * w; } else s += matSig(mt) * w;
+        s += o.renderOrder * 0.31 + (o.frustumCulled ? 0.1 : 0);
+      } else if (o.isLight) {
+        s += (o.intensity * 5.3 + o.color.r + o.color.g * 2 + o.color.b * 3 + (o.castShadow ? 1.9 : 0)) * w;
+      }
+      const ch = o.children;
+      s += ch.length * 0.017 * w;
+      for (let i = 0; i < ch.length; i++) st.push(ch[i]);
+    }
+    return s;
+  }
+  /** Нужен ли кадр. Дешёвые признаки — сначала; подпись сцены считается всегда (чтобы после кадра она была свежей). */
+  function wantRender() {
+    const sig = sceneSig();
+    const changed = !(sig === rod.sig);
+    rod.sig = sig;
+    return changed || rod.need > 0 || rod.rt || time < rod.until || !!rig.tr || rig.shakeT < rig.shakeDur
+      || light.flashT < light.flashDur || light.night !== light.nightTarget || (engine.fx && engine.fx.particles > 0)
+      || !!(engine.input && engine.input.busy) || time - rod.last >= 1 || time < rod.last || (shDirty && keyLight.castShadow);
+  }
+  /** Частота кадров по уровню: «экономное» — не чаще 30 к/с, если игрок сам не выбрал частоту (engine.setFrameCap(n, true)). */
+  function effCap() { return frameCap || (quality && quality.fpsCap && !frameCapChosen ? quality.fpsCap : 0); }
 
   // --- качество ---
   // Запасной режим: если тени или постобработка дали ошибку (нет нужного формата, шейдер не собрался на этом GPU),
@@ -508,13 +642,18 @@ export async function createEngine(canvas, opts = {}) {
     engine.fx._setQuality(q);
     checkResize(false);
     AQ.hold = Math.max(AQ.hold, 1.5); AQ.slow = 0; AQ.good = 0; AQ.acc = 0; AQ.n = 0;
+    rod.need = Math.max(rod.need, 3);
     emit('quality', q);
+    // тени включились/выключились — у освещаемых материалов другие шейдеры: собираем их заранее, параллельно (KHR_parallel_shader_compile),
+    // чтобы первый кадр нового уровня не стоял на компиляции
+    if (started && renderer.compileAsync) { try { renderer.compileAsync(scene, camera).catch(() => {}); } catch (e) { /* соберутся при отрисовке */ } }
     return q;
   }
   // «АВТО»: средний интервал между кадрами по окнам в 1 с. Четыре медленных окна подряд (> ~24 мс) — уровень ниже;
   // 30 с подряд с запасом — один раз за запуск вернуться на уровень выше. Подобранный уровень запоминается до следующего запуска.
   const AQ = { tier: 'high', acc: 0, n: 0, slow: 0, good: 0, ups: 0, downs: 0, hold: 2, last: 0 };
-  try { const v = localStorage.getItem('arta2.autoTier'); if (QUALITY[v]) AQ.tier = v; } catch (e) { /* хранилище недоступно */ }
+  try { const v = localStorage.getItem('arta2.autoTier'); if (QUALITY[v]) { AQ.tier = v; AQ.stored = true; } } catch (e) { /* хранилище недоступно */ }
+  let device = null;
   function autoStep(dir) {
     const i = TIERS.indexOf(AQ.tier) + dir;
     if (i < 0 || i >= TIERS.length) return false;
@@ -638,7 +777,7 @@ export async function createEngine(canvas, opts = {}) {
       }
       raf = requestAnimationFrame(frame);
     },
-    stop() { running = false; cancelAnimationFrame(raf); },
+    stop() { running = false; cancelAnimationFrame(raf); if (wd) { clearTimeout(wd); wd = 0; } },
 
     /** Тряска камеры: amount ~0..1 (1 — выстрел главного калибра), seconds — длительность затухания.
      *  Настройка игрока engine.settings.shake = false камеру не трогает (лампы помещения мигают по-прежнему). */
@@ -682,15 +821,43 @@ export async function createEngine(canvas, opts = {}) {
       engine.qualityAuto = auto;
       return applyQuality(QUALITY[auto ? AQ.tier : tier] || QUALITY.high);
     },
+    /**
+     * Распознать слабый телефон (device.js: ядра, память, имя GPU, пиксели экрана, замер ~0.3–0.5 с) и начать «АВТО» с
+     * подходящего уровня — чтобы слабый телефон не строил текстуры и цели уровня high и не ждал смены уровня. Действует,
+     * только пока «АВТО» не подобрало уровень (нет localStorage['arta2.autoTier']) или при o.force. Звать до создания постов.
+     * → итог замера { tier, reasons, gpu, cores, memory, screenPx, cpu, gpuMs, ms } или null (уровень уже подобран).
+     */
+    probeDevice(o = {}) {
+      if (AQ.stored && !o.force) return null;
+      device = probeDevice(renderer, o);
+      AQ.tier = device.tier; AQ.stored = true;
+      try { localStorage.setItem('arta2.autoTier', device.tier); } catch (e) { /* хранилище недоступно */ }
+      console.info('[engine] устройство: ' + device.tier + ' (' + (device.reasons.join(', ') || 'без ограничений') + '; GPU «' + device.gpu + '», ядер ' + device.cores +
+        ', память ' + (device.memory || '?') + ', CPU ' + device.cpu + ', заливка ' + device.gpuMs + ' мс, замер ' + device.ms + ' мс)');
+      return device;
+    },
+    get device() { return device; },
     /** { tier, pixelRatio, rtScale, samples, shadow, postfx, bloom, grain, particles } — текущее качество (только чтение). При 'auto' здесь уровень, действующий сейчас. */
     get quality() { return quality; },
     /** true — игрок выбрал качество «АВТО» (setQuality('auto')): уровень подбирает движок. */
     qualityAuto: false,
     /** Текущая плотность пикселей рендера (после ограничения качеством). */
     get pixelRatio() { return pixelRatio; },
-    /** Ограничение кадров: 30 — рисовать не чаще 30 раз в секунду; 0 или 60 — без ограничения. */
-    setFrameCap(n) { frameCap = n > 0 && n < 60 ? n : 0; },
+    /** Ограничение кадров: 30 — рисовать не чаще 30 раз в секунду; 0 или 60 — без ограничения.
+     *  chosen = true — частоту выбрал сам игрок: тогда и на «экономном» уровне она не ограничивается 30 к/с. */
+    setFrameCap(n, chosen = false) { frameCap = n > 0 && n < 60 ? n : 0; frameCapChosen = !!chosen; },
+    /** Частота, выбранная игроком (0 — без ограничения). Действующая (с учётом уровня) — frameCapActive. */
     get frameCap() { return frameCap; },
+    get frameCapActive() { return effCap(); },
+    /**
+     * Рисование по требованию: кадр рисуется, только когда в сцене что-то изменилось (см. wantRender).
+     * Пост, у которого есть анимация, которую движок не видит (например, меняет что-то вне сцены), зовёт
+     * engine.invalidate(seconds) — рисовать каждый кадр ещё seconds секунд (0 — один кадр).
+     */
+    invalidate(seconds = 0) { rod.need = Math.max(rod.need, 1); if (seconds > 0) rod.until = Math.max(rod.until, time + seconds); },
+    /** Выключить/включить рисование по требованию (по умолчанию включено; opts.onDemand = false — выключено). */
+    setOnDemand(on) { onDemand = !!on; rod.need = Math.max(rod.need, 1); },
+    get onDemand() { return onDemand; },
 
     /** Точка из локальных координат поста → мировые. */
     stationToWorld(id, v, out = new THREE.Vector3()) {
@@ -712,6 +879,7 @@ export async function createEngine(canvas, opts = {}) {
           particles: engine.fx ? engine.fx.particles : 0,
           geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures,
           programs: renderer.info.programs ? renderer.info.programs.length : 0,
+          rendered: rod.rendered, skipped: rod.skipped, renderFps: +(stats.renderFps || 0).toFixed(1), onDemand, cap: effCap(),
         };
       },
       /** Для проверки «АВТО» (tools/test-quality.cjs): подать count интервалов между кадрами по ms мс с временем логики cpuMs,

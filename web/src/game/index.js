@@ -86,7 +86,7 @@ const SETTINGS = {
   // игра
   hints: oneOf('new', HINT_MODES), autosave: bool(true), speed: oneOf(1, [1, 2]), confirmFriendly: bool(true), crewPanel: oneOf('full', ['full', 'compact', 'off']),
   // звук
-  volFx: vol(100), volAmb: vol(70), volRadio: vol(100), volMusic: vol(60),
+  volFx: vol(100), volAmb: vol(50), volRadio: vol(100), volMusic: vol(60),
   // экран: quality 'auto' — движок сам снижает качество, если телефон не успевает; qualityChosen — качество выбрано игроком
   // (ставит setSetting('quality', …); без этого флага прежнее 'high' из старого сохранения при загрузке становится 'auto')
   text: oneOf(1, TEXT_SIZES), quality: oneOf('auto', QUALITY_TIERS), qualityChosen: bool(false), fps: oneOf(60, [60, 30]), nightTint: oneOf('normal', ['normal', 'soft']), showFps: bool(false),

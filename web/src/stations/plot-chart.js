@@ -34,7 +34,8 @@ export function drawChart(canvas, mission, label) {
   const map = mission ? mission.map : null;
   const bat = mission ? (mission.battery || map.battery) : null;
 
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const k = canvas.width / S;                     // «экономное» качество рисует ту же карту на холсте 1024 (масштабом)
+  ctx.setTransform(k, 0, 0, k, 0, 0);
   ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
   ctx.fillStyle = C.paper; ctx.fillRect(0, 0, S, S);
 

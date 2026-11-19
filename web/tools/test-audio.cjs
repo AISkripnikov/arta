@@ -12,7 +12,7 @@ const fs = require('fs');
 
 const outDir = path.resolve(__dirname, '../.dev/audio-test');
 const tableIdx = process.argv.indexOf('--table');
-const ONLY_WIRING = process.argv.includes('--wiring'), NO_WIRING = process.argv.includes('--no-wiring');
+const ONLY_WIRING = process.argv.includes('--wiring'), NO_WIRING = process.argv.includes('--no-wiring'), ONLY_METRICS = process.argv.includes('--metrics');
 const tableFile = tableIdx >= 0 ? process.argv[tableIdx + 1] : null;
 
 let failed = 0, passed = 0;
@@ -33,8 +33,8 @@ const CEN_CAT = {
   radio: [500, 3400], air: [60, 1800], amb: [30, 1500], ambfx: [30, 3000], ui: [150, 5000], music: [60, 900], intro: [40, 4500],
 };
 const CEN = {
-  fault: [1500, 9000], overheat: [3000, 11000], paper: [1500, 9000], loupe: [2000, 11000], whistle: [400, 3500], bombWhistle: [600, 5000],
-  shellWhoosh: [200, 2500], missionLost: [80, 900], clunk: [100, 2500], leverPull: [100, 2500], pin: [200, 3000], drip: [800, 4000], 'ambient:storm': [100, 6000], introKey: [300, 6000], introHiss: [1000, 5000],
+  fault: [1500, 9000], overheat: [1500, 6000], paper: [1500, 9000], loupe: [2000, 11000], whistle: [400, 3500], bombWhistle: [600, 5000],
+  shellWhoosh: [200, 2500], missionLost: [80, 900], clunk: [100, 2500], leverPull: [100, 2500], pin: [200, 3000], drip: [800, 4000], 'ambient:storm': [100, 6000], introKey: [300, 6000], introHiss: [300, 2500],
   hintNew: [1000, 7000], dailyRecord: [800, 7000], uiTap: [300, 6000], bell: [900, 7000],
 };
 // «короткие и тихие»: щелчки интерфейса и приборов
@@ -52,9 +52,9 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
         import { createAudio, CATALOGUE } from './src/engine/audio.js';
         import { createBank } from './src/engine/audio/bank.js';
         import { makeNoise } from './src/engine/audio/kit.js';
-        import { steelRoomIR, openSeaIR } from './src/engine/audio/space.js';
+        import { steelRoomIR } from './src/engine/audio/space.js';
         import { CAT } from './src/engine/audio/catalogue.js';
-        window.__A = { createAudio, CATALOGUE, createBank, makeNoise, steelRoomIR, openSeaIR, CAT };`,
+        window.__A = { createAudio, CATALOGUE, createBank, makeNoise, steelRoomIR, CAT };`,
       resolveDir: path.resolve(__dirname, '..'), loader: 'js',
     },
     bundle: true, format: 'iife', target: ['chrome80'], outfile: path.join(outDir, 'app.js'), logLevel: 'warning',
@@ -76,6 +76,19 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
   // учёт живых источников — до загрузки страницы
   await page.addInitScript(() => {
     const L = window.__live = { started: 0, ended: 0, noStop: 0, set: new Set() };
+    // «нагрузка на звуковой поток»: живые узлы обработки (фильтры, свёртки, компрессоры, искажения, панорамы, задержки) —
+    // подключены и ещё не отсоединены; источники — запущены и не закончились. Усиления (GainNode) считаются отдельно.
+    const N = window.__nodes = { proc: new Set(), gains: new Set() };
+    const BA = window.BaseAudioContext && window.BaseAudioContext.prototype;
+    if (BA) {
+      for (const m of ['createBiquadFilter', 'createConvolver', 'createDynamicsCompressor', 'createWaveShaper', 'createStereoPanner', 'createDelay', 'createGain', 'createPanner', 'createIIRFilter']) {
+        const f = BA[m]; if (!f) continue;
+        BA[m] = function (...a) { const n = f.apply(this, a); if (this instanceof AudioContext) n.__kind = m === 'createGain' ? 'gain' : 'proc'; return n; };
+      }
+      const AN = window.AudioNode.prototype, cn = AN.connect, dc = AN.disconnect;
+      AN.connect = function (...a) { if (this.__kind) N[this.__kind === 'gain' ? 'gains' : 'proc'].add(this); return cn.apply(this, a); };
+      AN.disconnect = function (...a) { if (this.__kind && !a.length) N[this.__kind === 'gain' ? 'gains' : 'proc'].delete(this); return dc.apply(this, a); };
+    }
     const P = window.AudioScheduledSourceNode && window.AudioScheduledSourceNode.prototype;
     if (P) {
       const st = P.start, sp = P.stop;
@@ -98,12 +111,12 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
       const noise = A.makeNoise(base, 2, rate, 7);
       const bank = A.createBank(base, noise, { idle: 0 });
       await bank.all();
-      const irRoom = A.steelRoomIR(base, rate), irSea = A.openSeaIR(base, rate);
-      T.sets[rate] = { noise, bank, irRoom, irSea };
-      const irBytes = (irRoom.length + irSea.length) * 2 * 4, noiseBytes = noise.length * 4;
-      return { ms: Math.round(performance.now() - t0), bankBytes: bank.bytes, irBytes, noiseBytes, total: bank.bytes + irBytes + noiseBytes, sounds: bank.total, roomSec: irRoom.duration, seaSec: irSea.duration };
+      const irRoom = A.steelRoomIR(base, rate);
+      T.sets[rate] = { noise, bank, irRoom };
+      const irBytes = irRoom.length * 2 * 4, noiseBytes = noise.length * 4;
+      return { ms: Math.round(performance.now() - t0), bankBytes: bank.bytes, irBytes, noiseBytes, total: bank.bytes + irBytes + noiseBytes, sounds: bank.total, roomSec: irRoom.duration };
     };
-    function fft(re, im) {
+    const fft = T.fft = function (re, im) {
       const n = re.length;
       for (let i = 1, j = 0; i < n; i++) { let bit = n >> 1; for (; j & bit; bit >>= 1) j ^= bit; j ^= bit; if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; } }
       for (let len = 2; len <= n; len <<= 1) {
@@ -228,16 +241,17 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
   console.log('банк звуков');
   const RATE = 48000;
   const setup = await page.evaluate((r) => window.__T.setup(r), RATE);
+  if (ONLY_METRICS) { await metrics(page, RATE); await browser.close(); console.log(`\n${passed} passed, ${failed} failed`); process.exit(failed ? 1 : 0); }
   console.log('  --   просчитано ' + setup.sounds + ' буферов за ' + setup.ms + ' мс; банк ' + (setup.bankBytes / 1048576).toFixed(2) + ' МБ, отклики ' + (setup.irBytes / 1048576).toFixed(2) + ' МБ, шум ' + (setup.noiseBytes / 1048576).toFixed(2) + ' МБ');
   ok(setup.total <= 12 * 1048576, 'вся память буферов ≤ 12 МБ при 48 кГц', (setup.total / 1048576).toFixed(2) + ' МБ');
-  ok(setup.roomSec >= 0.7 && setup.roomSec <= 1.0, 'отклик «стальная комната» 0.7–1.0 с', setup.roomSec);
-  ok(setup.seaSec >= 3 && setup.seaSec <= 4, 'отклик «открытое море» 3–4 с', setup.seaSec);
+  ok(setup.roomSec >= 0.6 && setup.roomSec <= 0.8, 'одна реверберация: отклик «стальная комната» 0.6–0.8 с (второй, длинной, нет)', setup.roomSec);
   const bankInfo = await page.evaluate((r) => {
     const A = window.__A, b = window.__T.sets[r].bank, out = [];
     for (const name of Object.keys(A.CAT)) {
       const vs = b.variants(name); let peak = 0, nan = 0;
       for (const v of vs) { const d = v.getChannelData(0); for (let i = 0; i < d.length; i++) { const a = Math.abs(d[i]); if (!(a === a)) nan++; if (a > peak) peak = a; } }
-      out.push({ name, n: vs.length, want: A.CAT[name].v || 1, peak, nan, sec: vs[0] ? vs[0].duration : 0, d: A.CAT[name].d });
+      const c = A.CAT[name], tail = c.tail || (c.sp === 'out' && !c.pcm && c.bus !== 'music') ? 2.6 : 0;
+      out.push({ name, n: vs.length, want: c.v || 1, peak, nan, sec: vs[0] ? vs[0].duration : 0, d: c.d + tail });
     }
     return out;
   }, RATE);
@@ -255,7 +269,7 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
     rows.push(Object.assign({}, e, r));
   }
   const api = await page.evaluate(() => { const a = window.__A.createAudio(); return Object.keys(a).filter((k) => typeof a[k] === 'function'); });
-  const service = ['unlock', 'setMuted', 'setVolume', 'setBus', 'busNode', 'suspend', 'resume', 'dispose', 'prerender', 'play', 'debug', 'introVolume', 'introStop',
+  const service = ['setTier', 'unlock', 'setMuted', 'setVolume', 'setBus', 'busNode', 'suspend', 'resume', 'dispose', 'prerender', 'play', 'debug', 'introVolume', 'introStop',
     'stopper', 'lever', 'toggle', 'slew', 'nearMiss', 'ambience', 'tension', 'trace', 'duckBus'];   // служебные и вторые имена тех же звуков
   const covered = new Set(cat.map((e) => e.fn));
   const missing = api.filter((k) => !covered.has(k) && !service.includes(k));
@@ -285,7 +299,7 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
   ok(gun.midDb >= -30, 'и середина, слышная в телефоне (0.3–6 кГц выше −30 дБ)', +gun.midDb.toFixed(1));
   const louder = events.filter((r) => r.rms >= gun.rms || r.st >= gun.st);
   ok(louder.length === 0, 'выстрел — самое громкое событие (и интегрально, и за 400 мс)', louder.map((r) => [r.id, +r.rms.toFixed(1), +r.st.toFixed(1)]));
-  ok(gun.dur >= 2.5, 'длинный хвост выстрела (≥ 2.5 с)', gun.dur);
+  ok(gun.dur >= 2, 'хвост выстрела (звон брони и раскат) ≥ 2 с', gun.dur);
   // в динамике телефона (полоса 0.3–6 кГц, окно 400 мс) выстрел тоже главный — с запасом 3 дБ над любым звуком боя и интерфейса
   const phoneLoud = events.filter((r) => r.cat !== 'music' && r.phone > gun.phone - 3);
   ok(phoneLoud.length === 0, 'и в динамике телефона выстрел громче всего на 3+ дБ (полоса 0.3–6 кГц, 400 мс)', { gun: +gun.phone.toFixed(1), louder: phoneLoud.map((r) => [r.id, +r.phone.toFixed(1)]) });
@@ -315,7 +329,7 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
 
   // ---------- 3. швы петель ----------
   console.log('петли');
-  for (const name of ['hoistLoop', 'aaLoop', 'rainLoop']) {
+  for (const name of ['hoistLoop', 'aaLoop', 'gearLoop', 'theme', 'roomBed', 'machineBed', 'airBed', 'stormBed', 'tensionBed', 'etherBed', 'windBed']) {
     const sm = await page.evaluate(([r, n]) => window.__T.seam(r, n), [RATE, name]);
     ok(sm.seam <= Math.max(sm.p999 * 3, sm.max * 0.25), 'петля ' + name + ' (' + sm.sec.toFixed(2) + ' с): нет скачка на шве', sm);
   }
@@ -433,7 +447,7 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
       return { maxVoices, played, started: window.__live.started };
     });
     ok(rapid.played === 200, '200 быстрых звуков подряд сыграны', rapid);
-    ok(rapid.maxVoices <= 28, 'число одновременных голосов ограничено (≤ 28; лишние гаснут за 40 мс)', rapid.maxVoices);
+    ok(rapid.maxVoices <= 12, 'число одновременных голосов ограничено (≤ 12; лишние гаснут за 40 мс)', rapid.maxVoices);
     ok(await wait0(), '200 быстрых звуков не оставили живых узлов и источников', await page.evaluate(() => [window.__a.debug(), window.__live.set.size]));
     const cyc = await page.evaluate(async () => {
       const a = window.__a; let threw = 0;
@@ -465,6 +479,7 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
     ok(sus.s3 === 'running' && sus.amb === true, 'resume(): контекст идёт, включённый за время паузы фон на месте', sus);
     ok(sus.after === false, 'dispose(): дальше все вызовы молчат', sus);
   }
+  await metrics(page, RATE);
   ok(problems.length === 0, 'нет ошибок и предупреждений в консоли', problems.slice(0, 5));
   if (!NO_WIRING) await wiring(browser);
   const f1 = (x) => (x <= -179 ? '  -inf' : x.toFixed(1).padStart(6));
@@ -477,6 +492,98 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });
+
+// ---------- 7б. шипение, треск, нагрузка ----------
+// Слушать нельзя, поэтому «не шипит» доказываем числами по каждому непрерывному звуку (петли, фон, музыка), прослушанному
+// через тракт целиком:
+//   >6 кГц    — доля энергии выше 6 кГц (у тёмного фона и петель — меньше 1 %);
+//   плоскость — спектральная плоскость (геометрическое / арифметическое среднее мощности) в полосе 200 Гц – 12 кГц: белый
+//               шум ≈ 1, тон ≈ 0; «шипение» — это высокая плоскость при заметной доле верхов;
+//   треск     — отсчёты, где скачок между соседними отсчётами в 10+ раз больше обычного (СКЗ скачков вокруг, 20 мс) и
+//               больше 0.02: щелчки, обрывы, переполнение. У непрерывных звуков их быть не должно.
+// Нагрузка — живой AudioContext, весь бой разом (фон шторма на зенитке с напряжением, очередь, самолёты, привод, шестерни,
+// элеватор, ревун, выстрел, разрывы, радио, до этого — музыка): пиковое число живых узлов обработки и источников.
+async function metrics(page, RATE) {
+  console.log('шипение, треск, нагрузка');
+  await page.evaluate(() => {
+    const T = window.__T;
+    T.hiss = (buf) => {
+      const rate = buf.sampleRate, L = buf.getChannelData(0), R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L, n = L.length;
+      const m = new Float32Array(n); for (let i = 0; i < n; i++) m[i] = (L[i] + R[i]) / 2;
+      const N = 4096, spec = new Float64Array(N / 2), re = new Float64Array(N), im = new Float64Array(N);
+      for (let s = 0; s + N <= n; s += N / 2) {
+        for (let i = 0; i < N; i++) { re[i] = m[s + i] * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / N)); im[i] = 0; }
+        T.fft(re, im); for (let i = 0; i < N / 2; i++) spec[i] += re[i] * re[i] + im[i] * im[i];
+      }
+      const hz = rate / N; let tot = 0, hi = 0, lg = 0, ar = 0, c = 0;
+      for (let i = 1; i < N / 2; i++) { const f = i * hz, p = spec[i]; tot += p; if (f > 6000) hi += p; if (f >= 200 && f <= 12000) { lg += Math.log(p + 1e-30); ar += p; c++; } }
+      const flat = c ? Math.exp(lg / c) / (ar / c + 1e-30) : 0;
+      // треск
+      const d = new Float32Array(n); for (let i = 1; i < n; i++) d[i] = Math.abs(m[i] - m[i - 1]);
+      const w = Math.floor(rate * 0.02), sq = new Float64Array(n + 1); for (let i = 0; i < n; i++) sq[i + 1] = sq[i] + d[i] * d[i];
+      let crackle = 0, worst = 0;
+      for (let i = 1; i < n; i++) {
+        const a = Math.max(0, i - w), b = Math.min(n, i + w), loc = Math.sqrt((sq[b] - sq[a] - d[i] * d[i]) / Math.max(1, b - a - 1));
+        const r = d[i] / (loc + 1e-9); if (d[i] > 0.02 && r > 10) { crackle++; if (r > worst) worst = r; }
+      }
+      return { high6: tot ? hi / tot : 0, flat, crackle, worst };
+    };
+  });
+  const loopIds = await page.evaluate(() => window.__A.CATALOGUE.filter((e) => e.loop).map((e) => e.id));
+  const res = [];
+  for (const id of loopIds) {
+    const r = await page.evaluate(async ([id, rate]) => {
+      const T = window.__T, e = window.__A.CATALOGUE.find((x) => x.id === id);
+      const a = await T.render(e, rate, { win: Math.min(e.win, 12) });
+      return Object.assign({ id, rms: a.rms }, T.hiss(T.lastBuf));
+    }, [id, RATE]);
+    res.push(r);
+  }
+  for (const r of res) console.log('  --   ' + r.id.padEnd(18) + ' >6кГц ' + (r.high6 * 100).toFixed(2).padStart(6) + ' %  плоскость ' + r.flat.toFixed(3) + '  треск ' + r.crackle + '  инт. ' + r.rms.toFixed(1) + ' дБ');
+  const beds = res.filter((r) => /^ambient|^radioStatic|^music|^introWind|^introHiss/.test(r.id)), mech = res.filter((r) => !beds.includes(r));
+  group('фон, эфир и музыка не шипят: выше 6 кГц меньше 1 % энергии, плоскость спектра < 0.12', beds, (r) => r.high6 < 0.01 && r.flat < 0.12, (r) => [r.id, +(r.high6 * 100).toFixed(2), +r.flat.toFixed(3)]);
+  group('петли механизмов и воздуха не шипят: выше 6 кГц меньше 3 % энергии, плоскость спектра < 0.25', mech, (r) => r.high6 < 0.03 && r.flat < 0.25, (r) => [r.id, +(r.high6 * 100).toFixed(2), +r.flat.toFixed(3)]);
+  group('непрерывные звуки без треска (нет одиночных скачков в 10+ раз выше обычных)', res, (r) => r.crackle === 0, (r) => [r.id, r.crackle, +r.worst.toFixed(1)]);
+  // весь бой разом через тракт (офлайн): треска нет и на сведении
+  const mix = await page.evaluate(async (rate) => {
+    const T = window.__T, e = { win: 6, fn: 'ambient', args: [true], pre: ['ambience', { station: 'aa', weather: 'storm', tension: 1 }] };
+    await T.render(e, rate, { steps: [[0.1, 'aaFire', [true]], [0.2, 'planeDrone', [0.8, 0.4, 0.3]], [0.3, 'servo', [0.6]], [0.4, 'gear', [0.5]], [0.5, 'hoistRun', [true]],
+      [1, 'radioMsg', ['spotter', false]], [2, 'aaFire', [false]], [2.5, 'fire', []], [3, 'impact', [{ range: 5, kind: 'land', delay: 0 }]], [3.5, 'turretHit', []]] });
+    return T.hiss(T.lastBuf);
+  }, RATE);
+  console.log('  --   сведение боя: >6кГц ' + (mix.high6 * 100).toFixed(2) + ' %  плоскость ' + mix.flat.toFixed(3) + '  треск ' + mix.crackle);
+  ok(mix.crackle === 0, 'сведение всего боя через лимитер без треска', mix);
+  // нагрузка: живой контекст
+  const load = await page.evaluate(async () => {
+    const a = window.__A.createAudio(), N = window.__nodes, w = (ms) => new Promise((r) => setTimeout(r, ms));
+    a.unlock(); await w(200);
+    if (a.debug().state !== 'running') return null;
+    if (a.setTier) a.setTier('high');
+    await a.prerender();
+    let peak = 0, peakG = 0, peakSrc = 0;
+    const live = () => window.__live.set.size;
+    const sample = () => { const p = N.proc.size + live(); if (p > peak) { peak = p; peakSrc = live(); } peakG = Math.max(peakG, N.gains.size); };
+    const timer = setInterval(sample, 25);
+    a.music(true); await w(1500);
+    const music = N.proc.size + live();
+    a.ambience({ station: 'aa', weather: 'storm', tension: 1 }); a.ambient(true); await w(1200);
+    const amb = N.proc.size + live();
+    a.aaFire(true); a.planeDrone(0.8, 0.4, 0.3); a.servo(0.6); a.gear(0.5); a.hoistRun(true); a.alarm(true);
+    a.fire(); a.impact({ range: 5, kind: 'land', delay: 0.3 }); a.radioMsg('hq'); a.detent(1, 1); a.whistle(1); a.turretHit();
+    for (let i = 0; i < 6; i++) { await w(150); a.detent(1, 1); a.planeDrone(0.8, 0.4 + i * 0.05, 0.3); }
+    await w(600);
+    a.aaFire(false); a.planeDrone(0); a.servo(0); a.gear(0); a.hoistRun(false); a.alarm(false); a.ambient(false); a.music(false);
+    await w(300); sample(); clearInterval(timer);
+    const r = { music, amb, peak, peakSrc, peakGains: peakG };
+    a.dispose();
+    return r;
+  });
+  if (!load) console.log('  --   живой AudioContext не идёт — нагрузка не измерена');
+  else {
+    console.log('  --   нагрузка (живые узлы обработки + источники): музыка ' + load.music + ', фон шторма ' + load.amb + ', пик боя ' + load.peak + ' (из них источников ' + load.peakSrc + '; усилений ' + load.peakGains + ')');
+    ok(load.music <= 12 && load.amb <= 14 && load.peak <= 26, 'нагрузка: музыка ≤ 12, фон ≤ 14, весь бой ≤ 26 живых узлов обработки и источников (было 16 / 43 / 77)', load);
+  }
+}
 
 // ---------- 8. проводка звука в игре ----------
 // Полная игра (личная сборка), сценарий боя действиями game.*; журнал вызовов engine.audio.trace() — что, когда и с какими

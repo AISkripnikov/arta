@@ -27,6 +27,8 @@ const wrap180 = (a) => { a = ((a + 180) % 360 + 360) % 360; return a - 180; };
 export function createSoundscape({ engine, game, shell = null, stations = [] }) {
   const audio = engine.audio, s = game.state, offs = [];
   const A = (name, ...a) => { try { const f = audio && audio[name]; if (typeof f === 'function') return f.apply(audio, a); } catch (e) { /* звук не обязателен */ } return 0; };
+  // уровень звука следует за качеством графики: слабый телефон (low) — без реверберации, фон из двух слоёв, моно
+  try { if (engine.quality) A('setTier', engine.quality.tier); if (engine.on) offs.push(engine.on('quality', (q) => A('setTier', q && q.tier))); } catch (e) { /* без уровня */ }
   const near = (id) => { const st = stations.find((x) => x && x.id === id); return !!(st && st.group && st.group.visible); };
   const battle = () => s.phase === 'playing';
   const live = () => s.phase === 'playing' && !s.paused;
