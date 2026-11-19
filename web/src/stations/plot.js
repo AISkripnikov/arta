@@ -656,7 +656,7 @@ export function createPlotStation(ctx) {
     onUp(e) {
       if (!drag) return;
       const d = drag;
-      if (d.kind === 'pan') { if (d.moved) { drag = null; if (!e.cancelled) startFling(d); } return; }
+      if (d.kind === 'pan') { if (d.moved) { drag = null; if (!e.cancelled) startFling(d, e); } return; }
       if (d.moved) {
         d.done = true;
         if (d.kind === 'pin') { d.free = null; audio.pin(); }
@@ -719,12 +719,12 @@ export function createPlotStation(ctx) {
       d.trail = [];
     }
     panLoupe(loupeC.u + d.anchor.u - p.u, loupeC.v + d.anchor.v - p.v);
-    const t = now();
+    const t = e.duration || 0;                             // время по меткам событий: долгий кадр не «гасит» бросок
     d.trail.push({ t, u: loupeC.u, v: loupeC.v });
     while (d.trail.length > 2 && t - d.trail[0].t > FLING.window) d.trail.shift();
   }
-  function startFling(d) {
-    const tr = d.trail || [], t = now();
+  function startFling(d, e) {
+    const tr = d.trail || [], t = e.duration || 0;
     if (tr.length < 2) return;
     const a = tr[0], b = tr[tr.length - 1], dt = (b.t - a.t) / 1000;
     if (t - b.t > FLING.still || dt < 0.012) return;       // палец остановился перед отпусканием — без инерции
@@ -735,7 +735,6 @@ export function createPlotStation(ctx) {
     fling.u = fu; fling.v = fv;
     engine.invalidate();
   }
-  function now() { return typeof performance !== 'undefined' ? performance.now() : Date.now(); }
 
   // ------------------------------------------------------------------ кадр
   const fmt2 = (v) => { const n = Math.round(v * 100); return (n < 1000 ? '0' : '') + (n / 100).toFixed(2); };

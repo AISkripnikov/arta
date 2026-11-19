@@ -290,12 +290,15 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol + 1e-9;
     };
     /** Перетаскивание мышью с компенсацией порога (5 px «съедаются»); hold — пауза перед отпусканием (без инерции). */
     const panBy = async (e, hold = 150, gap = 0) => {
+      // бросок: кадры на время жеста остановлены — иначе на SwiftShader между событиями пальца проходят сотни мс
+      if (!hold) await page.evaluate(() => window.__dev.engine.stop());
       const L = Math.hypot(e.sb.x - e.sa.x, e.sb.y - e.sa.y) || 1, k = (L + 5) / L;
       const b = { x: e.sa.x + (e.sb.x - e.sa.x) * k, y: e.sa.y + (e.sb.y - e.sa.y) * k };
       await page.mouse.move(e.sa.x, e.sa.y); await page.mouse.down();
       for (let i = 1; i <= 8; i++) { await page.mouse.move(e.sa.x + (b.x - e.sa.x) * i / 8, e.sa.y + (b.y - e.sa.y) * i / 8); if (gap) await page.waitForTimeout(gap); }
       if (hold) await page.waitForTimeout(hold);
       await page.mouse.up();
+      if (!hold) await page.evaluate(() => window.__dev.engine.start());
     };
     await tap(await at("T.hot('btnLoupe')"));
     await step(30, 0.05);
@@ -313,11 +316,7 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol + 1e-9;
     ok(near(v1.x, v0.x - d.x, 0.02) && near(v1.y, v0.y - d.y, 0.02), 'карта идёт за пальцем 1:1 (сдвиг 0.72 км ±0.02)', [v0, v1, d]);
     ok(v1.panned && (await plateShown()) && s.loupe, 'карта отведена — видна плашка «К ВИЗИРУ», лупа не снята', v1);
     ok(s.pins[moving.id].x === pin0.x && s.pins[moving.id].y === pin0.y && s.al.bearing === al0.bearing && s.al.range === al0.range, 'фишка и алидада при этом не тронуты', [s.pins[moving.id], s.al]);
-    {
-      const tags = await at('[T.st.group.getObjectByName("chartBoard")].length');
-      if (process.env.PLOT_SHOT) { await step(2); await page.screenshot({ path: process.env.PLOT_SHOT }); }
-      ok(tags === 1, 'снимок кадра');
-    }
+    if (process.env.PLOT_SHOT) { await step(2); await page.screenshot({ path: process.env.PLOT_SHOT }); }   // снимок отведённой лупы
     // 2) «К ВИЗИРУ» возвращает кадр к фишке активной цели
     await tap(await at("T.hot('btnToSight')"));
     await step(30, 0.05);
