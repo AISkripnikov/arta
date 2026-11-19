@@ -162,7 +162,7 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
   await tab('ctrl');
   // смена уровня качества (их только что перебрали все) перестраивает шейдеры и текстуры — на программном WebGL это
   // секунды; замер пропуска кадров начинаем, когда движок снова рисует ровно (6 кадров после последней смены)
-  { const f0 = await p.evaluate(() => __arta.engine.debug.stats().frames); await p.waitForFunction((f) => __arta.engine.debug.stats().frames >= f + 6, f0, { timeout: 60000 }); }
+  await p.evaluate(() => new Promise((r) => { let n = 0; const off = __arta.engine.onFrame(() => { if (++n >= 6) { off(); r(); } }); }));
   await p.waitForTimeout(1300);                // даём движку отрисовать секунду с ограничением 30 кадров
   const eng = await p.evaluate(async () => {
     const { engine, game } = __arta, st = game.settings(), fm = document.getElementById('fpsMeter');

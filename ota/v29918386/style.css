@@ -177,10 +177,62 @@ table.dbf tr.on td { background: rgba(211,154,30,.22); } table.dbf tbody tr { cu
 .up-foot { flex: none; display: flex; justify-content: space-between; gap: 10px; margin-top: 7px; font-size: 10.5px; letter-spacing: .02em; color: var(--dim); text-transform: none; } #upMsg { color: #ff8a7a; }
 @media (max-height: 380px) { .up-d { font-size: 10.5px; } .up-card { padding: 5px 8px; gap: 2px; } #upgrades .sheet-head { margin-bottom: 6px; } }
 
-/* ---------- настройки ---------- */
-.set-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; touch-action: pan-y; } .set-list .opt { flex-wrap: wrap; color: var(--ivory); font-size: calc(11px * var(--tsc)); }
-.set-list .seg button { padding: 7px 11px; white-space: nowrap; }
-@media (max-height: 380px) { .set-list { gap: 6px; } .set-list .seg button { padding: 5px 10px; } }
+/* ---------- настройки: вкладки, строки «название + пояснение + орган» ---------- */
+.set-head { gap: 10px; flex-wrap: wrap; row-gap: 6px; } .set-head h2 { flex: none; }
+.set-tabs { flex: 1; display: flex; gap: 2px; min-width: 0; justify-content: center; }
+.set-tabs button { padding: 8px 10px; min-height: 34px; font-size: calc(12px * var(--tsc)); font-weight: 600; letter-spacing: .1em; color: var(--dim); border-bottom: 2px solid transparent; white-space: nowrap; }
+.set-tabs button.on { color: var(--ochre); border-bottom-color: var(--ochre); background: rgba(211,154,30,.1); }
+.set-list { flex: 1; min-height: 0; overflow-y: auto; touch-action: pan-y; padding-right: 4px; }
+.set-pane { display: none; flex-direction: column; } .set-pane.on { display: flex; }
+.set-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 14px; padding: 7px 0; border-bottom: 1px solid rgba(0,0,0,.4); box-shadow: 0 1px 0 rgba(255,255,255,.04); }
+.set-row:last-child { border-bottom: 0; box-shadow: none; }
+.set-l { flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.set-l b { font-size: calc(12px * var(--tsc)); font-weight: 600; letter-spacing: .14em; color: var(--ivory); }
+.set-l small { font-size: calc(11px * var(--tsc)); line-height: 1.25; letter-spacing: .01em; color: var(--dim); text-transform: none; } .set-l small:empty { display: none; }
+.set-l .set-lock { color: var(--amber); }
+.set-row .seg { flex: none; max-width: 100%; } .set-row .seg button { padding: 0 12px; min-height: 36px; min-width: 52px; font-size: calc(12px * var(--tsc)); white-space: nowrap; }
+.set-row.off .set-l b, .set-row.off .seg, .set-row.off .sld { opacity: .45; } .set-row button[disabled] { cursor: default; }
+.set-v { flex: none; font: 600 calc(12px * var(--tsc)) var(--mono); color: var(--ochre); letter-spacing: .04em; }
+.set-act { flex: none; min-height: 36px; padding: 0 14px !important; font-size: calc(12px * var(--tsc)) !important; white-space: nowrap; }
+.btn.danger { background: linear-gradient(#b3261a, #7d150d); color: #fff3d6; }
+/* ползунок громкости: − шкала + */
+.sld { flex: none; display: flex; align-items: stretch; height: 36px; width: min(300px, 100%); border: 1px solid #000; border-radius: 3px; overflow: hidden; }
+.sld-b { flex: none; width: 44px; font: 600 20px/1 var(--font); color: var(--ochre); background: #232b33; } .sld-b:active { background: rgba(211,154,30,.25); }
+.sld-bar { flex: 1; position: relative; background: #14181c; border-left: 1px solid #000; border-right: 1px solid #000; touch-action: none; cursor: pointer; }
+.sld-bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: linear-gradient(#e0a92c, #b9820f); pointer-events: none; }
+.sld-bar b { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 600 calc(13px * var(--tsc)) var(--mono); color: #fff; text-shadow: 0 1px 2px #000, 0 0 4px #000; pointer-events: none; }
+/* сброс прогресса: галочка «и настройки», красная кнопка с удержанием */
+.chk { display: flex; align-items: center; gap: 10px; min-height: 40px; margin: 4px 0 2px; font-size: calc(13px * var(--tsc)); letter-spacing: .08em; color: var(--ivory); text-align: left; }
+.chk i { flex: none; width: 24px; height: 24px; border: 2px solid var(--dim); border-radius: 3px; background: #14181c; position: relative; }
+.chk.on i { border-color: var(--ochre); background: var(--ochre); } .chk.on i::after { content: ''; position: absolute; left: 6px; top: 1px; width: 7px; height: 13px; border: solid #14171a; border-width: 0 3px 3px 0; transform: rotate(45deg); }
+.hold-btn { position: relative; display: block; width: 100%; min-height: 48px; margin-top: 10px; border: 1px solid #000; border-radius: 3px; background: #5a130c; color: #fff3d6; font-weight: 600; font-size: calc(14px * var(--tsc)); letter-spacing: .12em; overflow: hidden; touch-action: none; box-shadow: 0 1px 0 rgba(255,255,255,.12) inset; }
+.hold-btn i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: linear-gradient(#e2311f, #a3160c); } .hold-btn span { position: relative; } .hold-btn.holding { box-shadow: 0 0 0 2px var(--red), 0 0 14px rgba(255,74,58,.6); }
+@media (max-height: 380px) { .set-row { padding: 5px 0; } #settings .sheet-head { margin-bottom: 6px; } }
+
+/* ---------- бой: кнопка «СОХРАНИТЬ», спокойное сообщение, счётчик кадров ---------- */
+.tb-save { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 0 7px; min-width: 48px; border-left: 0; }
+.tb-save svg { width: 15px; height: 15px; flex: none; } .tb-save span { font-size: calc(8px * var(--tsb)); line-height: 1; letter-spacing: .08em; white-space: nowrap; }
+.w-only { text-decoration: none; } .tb-cell.grow { overflow: hidden; } #topbar > .tb-cell:nth-of-type(1) { flex: none; }
+/* узкий экран: с кнопкой «СОХРАНИТЬ» панель плотнее — поля меньше, «ПРОЧНОСТЬ» без «БАТАРЕИ», время не обрезается */
+@media (max-width: 860px) { .w-only { display: none; } }
+@media (max-width: 780px) { #topbar .tb-cell { padding: 0 5px; } #topbar .tb-cell.grow { min-width: 66px; } #topbar .tb-btn { padding: 0 8px; } #topbar .tb-btn.wide { padding: 0 6px; } #topbar .tb-save { padding: 0 4px; min-width: 44px; } }
+@media (max-width: 680px) { #topbar .tb-save span { display: none; } #topbar .tb-save svg { width: 18px; height: 18px; } }
+#toast.ok { background: rgba(17,19,22,.95); border-left: 3px solid var(--green); color: var(--ivory); }
+/* счётчик кадров — часть экрана боя (внутри #hud): слева внизу над полосой постов; в меню и под окнами (настройки, блокнот) его нет поверх органов.
+   На посту ОГОНЬ слева внизу стоят плашки неисправностей — там счётчик уходит вправо. */
+#hud[data-st="fire"] #fpsMeter { left: auto; right: max(4px, env(safe-area-inset-right)); }
+#fpsMeter { position: absolute; left: max(4px, env(safe-area-inset-left)); bottom: 60px; padding: 1px 5px; font: 600 10px/1.4 var(--mono); color: #9fe8b0; background: rgba(0,0,0,.6); border-radius: 2px; pointer-events: none; }
+/* настройка «красный свет ночью: слабый» */
+body.night-soft #night.on { opacity: .5; }
+/* настройка «расчёт на экране»: компактно — узкая полоска, как на экранах 16:9; скрыть — виден только значок раненого */
+body.crew-compact #rcol { width: 22px; right: max(2px, env(safe-area-inset-right)); } body.crew-compact.lefty #rcol { right: auto; left: max(2px, env(safe-area-inset-left)); }
+body.crew-compact .crew-chip { padding: 5px 2px 5px; align-items: center; } body.crew-compact .crew-chip .top { justify-content: center; } body.crew-compact .crew-chip .nm, body.crew-compact .crew-chip em, body.crew-compact #crewKits span { display: none; }
+body.crew-compact .crew-chip .fat { align-self: stretch; } body.crew-compact #crewKits { justify-content: center; padding: 1px 0; }
+body.crew-compact #rstack { right: calc(max(2px, env(safe-area-inset-right)) + 26px); } body.crew-compact.lefty #rstack { right: auto; left: calc(max(2px, env(safe-area-inset-left)) + 26px); }
+body.crew-off .crew-chip:not(.wounded), body.crew-off #crewKits { display: none; }
+/* меню: сохранённый бой — главная кнопка */
+#resumeBox .btn.resume { padding-top: 9px; padding-bottom: 9px; box-shadow: 0 1px 0 rgba(255,255,255,.3) inset, 0 0 0 1px rgba(224,169,44,.5), 0 0 14px rgba(224,169,44,.28); }
+#resumeBox .btn.resume small { font-size: calc(10px * var(--tsc)); letter-spacing: .08em; margin-top: 1px; }
 
 /* ---------- итоги: задание дня ---------- */
 #dlgBody .daily-res { display: flex; justify-content: space-between; align-items: baseline; margin: 8px 0 4px; padding: 4px 10px; border: 1px solid var(--ochre); border-radius: 3px; letter-spacing: .12em; font-size: 12px; } #dlgBody .daily-res b { font-size: 22px; color: var(--ochre); }
@@ -271,3 +323,42 @@ body.lefty #hud[data-st="fire"] #faults { right: auto; left: max(8px, env(safe-a
   #convoyChip span { display: none; } #convoyChip { white-space: normal; text-align: center; padding: 3px 1px; line-height: 10px; } #convoyChip i { margin: 1px; }
   #rstack { right: calc(max(2px, env(safe-area-inset-right)) + 26px); } body.lefty #rstack { right: auto; left: calc(max(2px, env(safe-area-inset-left)) + 26px); }
 }
+/* узкий экран: счётчик непрочитанного не закрывает последнюю букву слова «БЛОКНОТ» */
+@media (max-width: 780px) {
+  #topbar .tb-btn.wide { padding: 0 13px 0 6px; } #hUnread { top: 2px; right: 1px; }
+  body.lefty #topbar .tb-btn.wide { padding: 0 6px 0 13px; } body.lefty #hUnread { right: auto; left: 1px; }
+}
+
+/* «ГОТОВО» в шапке настроек — единственный выход с экрана: не ниже 36 px */
+#settings .set-head .btn.small{min-height:36px;padding:0 14px}
+
+/* ===== подсказки «НОВОЕ» и засечка батареи ===== */
+#hint.topic { color: #ffe08a; font-weight: 600; letter-spacing: .05em; }
+/* объяснение темы показывается в строке радио (тот же вид и место, касаний не перехватывает); строка «НОВОЕ · …» внизу — напоминание, касание показывает объяснение снова */
+#radio.topic { border-left-color: var(--amber); } #radio.topic b { color: var(--amber); }
+#radio.topic.warn { border-left-color: var(--red); } #radio.topic.warn b { color: #ff8a7a; }
+/* пост ОГОНЬ, левша: обычное радио (1–2 строки) уходит вправо, но объяснение темы — 5–9 строк и легло бы на спуск, «ВИЛКУ» и «ОЧЕРЕДЬ»,
+   о которых само и говорит. Тема остаётся слева, за столбиком расчёта (там только приборы); при тревоге — под её плашкой */
+body.lefty #hud[data-st="fire"] #radio.topic { right: auto; left: calc(max(4px, env(safe-area-inset-left)) + 58px); }
+body.lefty.crew-compact #hud[data-st="fire"] #radio.topic { left: calc(max(2px, env(safe-area-inset-left)) + 28px); }
+@media (max-width: 700px) { body.lefty #hud[data-st="fire"] #radio.topic { left: calc(max(2px, env(safe-area-inset-left)) + 28px); } }
+body.lefty #hud.raid[data-st="fire"] #radio.topic { top: 84px; }
+/* на посту ОГОНЬ колонка узкая: крупнее 1.15 текст темы не делаем, иначе на 640 px он не помещается по высоте */
+#hud[data-st="fire"] #radio.topic { font-size: calc(13px * var(--tsc)); }
+/* строка «НОВОЕ · …» — единственный способ перечитать объяснение, а высота её 18 px: зона касания шире самой строки
+   (16 px над нижней панелью и 2 px под строкой; --hintw — ширина строки, пишет оболочка). Псевдоэлемент — потомок #info,
+   но отсчитывается от #bottombar, поэтому overflow строки его не режет */
+#info.hastopic::after { content: ''; position: absolute; right: max(6px, env(safe-area-inset-left)); top: -16px; height: 36px; width: var(--hintw, 160px); cursor: pointer; }
+body.lefty #info.hastopic::after { right: auto; left: max(6px, env(safe-area-inset-left)); }
+#hint.topic { position: relative; z-index: 1; }      /* сама строка — поверх своей зоны касания */
+#hint.topic { cursor: pointer; } #hint.topic::after { content: ' (?)'; color: var(--dim); font-weight: 400; }
+/* засечка батареи: значок-глаз в верхней панели, в ячейке «ПРОЧНОСТЬ» рядом с полосой (над постами ничего постоянного не висит:
+   плашка под панелью закрывала лампы и органы постов). Зелёный зачёркнутый — нас не видят; красный — засечены. Текст — для проверок и чтения с экрана */
+.bar-row { display: flex; align-items: center; gap: 5px; margin-top: 4px; } .bar-row .bar { flex: 1 1 auto; min-width: 0; margin-top: 0; }
+#detChip { flex: 0 0 auto; display: flex; width: 17px; height: 12px; margin: -2px 0; color: var(--green); border-radius: 2px; pointer-events: none !important; }
+#detChip.hidden { display: none; } #detChip svg { width: 17px; height: 12px; display: block; } #detChip span { display: none; }
+#detChip.det { color: #ff5a48; } #detChip.det .slash { display: none; }
+#detChip.fresh { color: #fff3d6; background: #a3160c; animation: raid .7s infinite; }
+#flash.det { background: radial-gradient(circle, transparent 45%, rgba(190,20,10,.55)); animation: fl .9s ease-out; }
+#dlgBody .new-box { border-left: 3px solid var(--amber); padding: 1px 0 1px 9px; margin: 8px 0; } #dlgBody .new-box h3 { margin-top: 2px; color: var(--amber); } #dlgBody .new-box ul { margin-bottom: 2px; }
+#diffHint.new { color: var(--amber); }
