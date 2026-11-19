@@ -272,8 +272,18 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
   await p.waitForTimeout(1500);
   await p.evaluate(() => localStorage.removeItem('arta2.intro'));
   await p.waitForTimeout(500);
+  const keep = await p.evaluate(() => JSON.stringify(Object.fromEntries(Object.keys(localStorage).map((k) => [k, localStorage.getItem(k)]))));
   await p.reload();
   await p.waitForFunction(() => window.__arta);
+  // безголовый Chromium на file:// изредка теряет ВСЁ хранилище при перезагрузке (воспроизводится и на старых сборках;
+  // сама игра хранилище целиком не чистит). Тогда возвращаем снимок и перезагружаем ещё раз — проверка ниже та же.
+  if (await p.evaluate(() => localStorage.length === 0)) {
+    console.log('среда потеряла localStorage при перезагрузке — повтор с тем же сохранением');
+    await p.evaluate((k) => { for (const [n, v] of Object.entries(JSON.parse(k))) localStorage.setItem(n, v); }, keep);
+    await p.waitForTimeout(1000);
+    await p.reload();
+    await p.waitForFunction(() => window.__arta);
+  }
   if (await p.evaluate(() => __arta.shell.introPlaying || !!document.getElementById('arta-intro') || !__arta.shell.intro.seen())) fail('игроку с сохранённым боем ролик показан насильно (или не отмечен показанным)');
   await skipIntro();
   if (await p.isVisible('#dialog.show')) await p.click('#dlgBtns .btn');
