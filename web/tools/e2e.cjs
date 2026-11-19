@@ -131,6 +131,7 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
     ['sound', '#setVolAmb [data-step="10"]', 'volAmb', 60], ['sound', '#setVolRadio [data-step="-10"]', 'volRadio', 90], ['sound', '#setVolMusic [data-step="10"]', 'volMusic', 70],
     ['screen', '#setText [data-val="1.15"]', 'text', 1.15], ['screen', '#setQuality [data-val="high"]', 'quality', 'high'], ['screen', '#setQuality [data-val="auto"]', 'quality', 'auto'],
     ['screen', '#setQuality [data-val="mid"]', 'quality', 'mid'], ['screen', '#setQuality [data-val="low"]', 'quality', 'low'],
+    ['screen', '#setRes [data-val="1.25"]', 'resolution', 1.25], ['screen', '#setRes [data-val="auto"]', 'resolution', 'auto'],
     ['screen', '#setFps [data-val="30"]', 'fps', 30], ['screen', '#setNight [data-val="soft"]', 'nightTint', 'soft'], ['screen', '#setShowFps [data-val="1"]', 'showFps', true],
     ['screen', '#setShake [data-val="0"]', 'shake', false],
   ];
@@ -186,7 +187,7 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
   if (eng.volRadio !== 25 || eng.bar !== '25%' || eng.label !== '25') fail('ползунок громкости радио не встал на 25: ' + eng.volRadio + ' ' + eng.bar);
   if (!eng.powerOff) fail('сила вибрации доступна при выключенной вибрации');
   if (eng.invert !== true || eng.sens !== 1.3) fail('инверсия или чувствительность не дошли до движка');
-  if (eng.q.tier !== 'low' || eng.q.pixelRatio !== 1 || eng.q.rtScale !== 0.5 || eng.rtW !== 256 || eng.qAuto !== false) fail('качество «экономное» не дошло до движка: ' + JSON.stringify(eng.q) + ' окуляр ' + eng.rtW);
+  if (eng.q.tier !== 'low' || eng.q.pixelRatio !== 1.5 || eng.q.renderScale || eng.q.rtScale !== 0.5 || eng.rtW !== 256 || eng.qAuto !== false) fail('качество «экономное» не дошло до движка: ' + JSON.stringify(eng.q) + ' окуляр ' + eng.rtW);
   if (eng.shake !== false) fail('выключенная тряска камеры не дошла до движка');
   if (eng.cap !== 30 || eng.frames > 34) fail('ограничение 30 кадров не работает: ' + eng.cap + ', кадров за секунду ' + eng.frames);
   if (eng.free < 5 || eng.slow < 1 || eng.slow > 4 || eng.maxDt > 0.0501) fail('пропуск кадров не работает: без предела ' + eng.free + ' кадров за 1,5 с, с пределом 2 к/с — ' + eng.slow + ', dt до ' + eng.maxDt);

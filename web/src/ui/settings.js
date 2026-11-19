@@ -72,8 +72,8 @@ const ROWS = {
     { id: 'setUpReset', act: 'upreset', type: 'act', label: 'УЛУЧШЕНИЯ БАШНИ', btn: 'СБРОСИТЬ УЛУЧШЕНИЯ', lock: true, note: 'Снять все улучшения и вернуть очки снабжения.' },
     { id: 'setDefaults', act: 'defaults', type: 'act', label: 'НАСТРОЙКИ', btn: 'ВОССТАНОВИТЬ ПО УМОЛЧАНИЮ', note: 'Вернуть все настройки к исходным. Прогресс и сложность не меняются.' },
     { id: 'setWipe', act: 'wipe', type: 'act', label: 'ПРОГРЕСС', btn: 'СБРОСИТЬ ПРОГРЕСС', danger: true, lock: true, note: 'Стереть звёзды, звание, улучшения, рекорды и сохранённый бой.' },
-    { id: 'setVerRow', type: 'info', label: 'ВЕРСИЯ ИГРЫ', note: 'Обновления приходят сами при запуске игры и ставятся при выходе в меню. ' +
-      'Звуки: записи CC0 с OpenGameArt (qubodup, rubberduck, thimras, tinyworlds, bart и др.); гул винта самолёта — antumdeluge по записи jakobthiesen, CC BY 3.0. Полный список — CREDITS-AUDIO.md.' },
+    { id: 'setVerRow', type: 'info', label: 'ВЕРСИЯ ИГРЫ', note: 'Обновления приходят сами при запуске игры и ставятся при выходе в меню.' },
+    { id: 'setCredits', act: 'credits', type: 'act', label: 'ЗВУКИ', btn: 'ИСТОЧНИКИ ЗВУКОВ', note: 'Настоящие записи со свободной лицензией: кто их записал и где они лежат.' },
   ],
 };
 const ALL = [].concat(...TABS.map(([t]) => ROWS[t]));
@@ -254,6 +254,9 @@ export function createSettings({ game, engine, show, sfx, dialog, hooks = {} }) 
     if (hooks.afterWipe) hooks.afterWipe({ settings: !!withSettings }); else show(null);
   }
   const ACTIONS = {
+    // авторы записей (имена латиницей) — в отдельном окне, а не в тексте вкладки
+    credits: () => ask('<h2>ИСТОЧНИКИ ЗВУКОВ</h2><p>Записи CC0 с OpenGameArt: qubodup (в том числе записи ВМС США из общественного достояния), rubberduck, thimras, tinyworlds, bart, kresiek-the-furry и другие.</p>' +
+      '<p>Гул винта самолёта — antumdeluge по записи jakobthiesen, лицензия CC BY 3.0.</p><p class="dim">Полный список с адресами и лицензиями — файл CREDITS-AUDIO.md в игре.</p>', [{ text: 'ЗАКРЫТЬ', primary: true, fn: reopen }]),
     // ролик вернёт на этот же экран; «куда по ГОТОВО» сохраняем — на случай, если экран настроек успели закрыть
     intro: () => { if (battle || !hooks.playIntro) return; const b = back; hooks.playIntro(() => { back = b; battle = false; reopen(); }); },
     tutorial: () => {

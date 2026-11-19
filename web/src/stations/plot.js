@@ -216,8 +216,8 @@ export function createPlotStation(ctx) {
   plane.position.z = PLANE_Z;
   board.add(plane);
 
-  // холст карты: 2048 (на «экономном» качестве — 1024: вчетверо меньше памяти и выгрузки в GPU; рисунок тот же, масштабом)
-  const chartPx = (q) => (q && q.tier === 'low' ? CHART.PX / 2 : CHART.PX);
+  // холст карты: размер из engine.quality.chartPx (сейчас 2048 на всех уровнях — чтобы карта была чёткой)
+  const chartPx = (q) => (q && q.chartPx) || CHART.PX;   // размер задаёт уровень качества (engine.quality.chartPx)
   const chartCanvas = TX.makeCanvas(chartPx(engine.quality), chartPx(engine.quality));
   const chartTex = TX.canvasTexture(chartCanvas, { aniso: 8 });
   const chartMat = new THREE.MeshBasicMaterial({ map: chartTex, color: 0xd9d6cf });
