@@ -291,6 +291,8 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
   const rb = await p.evaluate(() => ({ shown: !document.getElementById('resumeBox').classList.contains('hidden'), text: document.getElementById('resumeBtn').innerText.replace(/\n+/g, ' | '), phase: __arta.game.state.phase }));
   await p.click('#resumeBtn');
   await p.waitForFunction(() => !document.getElementById('hud').classList.contains('hidden') && document.getElementById('hTime').innerText !== '');
+  // HUD перерисовывается не каждый кадр: даём полосе прочности до 10 с догнать состояние (проверка ниже та же)
+  await p.waitForFunction(() => document.getElementById('hInt').style.width === Math.max(0, __arta.game.state.integrity) + '%', null, { polling: 100, timeout: 10000 }).catch(() => {});
   const sv1 = await p.evaluate(() => { const s = __arta.game.state; return { phase: s.phase, time: s.time, integrity: s.integrity, pin: s.plot.pins[s.targets[0].id], shell: s.breech.shell, open: s.breech.open,
     hudTime: document.getElementById('hTime').innerText, bar: document.getElementById('hInt').style.width, station: __arta.engine.current }; });
   console.log('resume', JSON.stringify({ sv0, rb, sv1 }));
