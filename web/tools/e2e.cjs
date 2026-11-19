@@ -24,6 +24,8 @@ const path = require('path');
 // «экономное» — проверки, ждущие игрового времени, на старте с «высокого» не успевают. Поэтому каждая страница стартует так,
 // будто «АВТО» уже подобрал уровень на этом устройстве (localStorage['arta2.autoTier'], пока пусто): --tier low|mid|high
 // (по умолчанию low). Настройка остаётся «АВТО» — проверки «АВТО» сравнивают действующий уровень с подобранным.
+// Ожидания опрашивают условие по таймеру (polling: 100): игра перерисовывает кадр только при изменениях,
+// и в безголовом браузере кадры анимации при этом приходят редко — опрос «по кадрам» почти останавливался.
 const TIER = (() => { const i = process.argv.indexOf('--tier'); const t = i >= 0 ? process.argv.splice(i, 2)[1] : 'low'; if (!['low', 'mid', 'high'].includes(t)) { console.error('--tier low|mid|high'); process.exit(1); } return t; })();
 const seedTier = (pg) => pg.addInitScript((t) => { try { if (!localStorage.getItem('arta2.autoTier')) localStorage.setItem('arta2.autoTier', t); } catch (e) { /* нет хранилища */ } }, TIER);
 { const i = process.argv.indexOf('--www'); if (i >= 0) { process.env.ARTA_WWW = process.argv[i + 1] || ''; process.argv.splice(i, 2); } }
@@ -49,7 +51,7 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
   await p.waitForFunction(() => window.__arta);
   // самый первый запуск: до меню идёт вступительный ролик; запуск подтверждается, пока он ещё на экране
   const boot = await p.evaluate(() => ({ intro: !!__arta.shell.intro, playing: __arta.shell.introPlaying, el: !!document.getElementById('arta-intro'), skip: !!document.querySelector('#arta-intro [data-ai=skip]') }));
-  await p.waitForFunction(() => window.__ready === 1, null, { timeout: 30000 }).catch(() => {});
+  await p.waitForFunction(() => window.__ready === 1, null, { polling: 100, timeout: 30000 }).catch(() => {});
   const boot2 = await p.evaluate(() => ({ ready: window.__ready, playing: __arta.shell.introPlaying }));
   console.log('boot', JSON.stringify({ boot, boot2 }));
   if (!boot.intro || !boot.playing || !boot.el || !boot.skip) fail('при первом запуске нет вступительного ролика с кнопкой «ПРОПУСТИТЬ»: ' + JSON.stringify(boot));
@@ -318,9 +320,9 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
   if (sb0.text !== 'СОХРАНИТЬ' || !sb0.glyph || !sb0.in) fail('кнопка «СОХРАНИТЬ» не видна в верхней панели: ' + JSON.stringify(sb0));
   // подсказки обучения выкл → строки подсказки и подсветки вкладки нет; вкл → возвращаются
   await p.evaluate(() => __arta.game.setSetting('hints', 'off'));
-  await p.waitForFunction(() => document.getElementById('hint').textContent === '' && !document.querySelector('#nav button.next'), null, { timeout: 20000 }).catch(() => fail('подсказки не выключились настройкой'));
+  await p.waitForFunction(() => document.getElementById('hint').textContent === '' && !document.querySelector('#nav button.next'), null, { polling: 100, timeout: 20000 }).catch(() => fail('подсказки не выключились настройкой'));
   await p.evaluate(() => __arta.game.setSetting('hints', 'new'));
-  await p.waitForFunction(() => document.getElementById('hint').textContent !== '', null, { timeout: 20000 }).catch(() => fail('подсказки не включились обратно'));
+  await p.waitForFunction(() => document.getElementById('hint').textContent !== '', null, { polling: 100, timeout: 20000 }).catch(() => fail('подсказки не включились обратно'));
   // «СОХРАНИТЬ И ПРОДОЛЖИТЬ»: бой на паузе, пока открыт лист; запись есть, бой идёт дальше, сообщение со временем
   await p.click('#hSave');
   const sheet = await p.evaluate(() => ({ paused: __arta.game.state.paused, head: document.querySelector('#dlgBody h2').textContent, info: document.getElementById('saveInfo').textContent,
@@ -675,7 +677,7 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
     return { warned, phase: s.phase, time: s.time, shown: !el.classList.contains('hidden'), text: el.innerText, tab: document.querySelector('#nav [data-station=aa]').classList.contains('alarm'), top: r.top, hint: document.getElementById('hint').innerText };
   });
   if (rd0.shown) await p.click('#raidBanner');
-  await p.waitForFunction(() => __arta.engine.current === 'aa', null, { timeout: 30000 }).catch(() => {});
+  await p.waitForFunction(() => __arta.engine.current === 'aa', null, { polling: 100, timeout: 30000 }).catch(() => {});
   const rd1 = await p.evaluate(async () => {
     const { game, engine } = __arta, s = game.state, { until } = window.__e2e;
     const at = engine.current;
@@ -926,7 +928,7 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
     const b1 = await r.evaluate(() => ({ text: document.getElementById('dlgBody').innerText, box: !!document.getElementById('briefNew') }));
     if (b1.box || !/после вашего первого выстрела/.test(b1.text)) fail('инструктаж задания 1: нет строки о засечке или лишний блок «НОВОЕ»: ' + JSON.stringify(b1).slice(0, 300));
     await r.click('#dlgBtns .btn');
-    await r.waitForFunction(() => document.getElementById('hint').textContent !== '' && document.getElementById('highlight').style.display === 'block' && document.querySelector('#nav button.next'), null, { timeout: 60000 }).catch(() => fail('задание 1: нет пошаговой подсказки с кольцом'));
+    await r.waitForFunction(() => document.getElementById('hint').textContent !== '' && document.getElementById('highlight').style.display === 'block' && document.querySelector('#nav button.next'), null, { polling: 100, timeout: 60000 }).catch(() => fail('задание 1: нет пошаговой подсказки с кольцом'));
     const h1 = await hud();
     if (h1.mode !== 'steps' || h1.kind !== 'step' || /НОВОЕ/.test(h1.hint) || !/ПЛАНШЕТ/.test(h1.hint) || h1.next !== 'plot' || h1.topic || /topic/.test(h1.cls) || h1.det) fail('задание 1: подсказки не по шагам: ' + JSON.stringify(h1));
     await r.evaluate(() => __arta.game.quit());
@@ -938,15 +940,15 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
     await r.evaluate(() => { const g = __arta.game; g.begin(); g.pause(true); });
     await r.waitForFunction(() => !document.getElementById('hud').classList.contains('hidden'));
     // обвязка перерисовывается по кадрам, а программный WebGL бывает медленнее кадра в секунду: ждём перерисовки, а не 0,6 с
-    await r.waitForFunction(() => document.getElementById('hint').textContent === '' && !document.querySelector('#nav button.next'), null, { timeout: 20000 }).catch(() => {});
+    await r.waitForFunction(() => document.getElementById('hint').textContent === '' && !document.querySelector('#nav button.next'), null, { polling: 100, timeout: 20000 }).catch(() => {});
     await r.waitForTimeout(300);
     const h4a = await hud();
     if (h4a.mode !== 'topics' || h4a.hint !== '' || h4a.ring || h4a.next || h4a.topic || h4a.kind !== null || h4a.time > 3 || h4a.det) fail('задание 4: до появления нового подсказок быть не должно: ' + JSON.stringify(h4a));
     await r.evaluate(() => __arta.game.pause(false));
-    await r.waitForFunction(() => /^НОВОЕ · /.test(document.getElementById('hint').textContent) && /show topic/.test(document.getElementById('radio').className) && document.getElementById('highlight').style.display === 'block', null, { timeout: 90000 }).catch(() => fail('задание 4: подсказка «НОВОЕ ·» не появилась'));
+    await r.waitForFunction(() => /^НОВОЕ · /.test(document.getElementById('hint').textContent) && /show topic/.test(document.getElementById('radio').className) && document.getElementById('highlight').style.display === 'block', null, { polling: 100, timeout: 90000 }).catch(() => fail('задание 4: подсказка «НОВОЕ ·» не появилась'));
     const h4b = await hud();
     // строка радио выезжает на место за 0,25 с (transform) — меряем, когда она встала
-    const settled = () => r.waitForFunction(() => { const el = document.getElementById('radio'), cs = getComputedStyle(el); return +cs.opacity > 0.99 && new DOMMatrix(cs.transform).m42 === 0; }, null, { timeout: 15000 }).catch(() => fail('строка радио не встала на место'));
+    const settled = () => r.waitForFunction(() => { const el = document.getElementById('radio'), cs = getComputedStyle(el); return +cs.opacity > 0.99 && new DOMMatrix(cs.transform).m42 === 0; }, null, { polling: 100, timeout: 15000 }).catch(() => fail('строка радио не встала на место'));
     await settled();
     const box = await r.evaluate(() => { const t = document.getElementById('radio').getBoundingClientRect(), nav = document.getElementById('bottombar').getBoundingClientRect(), top = document.getElementById('topbar').getBoundingClientRect();
       return { l: t.left, r: t.right, t: t.top, b: t.bottom, navTop: nav.top, topBottom: top.bottom, w: innerWidth, pe: getComputedStyle(document.getElementById('radio')).pointerEvents }; });
@@ -955,9 +957,9 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
     await r.screenshot({ path: shotOf('topic') });
     // действие игрока (замер) — тема гаснет и считается изученной; следующая по очереди — «ЦЕЛЬ УХОДИТ», её убирает касание
     await r.evaluate(() => { const g = __arta.game; g.setAlidade({ bearing: 5, range: 9 }); g.recordMeasurement(); });
-    await r.waitForFunction(() => __arta.game.save.learned.lead === true && document.getElementById('hint').textContent !== 'НОВОЕ · ДВИЖУЩАЯСЯ ЦЕЛЬ', null, { timeout: 30000 }).catch(() => fail('тема не погасла после действия игрока'));
-    await r.waitForFunction(() => document.getElementById('hint').textContent === 'НОВОЕ · ЦЕЛЬ УХОДИТ', null, { timeout: 30000 }).catch(() => fail('следующая тема очереди не показана'));
-    await r.waitForFunction(() => document.getElementById('highlight').style.display !== 'block', null, { timeout: 30000 }).catch(() => fail('у темы без органа управления осталось кольцо'));
+    await r.waitForFunction(() => __arta.game.save.learned.lead === true && document.getElementById('hint').textContent !== 'НОВОЕ · ДВИЖУЩАЯСЯ ЦЕЛЬ', null, { polling: 100, timeout: 30000 }).catch(() => fail('тема не погасла после действия игрока'));
+    await r.waitForFunction(() => document.getElementById('hint').textContent === 'НОВОЕ · ЦЕЛЬ УХОДИТ', null, { polling: 100, timeout: 30000 }).catch(() => fail('следующая тема очереди не показана'));
+    await r.waitForFunction(() => document.getElementById('highlight').style.display !== 'block', null, { polling: 100, timeout: 30000 }).catch(() => fail('у темы без органа управления осталось кольцо'));
     const h4c = await hud();
     // объяснение ушло со строки радио — касание строки «НОВОЕ · …» внизу показывает его снова
     await r.evaluate(() => { document.getElementById('radio').className = ''; });
@@ -966,16 +968,16 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
     if (!/^НОВОЕ · ЦЕЛЬ УХОДИТ.*выйдет из зоны огня/.test(again.topic)) fail('касание строки «НОВОЕ» не показало объяснение: ' + JSON.stringify(again));
     // тема убрана (как по истечении времени) — подсказок больше нет
     await r.evaluate(() => __arta.game.dismissTopic());
-    await r.waitForFunction(() => document.getElementById('hint').textContent === '' && !document.querySelector('#hint.topic'), null, { timeout: 30000 }).catch(() => fail('убранная тема осталась на экране'));
+    await r.waitForFunction(() => document.getElementById('hint').textContent === '' && !document.querySelector('#hint.topic'), null, { polling: 100, timeout: 30000 }).catch(() => fail('убранная тема осталась на экране'));
     const h4d = await hud();
     if (h4c.ring || h4c.id !== 'escape' || !/escape/.test(h4d.learned) || !/lead/.test(h4d.learned) || h4d.kind !== null || h4d.ring || h4d.next) fail('после изученных тем подсказок быть не должно: ' + JSON.stringify({ h4c, h4d }));
     if (JSON.parse(await r.evaluate(() => localStorage.getItem('arta2.save'))).learned.lead !== true) fail('изученная тема не записана в сохранение');
     // 8в. «ПО ШАГАМ» возвращает шаги и в задании 4; «ВЫКЛ» прячет всё
     await r.evaluate(() => __arta.game.setSetting('hints', 'all'));
-    await r.waitForFunction(() => /^[А-ЯЁ]+: /.test(document.getElementById('hint').textContent) && document.querySelector('#nav button.next'), null, { timeout: 30000 }).catch(() => fail('«ПО ШАГАМ» не вернуло пошаговые подсказки'));
+    await r.waitForFunction(() => /^[А-ЯЁ]+: /.test(document.getElementById('hint').textContent) && document.querySelector('#nav button.next'), null, { polling: 100, timeout: 30000 }).catch(() => fail('«ПО ШАГАМ» не вернуло пошаговые подсказки'));
     const hAll = await hud();
     await r.evaluate(() => __arta.game.setSetting('hints', 'off'));
-    await r.waitForFunction(() => document.getElementById('hint').textContent === '' && !document.querySelector('#nav button.next') && document.getElementById('highlight').style.display !== 'block', null, { timeout: 30000 }).catch(() => fail('«ВЫКЛ» не спрятало подсказки'));
+    await r.waitForFunction(() => document.getElementById('hint').textContent === '' && !document.querySelector('#nav button.next') && document.getElementById('highlight').style.display !== 'block', null, { polling: 100, timeout: 30000 }).catch(() => fail('«ВЫКЛ» не спрятало подсказки'));
     const hOff = await hud();
     if (hAll.kind !== 'step' || /НОВОЕ/.test(hAll.hint) || hAll.topic || hOff.kind !== null || hOff.mode !== 'off') fail('режимы подсказок: ' + JSON.stringify({ hAll, hOff }));
     // настройка на экране: три положения, «ВЫКЛ» отмечено
@@ -1004,7 +1006,7 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
     if (missing.length) fail('темы подсказок указывают на несуществующее: ' + missing.join('; '));
     // 8д. засечка: задание 3 «Бетон» идёт по шагам; плашка «НАС НЕ ВИДЯТ» → выстрел → «ЗАСЕЧЕНЫ», строка и запись в блокноте
     await r.evaluate(() => { const g = __arta.game; g.startMission(2); g.begin(); });
-    await r.waitForFunction(() => document.getElementById('detChip').offsetWidth > 0, null, { timeout: 60000 }).catch(() => fail('нет плашки «НАС НЕ ВИДЯТ»'));
+    await r.waitForFunction(() => document.getElementById('detChip').offsetWidth > 0, null, { polling: 100, timeout: 60000 }).catch(() => fail('нет плашки «НАС НЕ ВИДЯТ»'));
     const d0 = await hud();
     await r.click('[data-act=notebook]');
     const nb0 = await r.innerText('#nbBattery'); await r.click('[data-act=closeNotebook]');
@@ -1021,7 +1023,7 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
       await until(() => s.detected);
       return { fired: f.ok, before, detected: s.detected, events: ev.length, integrity: s.integrity, radio: s.radio.some((m) => /засёк батарею по вспышке/.test(m.text)), toast: document.getElementById('toast').textContent };
     });
-    await r.waitForFunction(() => document.getElementById('detChip').textContent === 'ЗАСЕЧЕНЫ', null, { timeout: 30000 }).catch(() => fail('плашка не сменилась на «ЗАСЕЧЕНЫ»'));
+    await r.waitForFunction(() => document.getElementById('detChip').textContent === 'ЗАСЕЧЕНЫ', null, { polling: 100, timeout: 30000 }).catch(() => fail('плашка не сменилась на «ЗАСЕЧЕНЫ»'));
     const d1 = await hud();
     await r.click('[data-act=notebook]');
     const nb1 = await r.innerText('#nbBattery'); await r.click('[data-act=closeNotebook]');
@@ -1109,7 +1111,7 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
     await r.evaluate(() => { const g = __arta.game; g.quit(); for (const t of g.TOPICS) if (t.id !== 'burst') g.learnTopic(t.id); g.setSetting('text', 1.3); g.setSetting('lefty', true); g.startMission(3); g.begin(); __arta.engine.gotoStation('fire', { instant: true }); });
     await r.waitForFunction(() => { const g = __arta.game, s = g.state, t = s.targets.find((x) => x.alive && x.reported); g.update(0.1); if (!t) return false; if (!s.activeTarget) g.selectTarget(t.id);
       s.lastReport = { targetId: s.activeTarget, over: 60, right: -40, text: 'x', time: s.time, observed: true };
-      return s.topic && s.topic.id === 'burst' && document.getElementById('hud').dataset.st === 'fire' && /show topic/.test(document.getElementById('radio').className) && document.getElementById('info').classList.contains('hastopic'); }, null, { timeout: 120000 }).catch(() => fail('тема «ОЧЕРЕДЬ» на посту ОГОНЬ не показана'));
+      return s.topic && s.topic.id === 'burst' && document.getElementById('hud').dataset.st === 'fire' && /show topic/.test(document.getElementById('radio').className) && document.getElementById('info').classList.contains('hastopic'); }, null, { polling: 100, timeout: 120000 }).catch(() => fail('тема «ОЧЕРЕДЬ» на посту ОГОНЬ не показана'));
     await settled();
     const fireBox = () => r.evaluate(() => { const { engine } = __arta, rd = document.getElementById('radio'), q = rd.getBoundingClientRect(), st = engine.stations.find((x) => x.id === 'fire'), V = new engine.THREE.Vector3(), cov = [];
       const zs = getComputedStyle(document.getElementById('info'), '::after'), hint = document.getElementById('hint').getBoundingClientRect(), bb = document.getElementById('bottombar').getBoundingClientRect();
@@ -1125,16 +1127,16 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
     await r.screenshot({ path: shotOf('topic-fire-lefty') });
     await r.evaluate(() => { document.getElementById('radio').className = ''; });
     await r.touchscreen.tap((fb.hint.l + fb.hint.r) / 2, fb.hint.t - 11);          // на 11 px выше самой строки
-    await r.waitForFunction(() => /show topic/.test(document.getElementById('radio').className), null, { timeout: 5000 }).catch(() => fail('касание над строкой «НОВОЕ · …» не показало объяснение'));
+    await r.waitForFunction(() => /show topic/.test(document.getElementById('radio').className), null, { polling: 100, timeout: 5000 }).catch(() => fail('касание над строкой «НОВОЕ · …» не показало объяснение'));
     const st0 = await r.evaluate(() => __arta.engine.current);
     await r.touchscreen.tap((fb.hint.l + fb.hint.r) / 2, fb.hint.b + 12);           // ниже зоны — вкладка поста, как и раньше
-    await r.waitForFunction((was) => __arta.engine.current !== was, st0, { timeout: 8000 }).catch(() => fail('касание под строкой «НОВОЕ · …» не дошло до вкладки поста'));
+    await r.waitForFunction((was) => __arta.engine.current !== was, st0, { polling: 100, timeout: 8000 }).catch(() => fail('касание под строкой «НОВОЕ · …» не дошло до вкладки поста'));
     // донесение сразу после показа: объяснение вытеснено (на экране было < 5 с) и возвращается, когда эфир освободится
     await r.evaluate(() => { __arta.engine.gotoStation('fire', { instant: true }); document.getElementById('hint').click(); });
     await r.waitForFunction(() => /show topic/.test(document.getElementById('radio').className));
     await r.evaluate(() => __arta.game.scopeMark());
     const pre = await r.evaluate(() => document.getElementById('radio').className + '|' + document.getElementById('radio').textContent.slice(0, 30));
-    await r.waitForFunction(() => /show topic/.test(document.getElementById('radio').className) && /ОЧЕРЕДЬ/.test(document.getElementById('radio').textContent), null, { timeout: 20000 }).catch(() => fail('объяснение темы, вытесненное донесением, не вернулось'));
+    await r.waitForFunction(() => /show topic/.test(document.getElementById('radio').className) && /ОЧЕРЕДЬ/.test(document.getElementById('radio').textContent), null, { polling: 100, timeout: 20000 }).catch(() => fail('объяснение темы, вытесненное донесением, не вернулось'));
     if (/topic/.test(pre) || !/РАСЧЁТ/.test(pre)) fail('донесение не сменило объяснение темы: ' + pre);
     // правша на том же экране: объяснение слева, органы открыты
     await r.evaluate(() => { __arta.game.setSetting('lefty', false); document.getElementById('hint').click(); });
