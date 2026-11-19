@@ -1,18 +1,38 @@
 {
- "version": 29918629,
+ "version": 29918754,
  "minApp": 3,
  "orientation": "landscape",
  "confirm": true,
  "files": [
   {
+   "path": "CREDITS-AUDIO.md",
+   "size": 10117,
+   "sha256": "ea7e5be9b3c6c139ab9b9f19e90dbd830530b6963d33d491526696945f8bd6c7"
+  },
+  {
    "path": "app.js",
-   "size": 1632903,
-   "sha256": "9322f4dfae8831f8f47e24fc5a96a88ee0369de8b43ca5d6695e9d1bcea60dfe"
+   "size": 1651978,
+   "sha256": "9a5355713fffe43b415e314622b08618461f46af57a97eb1f577512c0ae6fe2f"
   },
   {
    "path": "index.html",
    "size": 7074,
    "sha256": "ee316880bb89e31a7cbd82af262b7619be7b3b68ac26699dd07ff8bcd90d95c6"
+  },
+  {
+   "path": "sfx/pack1.js",
+   "size": 1182801,
+   "sha256": "65e225cbdbde54df182f02c7c1819952b49ca6804f36a15724c86c3ba9f15008"
+  },
+  {
+   "path": "sfx/pack2.js",
+   "size": 450065,
+   "sha256": "a79032f896a650ff38ce9a171e499648cc40271b6060a43293d043073338a759"
+  },
+  {
+   "path": "sfx/pack3.js",
+   "size": 690036,
+   "sha256": "65652717c470b0d79e5a8f795f43c0821ddea73962fc328567f103bbca3961e5"
   },
   {
    "path": "style.css",
