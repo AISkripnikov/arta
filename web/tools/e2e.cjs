@@ -267,6 +267,7 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
     window.dispatchEvent(new Event('pagehide'));          // уход в фон → game.suspend()
     return { time: s.time, id: t.id, pin: s.plot.pins[t.id], info: game.resumeInfo() };
   });
+  console.log('сохранение перед перезагрузкой', JSON.stringify(sv0));
   // игрок, который уже играл, обновился до версии с роликом (отметки о показе ещё нет): ролик не навязываем, а считаем показанным
   // запись localStorage уходит из страницы в браузер не сразу: перед перезагрузкой даём ей дойти (на телефоне уход в фон длится дольше)
   await p.waitForTimeout(1500);
@@ -284,7 +285,7 @@ if (!require('fs').existsSync(WWW)) { console.error('нет сборки: ' + WW
     await p.reload();
     await p.waitForFunction(() => window.__arta);
   }
-  if (await p.evaluate(() => __arta.shell.introPlaying || !!document.getElementById('arta-intro') || !__arta.shell.intro.seen())) fail('игроку с сохранённым боем ролик показан насильно (или не отмечен показанным)');
+  if (await p.evaluate(() => __arta.shell.introPlaying || !!document.getElementById('arta-intro') || !__arta.shell.intro.seen())) fail('игроку с сохранённым боем ролик показан насильно (или не отмечен показанным): ' + JSON.stringify(await p.evaluate(() => ({ playing: __arta.shell.introPlaying, el: !!document.getElementById('arta-intro'), seen: __arta.shell.intro.seen(), keys: Object.keys(localStorage), ri: __arta.game.resumeInfo(), xp: __arta.game.save.xp, unl: __arta.game.save.unlocked, news: localStorage.getItem('arta2.news') }))));
   await skipIntro();
   if (await p.isVisible('#dialog.show')) await p.click('#dlgBtns .btn');
   const rb = await p.evaluate(() => ({ shown: !document.getElementById('resumeBox').classList.contains('hidden'), text: document.getElementById('resumeBtn').innerText.replace(/\n+/g, ' | '), phase: __arta.game.state.phase }));
