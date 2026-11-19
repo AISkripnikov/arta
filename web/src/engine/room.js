@@ -491,13 +491,16 @@ export function createRoom(engine) {
 
   // ---------- мигание ламп при сотрясении ----------
   let level = 1, flickT = 0, flickDur = 0, flickAmp = 0;
+  // без постобработки (mid, low) свечения ламп нет — ореолы чуть ярче, чтобы лампы читались горящими
+  let glowK = 1;
   function applyLevel(k) {
     bulbMat.color.copy(bulbColor).multiplyScalar(0.15 + 0.85 * k);
-    glowU.opacity.value = 0.6 * k;
+    glowU.opacity.value = 0.6 * k * glowK;
     poolMat.opacity = POOL * k;
     engine.lights.fillCeil.intensity = fillBase * (0.35 + 0.65 * k);
   }
   const fillBase = engine.lights.fillCeil.intensity;
+  if (engine.on) engine.on('quality', (q) => { const g = engine.post && engine.post.active ? 1 : 1.3; if (g !== glowK) { glowK = g; applyLevel(level); } });
   engine.onFrame((dt, time) => {
     let k = level;
     if (flickT < flickDur) {

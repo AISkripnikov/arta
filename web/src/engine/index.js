@@ -117,14 +117,16 @@ function patchShadowChunk() {
 
 /**
  * Создаёт движок. Ждёт загрузки шрифта Oswald.
- * opts: { debug=false, maxPixelRatio=2, exposure=1.0, antialias=true }
+ * opts: { debug=false, maxPixelRatio=2, exposure=1.0, antialias=false }
  */
 export async function createEngine(canvas, opts = {}) {
   await loadFonts();
   patchShadowChunk();
 
   const renderer = new THREE.WebGLRenderer({
-    canvas, antialias: opts.antialias !== false, alpha: false, stencil: false, powerPreference: 'high-performance',
+    // MSAA буфера кадра выключен: high сглаживает в своей MSAA-цели постобработки, mid и low — плотностью пикселей 1.75 / 1.5
+    // (буфер кадра с MSAA на телефоне — лишняя память и проход «сведения» каждый кадр, на SwiftShader — вдвое дороже кадр)
+    canvas, antialias: opts.antialias === true, alpha: false, stencil: false, powerPreference: 'high-performance',
   });
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = opts.exposure || 1.0;
@@ -134,13 +136,23 @@ export async function createEngine(canvas, opts = {}) {
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.shadowMap.autoUpdate = false;
   setMaxAnisotropy(renderer.capabilities.getMaxAnisotropy());
-  // качество графики (настройка игрока): предел плотности пикселей, размер текстур-видов (щель, окуляр) и «дорогие» эффекты:
-  //   shadow — сторона карты теней (0 — теней нет); postfx — цепочка постобработки; bloom — 2: свечение в ½ + ¼ разрешения,
-  //   1: только ¼, 0: нет; grain — зерно; particles — доля частиц engine.fx (0 — частиц нет).
+  // качество графики (настройка игрока). Телефон упирается в заливку и пропускную способность памяти: дороги полноэкранные
+  // проходы обработки, MSAA-цели и тени в реальном времени; чёткость же даёт плотность пикселей, а не эффекты.
+  //   pixelRatio — предел плотности пикселей холста (× CSS-пикселей, не больше devicePixelRatio; не ниже 1 CSS-пикселя);
+  //   rtScale, samples — масштаб и MSAA текстур-видов постов (щель, окуляр); viewGap — не чаще одной перерисовки видов за
+  //   столько секунд (0 — как задумано постом); seaSimple — простое море и небо в видах;
+  //   shadow — сторона карты теней (0 — теней нет); shadowStatic — карта перерисовывается только при смене поста, по прилёте
+  //   камеры и при смене уровня (не за каждым движением органов управления); postfx — цепочка постобработки; bloom — 2:
+  //   свечение в ½ + ¼ разрешения, 1: только ¼, 0: нет; grain — зерно; vignette 'css' — виньетка слоем DOM поверх холста
+  //   (без прохода по кадру); particles — доля частиц engine.fx (0 — частиц нет); chartPx — холст карты прокладки (px);
+  //   fpsCap — 30 к/с, если игрок сам не выбрал частоту.
+  const maxPR = opts.maxPixelRatio || 2;
   const QUALITY = {
-    high: { tier: 'high', pixelRatio: opts.maxPixelRatio || 2, rtScale: 1, samples: 4, shadow: 1024, postfx: true, bloom: 2, grain: true, particles: 1 },
-    mid: { tier: 'mid', pixelRatio: Math.min(opts.maxPixelRatio || 2, 1.5), rtScale: 0.75, samples: 4, shadow: 512, shadowSoft: 0.9, postfx: true, bloom: 1, grain: false, particles: 0.5 },
-    low: { tier: 'low', pixelRatio: 1, rtScale: 0.5, samples: 0, shadow: 0, postfx: false, bloom: 0, grain: false, particles: 0, fpsCap: 30, renderScale: 0.75 },
+    high: { tier: 'high', pixelRatio: maxPR, rtScale: 1, samples: 4, viewGap: 0, shadow: 1024, postfx: true, bloom: 2, grain: true, particles: 1, chartPx: 2048 },
+    mid: { tier: 'mid', pixelRatio: Math.min(maxPR, 1.75), rtScale: 0.6, samples: 0, viewGap: 0.1, seaSimple: true, shadow: 512, shadowSoft: 0.9, shadowStatic: true,
+      postfx: false, bloom: 0, grain: false, vignette: 'css', particles: 0.5, chartPx: 2048 },
+    low: { tier: 'low', pixelRatio: Math.min(maxPR, 1.5), rtScale: 0.5, samples: 0, viewGap: 0.1, seaSimple: true, shadow: 0, postfx: false, bloom: 0, grain: false,
+      particles: 0, chartPx: 2048, fpsCap: 30 },
   };
   const TIERS = ['low', 'mid', 'high'];
   let quality = QUALITY.high, maxPixelRatio = quality.pixelRatio;
@@ -272,6 +284,13 @@ export async function createEngine(canvas, opts = {}) {
   /** Перед основным проходом: карта теней перерисовывается не чаще 15 раз в секунду и только если что-то сдвинулось. */
   function updateShadows() {
     if (!keyLight.castShadow) return;
+    // «статичная» карта (уровень mid): только по shDirty — смена поста, прилёт камеры, смена уровня, engine.shadowsDirty()
+    if (quality && quality.shadowStatic) {
+      if (!shDirty || rig.tr) return;
+      shDirty = false; shLast = time; shSum = NaN;
+      renderer.shadowMap.needsUpdate = true;
+      return;
+    }
     if (engine.input && engine.input.busy) shDirty = true;
     if (time - shLast < 1 / 15 && shLast >= 0 && time >= shLast) return;
     const sum = shadowSum();
@@ -297,7 +316,7 @@ export async function createEngine(canvas, opts = {}) {
   const byId = new Map();
   let current = null, entered = null;
   let running = false, raf = 0, lastT = 0, time = 0, started = false;
-  let width = 0, height = 0, pixelRatio = 1;
+  let width = 0, height = 0, pixelRatio = 1, resolution = 0;      // resolution: 0 — по уровню, иначе выбор игрока «ЧЁТКОСТЬ»
 
   // --- камера: локальная поза + угол «рамки» вокруг центра помещения ---
   const rig = {
@@ -346,6 +365,7 @@ export async function createEngine(canvas, opts = {}) {
         rig.pose = { pos: tr.toPose.pos.clone(), target: tr.toPose.target.clone(), fov: tr.toPose.fov };
         rig.tr = null;
         tr.resolve(true);
+        shDirty = true;                          // свет идёт за камерой: «статичную» карту теней — заново на новом месте
         if (tr.arc) emit('arrive', current);
       }
     }
@@ -408,8 +428,8 @@ export async function createEngine(canvas, opts = {}) {
   // --- размер ---
   function checkResize(force) {
     const w = canvas.clientWidth || canvas.width, h = canvas.clientHeight || canvas.height;
-    // renderScale (< 1 на «экономном»): холст рисуется в уменьшенном буфере, браузер растягивает его; DOM-оболочка остаётся чёткой
-    const pr = Math.min(window.devicePixelRatio || 1, maxPixelRatio) * ((quality && quality.renderScale) || 1);
+    // плотность пикселей: по уровню (quality.pixelRatio) или выбор игрока «ЧЁТКОСТЬ» (engine.setResolution) — не больше devicePixelRatio
+    const pr = Math.min(window.devicePixelRatio || 1, resolution > 0 ? resolution : maxPixelRatio);
     if (!w || !h) return;
     if (force || w !== width || h !== height || pr !== pixelRatio) {
       width = w; height = h; pixelRatio = pr;
@@ -638,6 +658,22 @@ export async function createEngine(canvas, opts = {}) {
     try { log = (gl.getProgramInfoLog(program) || '') + ' ' + (gl.getShaderInfoLog(vs) || '') + ' ' + (gl.getShaderInfoLog(fs) || ''); } catch (e) { /* нет журнала */ }
     degrade('шейдер не собрался', { message: log.trim().slice(0, 300) });
   };
+  // виньетка уровня mid: неподвижный слой DOM поверх холста (браузер сводит его при выводе) вместо прохода обработки по кадру
+  let vigEl = null;
+  function cssVignette(on) {
+    if (!on && !vigEl) return;
+    try {
+      if (!vigEl) {
+        if (!canvas.parentNode || typeof document === 'undefined') return;
+        vigEl = document.createElement('div');
+        vigEl.id = 'stageVignette'; vigEl.setAttribute('aria-hidden', 'true');
+        vigEl.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;pointer-events:none;' +
+          'background:radial-gradient(ellipse farthest-corner at 50% 47%,rgba(0,0,0,0) 52%,rgba(0,0,0,.1) 72%,rgba(0,0,0,.27) 100%)';
+        canvas.parentNode.insertBefore(vigEl, canvas.nextSibling);
+      }
+      vigEl.style.display = on ? 'block' : 'none';
+    } catch (e) { /* без виньетки */ }
+  }
   function applyQuality(q0) {
     if (q0 === quality) return q0;
     const q = gfxSafe ? Object.assign({}, q0, { shadow: 0, postfx: false, bloom: 0, grain: false }) : q0;
@@ -651,6 +687,7 @@ export async function createEngine(canvas, opts = {}) {
     }
     shDirty = true; shLast = -1;
     post.configure(q);
+    cssVignette((q.vignette === 'css' || q0.postfx) && !post.active);      // и high, если обработка выключилась после ошибки
     engine.fx._setQuality(q);
     checkResize(false);
     AQ.hold = Math.max(AQ.hold, 1.5); AQ.slow = 0; AQ.good = 0; AQ.acc = 0; AQ.n = 0;
@@ -663,13 +700,26 @@ export async function createEngine(canvas, opts = {}) {
   }
   // «АВТО»: средний интервал между кадрами по окнам в 1 с. Четыре медленных окна подряд (> ~24 мс) — уровень ниже;
   // 30 с подряд с запасом — один раз за запуск вернуться на уровень выше. Подобранный уровень запоминается до следующего запуска.
-  const AQ = { tier: 'high', acc: 0, n: 0, slow: 0, good: 0, ups: 0, downs: 0, hold: 2, last: 0 };
+  // Без «качелей»: уровень, на который «АВТО» спустилось, становится потолком подъёма (localStorage['arta2.autoCeil'] — уровень
+  // и время) на 7 дней: подъём туда не пробуется ни в этом запуске, ни в следующих — до выбора игрока или повторного замера устройства.
+  const AQ = { tier: 'high', acc: 0, n: 0, slow: 0, good: 0, ups: 0, downs: 0, hold: 2, last: 0, ceil: 'high' };
+  const CEIL_KEY = 'arta2.autoCeil', CEIL_DAYS = 7;
   try { const v = localStorage.getItem('arta2.autoTier'); if (QUALITY[v]) { AQ.tier = v; AQ.stored = true; } } catch (e) { /* хранилище недоступно */ }
+  try {
+    const c = JSON.parse(localStorage.getItem(CEIL_KEY) || 'null');
+    if (c && QUALITY[c.tier] && Date.now() - c.t < CEIL_DAYS * 864e5 && Date.now() >= c.t) AQ.ceil = c.tier;
+  } catch (e) { /* хранилище недоступно */ }
   let device = null;
+  function setCeil(tier) {
+    AQ.ceil = tier;
+    try { if (tier === 'high') localStorage.removeItem(CEIL_KEY); else localStorage.setItem(CEIL_KEY, JSON.stringify({ tier, t: Date.now() })); } catch (e) { /* хранилище недоступно */ }
+  }
   function autoStep(dir) {
     const i = TIERS.indexOf(AQ.tier) + dir;
     if (i < 0 || i >= TIERS.length) return false;
+    if (dir > 0 && i > TIERS.indexOf(AQ.ceil)) return false;     // выше потолка не поднимаемся
     AQ.tier = TIERS[i];
+    if (dir < 0) setCeil(AQ.tier);                               // не потянул прежний уровень — выше нового больше не пробуем
     try { localStorage.setItem('arta2.autoTier', AQ.tier); } catch (e) { /* хранилище недоступно */ }
     if (dir > 0) AQ.ups++; else AQ.downs++;
     applyQuality(QUALITY[AQ.tier]);
@@ -683,10 +733,12 @@ export async function createEngine(canvas, opts = {}) {
     if (AQ.hold > 0) { AQ.hold -= ms / 1000; return; }           // первые секунды и смена уровня: компиляция шейдеров
     AQ.acc += ms; AQ.n++;
     if (AQ.acc < 1000) return;
-    const avg = AQ.acc / AQ.n, cap = frameCap ? 1000 / frameCap : 0;
+    // предел частоты (выбор игрока или 30 к/с уровня low): интервал в 33 мс — это предел, а не медленный телефон
+    const avg = AQ.acc / AQ.n, capHz = effCap(), cap = capHz ? 1000 / capHz : 0;
     AQ.acc = 0; AQ.n = 0; AQ.last = avg;
     if (avg > Math.max(24, cap + 8)) { AQ.slow++; AQ.good = 0; }
-    else { AQ.slow = 0; AQ.good = avg <= Math.max(18, cap + 2) && cpu < 9 ? AQ.good + 1 : 0; }
+    // с запасом: интервал в пределе и логика кадра быстрая (при пределе 30 к/с — вдвое строже: запаса по GPU не видно)
+    else { AQ.slow = 0; AQ.good = avg <= Math.max(18, cap + 2) && cpu < (cap > 20 ? 4.5 : 9) ? AQ.good + 1 : 0; }
     if (AQ.slow >= 4) { AQ.slow = 0; autoStep(-1); }
     else if (AQ.good >= 30 && AQ.ups < 1) { AQ.good = 0; if (!autoStep(1)) AQ.ups = 1; }
   }
@@ -830,6 +882,7 @@ export async function createEngine(canvas, opts = {}) {
     setQuality(tier) {
       const auto = tier === 'auto';
       if (auto && !engine.qualityAuto) { AQ.slow = 0; AQ.good = 0; AQ.acc = 0; AQ.n = 0; }
+      if (!auto && QUALITY[tier] && AQ.ceil !== 'high') setCeil('high');     // выбор игрока снимает потолок «АВТО»
       engine.qualityAuto = auto;
       return applyQuality(QUALITY[auto ? AQ.tier : tier] || QUALITY.high);
     },
@@ -843,13 +896,25 @@ export async function createEngine(canvas, opts = {}) {
       if (AQ.stored && !o.force) return null;
       device = probeDevice(renderer, o);
       AQ.tier = device.tier; AQ.stored = true;
+      if (AQ.ceil !== 'high') setCeil('high');
       try { localStorage.setItem('arta2.autoTier', device.tier); } catch (e) { /* хранилище недоступно */ }
       console.info('[engine] устройство: ' + device.tier + ' (' + (device.reasons.join(', ') || 'без ограничений') + '; GPU «' + device.gpu + '», ядер ' + device.cores +
         ', память ' + (device.memory || '?') + ', CPU ' + device.cpu + ', заливка ' + device.gpuMs + ' мс, замер ' + device.ms + ' мс)');
       return device;
     },
     get device() { return device; },
-    /** { tier, pixelRatio, rtScale, samples, shadow, postfx, bloom, grain, particles } — текущее качество (только чтение). При 'auto' здесь уровень, действующий сейчас. */
+    /**
+     * (расш.) «ЧЁТКОСТЬ»: плотность пикселей холста — 'auto' (или 0) по уровню качества (quality.pixelRatio), либо число
+     * (0.75 / 1 / 1.25 / 1.5 / 2) × CSS-пикселей, не больше devicePixelRatio. Уровень качества её не меняет. → действующая плотность.
+     */
+    setResolution(v) {
+      const n = typeof v === 'number' && isFinite(v) && v > 0 ? Math.max(0.5, Math.min(3, v)) : 0;
+      if (n !== resolution) { resolution = n; checkResize(false); }
+      return pixelRatio;
+    },
+    /** Выбор «ЧЁТКОСТИ»: 'auto' или число (см. setResolution). */
+    get resolution() { return resolution > 0 ? resolution : 'auto'; },
+    /** { tier, pixelRatio, rtScale, samples, viewGap, seaSimple, shadow, shadowStatic, postfx, bloom, grain, vignette, particles, chartPx, fpsCap } — текущее качество (только чтение). При 'auto' здесь уровень, действующий сейчас. */
     get quality() { return quality; },
     /** true — игрок выбрал качество «АВТО» (setQuality('auto')): уровень подбирает движок. */
     qualityAuto: false,
@@ -886,7 +951,7 @@ export async function createEngine(canvas, opts = {}) {
       stats() {
         return {
           calls: stats.calls, triangles: stats.triangles, frameMs: +stats.frameMs.toFixed(2), fps: +stats.fps.toFixed(1),
-          tier: quality.tier, auto: !!engine.qualityAuto, autoTier: AQ.tier, gfxSafe, autoMs: +AQ.last.toFixed(1), autoUps: AQ.ups, autoDowns: AQ.downs,
+          tier: quality.tier, auto: !!engine.qualityAuto, autoTier: AQ.tier, autoCeil: AQ.ceil, resolution: resolution || 'auto', gfxSafe, autoMs: +AQ.last.toFixed(1), autoUps: AQ.ups, autoDowns: AQ.downs,
           shadowCalls: stats.shadowCalls, shadowUpdates: shStats.updates, postCalls: stats.postCalls, postPasses: stats.postPasses,
           particles: engine.fx ? engine.fx.particles : 0,
           geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures,

@@ -12,6 +12,8 @@
 //   staticBed(level)       открытый канал радио: очень тихий тёмный шорох (петля банка)
 //   whistle(dur, kind)     свист снаряда/бомбы с падающей высотой и нарастанием
 //   flyby(dur, from, to)   пролёт самолёта над башней с допплером и панорамой
+// Записи (samples.js): привод — петля мотора slewLoop, самолёты — петля винта planeLoop, сирена — sirenLoop/sirenShot;
+// высота следует за игрой через playbackRate. Пока записи нет — те же звуки живыми генераторами.
 
 const clamp01 = (v) => Math.max(0, Math.min(1, +v || 0));
 // гладкие формы волны: амплитуды гармоник 1…n
@@ -61,8 +63,24 @@ export function createLoops(core, satCurve) {
   const L = {};
 
   // ----- привод наведения -----
+  /** Источник-петля записи name (или null), подключённый к dest; старт со случайного места. */
+  function recLoop(b, name, dest) {
+    const buf = core.bank && core.bank.get(name, 0);
+    if (!buf) return null;
+    const src = b.nodes[b.nodes.push(core.ctx.createBufferSource()) - 1];
+    src.buffer = buf; src.loop = true; src.connect(dest); src.start(0, core.rnd() * buf.duration); b.srcs.push(src);
+    return src;
+  }
   L.slew = levelLoop(core, (b) => {
-    const out = b.gain(0, core.input('fx', 'in')), f = b.filter('lowpass', 300, 0.9, out);
+    const out = b.gain(0, core.input('fx', 'rec')), f = b.filter('lowpass', 300, 0.9, out);
+    const rec = recLoop(b, 'slewLoop', f);
+    if (rec) {
+      return { b, out, update(l, t) {                // мотор: обороты и яркость следуют за level
+        rec.playbackRate.setTargetAtTime(0.7 + 0.55 * l, t, 0.08);
+        f.frequency.setTargetAtTime(500 + 2200 * l, t, 0.08);
+        out.gain.setTargetAtTime(l > 0 ? G('slewLoop') * (0.45 + 0.55 * l) : 0, t, 0.07);
+      } };
+    }
     const m = b.wave(W_MOTOR, 48, f);
     return { b, out, update(l, t) {
       m.frequency.setTargetAtTime(48 + 70 * l, t, 0.08);
@@ -164,6 +182,17 @@ export function createLoops(core, satCurve) {
   const doppler = (a) => 1 + 0.11 * Math.tanh((0.5 - a) * 7);
   L.drone = levelLoop(core, (b) => {
     const out = b.gain(0, core.input('fx', 'out')), pn = b.pan(0, out), f = b.filter('lowpass', 380, 0.7, pn);
+    const rec = recLoop(b, 'planeLoop', f);
+    if (rec) {
+      return { b, out, update(l, t, approach, pan) {
+        const a = approach == null ? null : clamp01(approach), k = a == null ? 0.85 + 0.25 * l : doppler(a);
+        const near = a == null ? l : l * (0.25 + 0.75 * Math.exp(-Math.pow((a - 0.5) * 3.2, 2)));
+        rec.playbackRate.setTargetAtTime(k, t, 0.3);
+        f.frequency.setTargetAtTime(500 + 3500 * near, t, 0.3);
+        if (pn.pan) pn.pan.setTargetAtTime(pan == null ? (a == null ? 0 : (a - 0.5) * 1.6) : Math.max(-1, Math.min(1, pan)), t, 0.2);
+        out.gain.setTargetAtTime(l > 0 ? G('planeLoop') * (0.12 + 0.88 * near * near) : 0, t, 0.25);
+      } };
+    }
     const o1 = b.wave(W_ENGINE, 92, f), o2 = b.wave(W_ENGINE, 93.4, b.gain(0.7, f));        // два мотора: медленное биение ~1.4 Гц
     return { b, out, update(l, t, approach, pan) {
       const a = approach == null ? null : clamp01(approach), k = a == null ? 1 + 0.45 * l : doppler(a) * 1.25;
@@ -179,16 +208,19 @@ export function createLoops(core, satCurve) {
   L.flyby = (dur, from, to, gain) => {
     const ctx = core.ctx, t = ctx.currentTime + 0.01, b = builder(core), end = t + dur;
     const out = b.gain(0, core.input('fx', 'out')), pn = b.pan(from, out), f = b.filter('lowpass', 300, 0.7, pn);
-    const oscs = [b.wave(W_ENGINE, 88, f, t), b.wave(W_ENGINE, 89.3, b.gain(0.7, f), t)];
+    const rec = recLoop(b, 'planeLoop', f);
+    const oscs = rec ? [] : [b.wave(W_ENGINE, 88, f, t), b.wave(W_ENGINE, 89.3, b.gain(0.7, f), t)];
+    if (rec) gain *= G('planeLoop') / 0.18;
     const N = 24, gv = new Float32Array(N), fv = new Float32Array(N), cv = new Float32Array(N), pv = new Float32Array(N);
     for (let i = 0; i < N; i++) {
       const a = i / (N - 1), bell = Math.exp(-Math.pow((a - 0.5) * 3.4, 2));
-      gv[i] = gain * 1.2 * (0.03 + 0.97 * bell) * Math.min(1, a * 8, (1 - a) * 8); fv[i] = doppler(a) * 1.25; cv[i] = 300 + 1200 * bell; pv[i] = from + (to - from) * a;
+      gv[i] = gain * 1.2 * (0.03 + 0.97 * bell) * Math.min(1, a * 8, (1 - a) * 8); fv[i] = doppler(a) * (rec ? 1 : 1.25); cv[i] = rec ? 600 + 4000 * bell : 300 + 1200 * bell; pv[i] = from + (to - from) * a;
     }
     out.gain.setValueCurveAtTime(gv, t, dur);
     f.frequency.setValueCurveAtTime(cv, t, dur);
     if (pn.pan) pn.pan.setValueCurveAtTime(pv, t, dur);
-    [88, 89.3].forEach((base, i) => { oscs[i].frequency.setValueCurveAtTime(fv.map((x) => x * base), t, dur); });
+    if (rec) rec.playbackRate.setValueCurveAtTime(fv, t, dur);
+    else [88, 89.3].forEach((base, i) => { oscs[i].frequency.setValueCurveAtTime(fv.map((x) => x * base), t, dur); });
     b.end(end + 0.05);
     return dur;
   };
@@ -196,6 +228,14 @@ export function createLoops(core, satCurve) {
   // ----- сирена -----
   function sirenVoice(b) {
     const out = b.gain(0, core.input('fx', 'out')), lp = b.filter('lowpass', 1400, 0.7, out);
+    const rec = recLoop(b, 'sirenLoop', lp);
+    if (rec) {
+      lp.frequency.value = 2400;
+      return { out, spin(t, level, tc) {          // запись: обороты ротора — скорость петли (раскрутка снизу, выбег вниз)
+        rec.playbackRate.setTargetAtTime(0.45 + 0.55 * level, t, tc);
+        out.gain.setTargetAtTime(G('sirenLoop') * Math.pow(level, 1.2), t, tc);
+      } };
+    }
     const o1 = b.wave(W_SIREN, 60, b.gain(0.55, lp)), o2 = b.wave(W_SIREN, 72, b.gain(0.4, lp));
     return { out, spin(t, level, tc) {            // level 0…1 — обороты ротора
       o1.frequency.setTargetAtTime(90 + 520 * level, t, tc); o2.frequency.setTargetAtTime((90 + 520 * level) * 1.19, t, tc);
@@ -218,6 +258,17 @@ export function createLoops(core, satCurve) {
   };
   /** Три завывания (~4.5 с) — расписаны заранее. */
   L.sirenShot = () => {
+    const shot = core.bank && core.bank.get('sirenShot', 0);
+    if (shot) {                                    // запись: завывания городской сирены (~4.5 с из записи, плавные края)
+      const t = core.ctx.currentTime + 0.01, b = builder(core), g = b.gain(0, core.input('fx', 'out'));
+      const s = b.nodes[b.nodes.push(core.ctx.createBufferSource()) - 1]; s.buffer = shot; s.connect(g); b.srcs.push(s);
+      const len = Math.min(5, shot.duration);
+      s.start(t, Math.max(0, Math.min(shot.duration - len, core.rnd() * (shot.duration - len))));
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(G('sirenShot'), t + 0.5);
+      g.gain.setValueAtTime(G('sirenShot'), t + len - 0.9); g.gain.linearRampToValueAtTime(0, t + len);
+      b.end(t + len + 0.05);
+      return;
+    }
     const t = core.ctx.currentTime + 0.01, b = builder(core), v = sirenVoice(b);
     for (let i = 0; i < 3; i++) { v.spin(t + i * 1.35, 1, 0.26); v.spin(t + i * 1.35 + 0.75, i === 2 ? 0 : 0.5, i === 2 ? 0.5 : 0.3); }
     b.end(t + 5.2);

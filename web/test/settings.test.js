@@ -7,8 +7,8 @@ import { RAD, tick, noWind, start } from './bot.js';
 const mem = (init) => { const m = {}; if (init) m['arta2.save'] = JSON.stringify(init); return { mem: m, get: (k) => m[k] || null, set: (k, v) => { m[k] = v; } }; };
 const stored = (st) => JSON.parse(st.mem['arta2.save']);
 const DEF = { sens: 1, invert: false, lefty: false, vibro: true, vibroPower: 'high', hints: 'new', autosave: true, speed: 1, confirmFriendly: true,
-  crewPanel: 'full', volFx: 100, volAmb: 50, volRadio: 100, volMusic: 60, text: 1, quality: 'auto', qualityChosen: false, fps: 60, nightTint: 'normal', showFps: false,
-  shake: true };
+  crewPanel: 'full', volFx: 100, volAmb: 50, volRadio: 100, volMusic: 60, text: 1, quality: 'auto', qualityChosen: false, resolution: 'auto', fps: 60, nightTint: 'normal',
+  showFps: false, shake: true };
 /** Сохранение с прогрессом во всех полях. */
 const rich = (extra) => ({ unlocked: 12, stars: [3, 2, 1, 3, 3, 3, 3, 3, 3, 3, 3], records: [{ stars: 3, shots: 2, time: 50, integrity: 100, difficulty: 0 }],
   difficulty: 1, muted: true, xp: 2400, survivalBest: { waves: 5, kills: 14 }, upgrades: { hoist: 2, armor: 1 },
@@ -22,11 +22,12 @@ test('настройки: полный набор по умолчанию и о�
   const good = { sens: [0.6, 1.6, 1.2], invert: [true, false], lefty: [true, false], vibro: [false, true], vibroPower: ['low', 'high'],
     hints: ['all', 'off', 'new'], autosave: [false, true], speed: [2, 1], confirmFriendly: [false, true], crewPanel: ['compact', 'off', 'full'],
     volFx: [0, 100, 35], volAmb: [0, 100, 35], volRadio: [0, 100, 35], volMusic: [0, 100, 35], text: [1.15, 1.3, 1], quality: ['mid', 'low', 'high', 'auto'],
-    qualityChosen: [false, true], fps: [30, 60], nightTint: ['soft', 'normal'], showFps: [true, false], shake: [false, true] };
+    qualityChosen: [false, true], resolution: [0.75, 1, 1.25, 1.5, 2, 'auto'], fps: [30, 60], nightTint: ['soft', 'normal'], showFps: [true, false], shake: [false, true] };
   const bad = { sens: ['1', NaN, null], invert: [1, 'да', null], lefty: [1, 0], vibro: ['1', undefined], vibroPower: ['mid', true, 1],
     hints: [0, true, false, 'on', null], autosave: [1, null], speed: [3, 0, '2', 1.5], confirmFriendly: ['true', 2], crewPanel: ['hidden', true, 0],
     volFx: [-1, 101, '50', NaN, null], volAmb: [-0.5, 100.5, Infinity], volRadio: [1000, 'громко'], volMusic: [-1, 100.5, '60', NaN, null], text: [1.2, '1', 2],
-    quality: ['ultra', 'AUTO', 2, true, null], qualityChosen: [1, 'да', null], fps: [45, '30', 120], nightTint: ['off', true], showFps: [1, 'да'], shake: [0, 1, 'нет', null] };
+    quality: ['ultra', 'AUTO', 2, true, null], qualityChosen: [1, 'да', null],
+    resolution: [0, 0.5, 1.1, 3, '1.5', 'AUTO', NaN, Infinity, true, null], fps: [45, '30', 120], nightTint: ['off', true], showFps: [1, 'да'], shake: [0, 1, 'нет', null] };
   assert.deepEqual(Object.keys(good).sort(), Object.keys(DEF).sort()); assert.deepEqual(Object.keys(bad).sort(), Object.keys(DEF).sort());
   for (const k of Object.keys(DEF)) {
     for (const v of good[k]) { assert.equal(g.setSetting(k, v).ok, true, k + '=' + v); assert.equal(g.settings()[k], v, k); }
@@ -38,6 +39,18 @@ test('настройки: полный набор по умолчанию и о�
   assert.ok(g.setSetting('volMusic', 12.4).ok); assert.equal(g.settings().volMusic, 12);
   // области значений для интерфейса: качество — в том порядке, в каком его показывает экран настроек
   assert.deepEqual(g.SETTINGS.quality.list, ['auto', 'high', 'mid', 'low']);
+  assert.deepEqual(g.SETTINGS.resolution.list, ['auto', 0.75, 1, 1.25, 1.5, 2]);
+});
+
+test('настройки: «ЧЁТКОСТЬ» — по умолчанию по качеству, хранится между запусками, мусор из сохранения — по умолчанию', () => {
+  const st = mem(); const g = createGame({ storage: st });
+  assert.equal(g.settings().resolution, 'auto');
+  assert.ok(g.setSetting('resolution', 1.25).ok);
+  assert.equal(stored(st).settings.resolution, 1.25);
+  assert.equal(createGame({ storage: st }).settings().resolution, 1.25);
+  assert.equal(g.settings().qualityChosen, false, 'чёткость не помечает выбор качества');
+  for (const v of ['1.25', 7, -1, {}, 'ultra']) assert.equal(createGame({ storage: mem({ settings: { resolution: v } }) }).settings().resolution, 'auto', String(v));
+  assert.ok(g.resetSettings === undefined || (g.resetSettings(), g.settings().resolution === 'auto'));
 });
 
 test('настройки: неизвестный ключ — отказ с событием denied, без события settings и без записи', () => {
@@ -54,7 +67,7 @@ test('настройки: сохраняются между запусками; 
   const st = mem(); const g = createGame({ storage: st });
   const ev = []; g.on('settings', (e) => ev.push(e));
   const want = { invert: true, vibroPower: 'low', hints: 'off', autosave: false, speed: 2, confirmFriendly: false, crewPanel: 'compact', volFx: 40, volAmb: 0,
-    volRadio: 55, volMusic: 25, quality: 'low', fps: 30, nightTint: 'soft', showFps: true, shake: false };
+    volRadio: 55, volMusic: 25, quality: 'low', resolution: 1.5, fps: 30, nightTint: 'soft', showFps: true, shake: false };
   for (const k of Object.keys(want)) assert.ok(g.setSetting(k, want[k]).ok);
   assert.equal(ev.length, Object.keys(want).length);
   const all = { ...DEF, ...want, qualityChosen: true };      // выбор качества помечается сам

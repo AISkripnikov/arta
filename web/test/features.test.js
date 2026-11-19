@@ -6,7 +6,7 @@ import { CAMPAIGN, dailyDef, isLand } from '../src/game/missions.js';
 import { RAD, norm, tick, waitBreech, waitReport, unlockAll, botStep, playBot, autoAA, fireQuiet, noWind, start, elevTo, turnTo, friendNear } from './bot.js';
 
 /** Настройки по умолчанию (полный список — см. README, раздел 8). */
-const DEF = { sens: 1, invert: false, lefty: false, vibro: true, vibroPower: 'high', hints: 'new', autosave: true, speed: 1, confirmFriendly: true, crewPanel: 'full', volFx: 100, volAmb: 50, volRadio: 100, volMusic: 60, text: 1, quality: 'auto', qualityChosen: false, fps: 60, nightTint: 'normal', showFps: false, shake: true };
+const DEF = { sens: 1, invert: false, lefty: false, vibro: true, vibroPower: 'high', hints: 'new', autosave: true, speed: 1, confirmFriendly: true, crewPanel: 'full', volFx: 100, volAmb: 50, volRadio: 100, volMusic: 60, text: 1, quality: 'auto', qualityChosen: false, resolution: 'auto', fps: 60, nightTint: 'normal', showFps: false, shake: true };
 const mem = (init) => { const m = {}; if (init) m['arta2.save'] = JSON.stringify(init); return { mem: m, get: (k) => m[k] || null, set: (k, v) => { m[k] = v; } }; };
 const brgTo = (bat, o) => norm(Math.atan2(o.x - bat.x, o.y - bat.y) / RAD);
 const withRandom = (v, fn) => { const R = Math.random; Math.random = () => v; try { return fn(); } finally { Math.random = R; } };

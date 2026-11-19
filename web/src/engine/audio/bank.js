@@ -40,7 +40,8 @@ function finish(ctx, rendered, rec, rate) {
 /**
  * @param ctx   любой контекст (нужен для createBuffer и частоты дискретизации)
  * @param noise общий буфер белого шума
- * @param o     { onReady(name) — буфер появился; idle — пауза между просчётами, мс }
+ * @param o     { onReady(name) — буфер появился; idle — пауза между просчётами, мс; skip(name) — не просчитывать
+ *               (для рецепта будет запись, samples.js) }
  */
 export function createBank(ctx, noise, o = {}) {
   const rate = ctx.sampleRate, OAC = (typeof window !== 'undefined') && (window.OfflineAudioContext || window.webkitOfflineAudioContext);
@@ -96,7 +97,8 @@ export function createBank(ctx, noise, o = {}) {
   function pump() {
     timer = 0;
     if (busy || dead) return;
-    const job = queue.shift();
+    let job = queue.shift();
+    while (job && o.skip && o.skip(job.name)) job = queue.shift();   // записанные звуки не просчитываем
     if (!job) { const w = waiters; waiters = []; w.forEach((f) => f()); return; }
     busy = true;
     let p;
@@ -123,6 +125,12 @@ export function createBank(ctx, noise, o = {}) {
       return null;
     },
     variants(name) { return store[name] || []; },
+    /** Вернуть в очередь рецепты, которые пропускались ради записей (записи не загрузились). */
+    add(names) {
+      if (dead) return;
+      for (const name of names) if (CAT[name] && !store[name] && !queue.some((j) => j.name === name)) for (let v = 0; v < (CAT[name].v || 1); v++) queue.push({ name, v });
+      if (started) schedule();
+    },
     /** Обещание: весь каталог просчитан. */
     all() { return new Promise((res) => { if (dead || (!queue.length && !busy)) res(); else { waiters.push(res); this.start(); } }); },
     get bytes() { return bytes; },

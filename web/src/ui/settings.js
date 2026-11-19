@@ -8,6 +8,7 @@
 //   nightTint      → класс body.night-soft (красный фильтр ночного боя слабее)
 //   volFx/Amb/Radio/Music → engine.audio.setBus (эффекты, фон башни, радио, музыка); общий звук — game.setMuted + audio.setMuted
 //   quality, fps   → engine.setQuality ('auto' | 'high' | 'mid' | 'low'), engine.setFrameCap; qualityChosen ставит сама логика
+//   resolution     → engine.setResolution ('auto' | 0.75 | 1 | 1.25 | 1.5 | 2: «ЧЁТКОСТЬ», × CSS-пикселей, не больше плотности экрана)
 //   showFps        → плашка #fpsMeter
 //   vibro, vibroPower → vibrate(kind)
 //   hints ('new' | 'all' | 'off') → учитывает логика (game.hint()); confirmFriendly → читает оболочка (вопрос «СВОИ В ЗОНЕ. ОГОНЬ?»)
@@ -27,7 +28,7 @@ export const UI_KEYS = ['arta2.news', 'arta2.tutorial'];
 const ONLY_MENU = 'Только из главного меню, между боями.';
 
 const TABS = [['game', 'ИГРА'], ['ctrl', 'УПРАВЛЕНИЕ'], ['sound', 'ЗВУК'], ['screen', 'ЭКРАН'], ['data', 'ДАННЫЕ']];
-// строка: { id, key, type: 'bool' | 'num' | 'str' | 'vol' | 'act', label, note, items, lock (только из меню) }
+// строка: { id, key, type: 'bool' | 'num' | 'str' | 'mix' (число или строка) | 'vol' | 'act', label, note, items, lock (только из меню) }
 const ROWS = {
   game: [
     { id: 'setDiff', key: 'difficulty', type: 'num', label: 'СЛОЖНОСТЬ', lock: true, items: [[0, 'КУРСАНТ'], [1, 'КОМАНДИР']],
@@ -58,6 +59,8 @@ const ROWS = {
     { id: 'setText', key: 'text', type: 'num', label: 'РАЗМЕР НАДПИСЕЙ', items: TEXT, note: 'Радио, подсказки, блокнот, окна.' },
     { id: 'setQuality', key: 'quality', type: 'str', label: 'КАЧЕСТВО ГРАФИКИ', items: [['auto', 'АВТО'], ['high', 'ВЫСОКОЕ'], ['mid', 'СРЕДНЕЕ'], ['low', 'ЭКОНОМНОЕ']],
       note: 'АВТО само снижает качество, если телефон не успевает. Ниже качество — меньше греется телефон.' },
+    { id: 'setRes', key: 'resolution', type: 'mix', label: 'ЧЁТКОСТЬ', items: [['auto', 'АВТО'], [0.75, '0,75×'], [1, '1×'], [1.25, '1,25×'], [1.5, '1,5×'], [2, '2×']],
+      note: 'Сколько точек экрана рисует 3D-сцена. Выше — чётче, ниже — быстрее. АВТО — по качеству графики.' },
     { id: 'setFps', key: 'fps', type: 'num', label: 'ОГРАНИЧЕНИЕ КАДРОВ', items: [[60, '60'], [30, '30']], note: '30 кадров в секунду берегут батарею.' },
     { id: 'setNight', key: 'nightTint', type: 'str', label: 'КРАСНЫЙ СВЕТ НОЧЬЮ', items: [['normal', 'ОБЫЧНЫЙ'], ['soft', 'СЛАБЫЙ']], note: 'Яркость красного фильтра в ночных боях.' },
     { id: 'setShake', key: 'shake', type: 'bool', label: 'ТРЯСКА КАМЕРЫ ПРИ ВЫСТРЕЛЕ', note: 'Камера вздрагивает от выстрела башни и от близких разрывов.' },
@@ -69,7 +72,8 @@ const ROWS = {
     { id: 'setUpReset', act: 'upreset', type: 'act', label: 'УЛУЧШЕНИЯ БАШНИ', btn: 'СБРОСИТЬ УЛУЧШЕНИЯ', lock: true, note: 'Снять все улучшения и вернуть очки снабжения.' },
     { id: 'setDefaults', act: 'defaults', type: 'act', label: 'НАСТРОЙКИ', btn: 'ВОССТАНОВИТЬ ПО УМОЛЧАНИЮ', note: 'Вернуть все настройки к исходным. Прогресс и сложность не меняются.' },
     { id: 'setWipe', act: 'wipe', type: 'act', label: 'ПРОГРЕСС', btn: 'СБРОСИТЬ ПРОГРЕСС', danger: true, lock: true, note: 'Стереть звёзды, звание, улучшения, рекорды и сохранённый бой.' },
-    { id: 'setVerRow', type: 'info', label: 'ВЕРСИЯ ИГРЫ', note: 'Обновления приходят сами при запуске игры и ставятся при выходе в меню.' },
+    { id: 'setVerRow', type: 'info', label: 'ВЕРСИЯ ИГРЫ', note: 'Обновления приходят сами при запуске игры и ставятся при выходе в меню. ' +
+      'Звуки: записи CC0 с OpenGameArt (qubodup, rubberduck, thimras, tinyworlds, bart и др.); гул винта самолёта — antumdeluge по записи jakobthiesen, CC BY 3.0. Полный список — CREDITS-AUDIO.md.' },
   ],
 };
 const ALL = [].concat(...TABS.map(([t]) => ROWS[t]));
@@ -84,7 +88,7 @@ const fpsChosen = () => { try { return localStorage.getItem(FPS_CHOSEN) === '1';
 export function createSettings({ game, engine, show, sfx, dialog, hooks = {} }) {
   let back = null, battle = false, tab = 'game', built = false, ambTimer = 0, fpsTimer = 0, version = '';
   let cur = { sens: 1, invert: false, lefty: false, vibro: true, vibroPower: 'high', hints: 'new', autosave: true, speed: 1, confirmFriendly: true, crewPanel: 'full',
-    volFx: 100, volAmb: 50, volRadio: 100, volMusic: 60, text: 1, quality: 'auto', qualityChosen: false, fps: 60, nightTint: 'normal', showFps: false, shake: true };
+    volFx: 100, volAmb: 50, volRadio: 100, volMusic: 60, text: 1, quality: 'auto', qualityChosen: false, resolution: 'auto', fps: 60, nightTint: 'normal', showFps: false, shake: true };
   const read = () => { try { cur = Object.assign(cur, game.settings()); } catch (e) { /* старая логика без настроек */ } return cur; };
   const call = (obj, name, ...a) => { try { if (obj && typeof obj[name] === 'function') return obj[name](...a); } catch (e) { /* не критично */ } return undefined; };
   /** Значение строки: настройки + два «чужих» ключа (сложность и общий звук хранятся в сохранении отдельно). */
@@ -108,6 +112,7 @@ export function createSettings({ game, engine, show, sfx, dialog, hooks = {} }) 
     call(engine.audio, 'setBus', 'radio', st.volRadio / 100);
     call(engine.audio, 'setBus', 'music', st.volMusic / 60);
     call(engine, 'setQuality', st.quality);
+    call(engine, 'setResolution', st.resolution);
     // частота: пока игрок сам её не выбирал, на «экономном» уровне движок держит 30 к/с (батарея и нагрев слабых телефонов)
     call(engine, 'setFrameCap', st.fps === 30 ? 30 : 0, fpsChosen());
     const fm = $('fpsMeter');
@@ -181,7 +186,7 @@ export function createSettings({ game, engine, show, sfx, dialog, hooks = {} }) 
     else if (key === 'volRadio') sfx('radio');
     else if (key === 'volAmb') { sfx('ambient', true); clearTimeout(ambTimer); ambTimer = setTimeout(() => { if (game.state.phase !== 'playing') sfx('ambient', false); }, 2500); }
   }
-  const parse = (r, raw) => (r.type === 'bool' ? raw === '1' : r.type === 'num' ? +raw : raw);
+  const parse = (r, raw) => (r.type === 'bool' ? raw === '1' : r.type === 'num' ? +raw : r.type === 'mix' && raw !== '' && isFinite(+raw) ? +raw : raw);
 
   $('settings').addEventListener('click', (e) => {
     const el = e.target.closest('[data-set],[data-setclose],[data-settab],[data-step],[data-setact]');

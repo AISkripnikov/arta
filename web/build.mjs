@@ -40,6 +40,8 @@ if (dev) {
     '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">' +
     '<style>html,body{margin:0;height:100%;background:#000;overflow:hidden;touch-action:none}#stage{width:100%;height:100%;display:block}</style>' +
     '</head><body><canvas id="stage"></canvas><script src="app.js"></script></body></html>');
+  // записанные звуки (engine/audio/samples.js грузит их из sfx/ рядом со страницей)
+  if (existsSync(join(root, 'static', 'sfx'))) cpSync(join(root, 'static', 'sfx'), join(out, 'sfx'), { recursive: true });
   console.log('dev build →', out);
 } else if (outIdx >= 0) {
   // Личная полная сборка: ровно то же, что боевая, но в свой каталог и без манифеста версии.

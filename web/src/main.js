@@ -29,6 +29,7 @@ const storage = {
       const q = game.settings().quality;
       if (q === 'auto') engine.probeDevice();
       engine.setQuality(q);
+      engine.setResolution(game.settings().resolution);
     } catch (e) { console.error('[main] качество графики:', e); }
     const ctx = { engine, THREE: engine.THREE, ui: engine.ui, mat: engine.mat, audio: engine.audio, game };
     const stations = [createPlotStation, createComputerStation, createLoadingStation, createTraverseStation, createElevationStation, createFireStation,

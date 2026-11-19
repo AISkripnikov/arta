@@ -2,6 +2,7 @@
 // только для сравнения «до/после» на этой же машине, не как кадры в секунду на телефоне).
 //
 //   node tools/perf.cjs <каталог> [--w 844] [--h 390] [--dpr 2] [--frames 12] [--quality high,mid,low] [--mission 3]
+//                                 [--throttle 4] (замедление CPU через CDP) [--live 4] (живой цикл: к/с по постам --stations, покой и стрельба)
 //                                 [--sim 5] [--seed 1] [--aim 1] [--stations fire,aa] [--json файл.json] [--txt файл.txt]
 //                                 [--eval "js перед замером"]...
 //
@@ -39,7 +40,7 @@ const fs = require('fs');
 (async () => {
   const a = process.argv.slice(2);
   const STR = new Set(['quality', 'json', 'txt', 'stations']);
-  const opt = { w: 844, h: 390, dpr: 2, frames: 12, mission: 3, sim: 5, seed: 1, aim: 1, quality: '', json: '', txt: '', stations: '' }; const evals = [];
+  const opt = { w: 844, h: 390, dpr: 2, frames: 12, mission: 3, sim: 5, seed: 1, aim: 1, quality: '', json: '', txt: '', stations: '', throttle: 1, live: 0 }; const evals = [];
   let dir = null;
   for (let i = 0; i < a.length; i++) {
     if (a[i] === '--eval') evals.push(a[++i]);
@@ -54,6 +55,8 @@ const fs = require('fs');
   try {
     const ctx = await b.newContext({ viewport: { width: opt.w, height: opt.h }, deviceScaleFactor: opt.dpr, hasTouch: true });
     await ctx.addInitScript(() => { try { localStorage.setItem('arta2.intro', '1'); localStorage.setItem('arta2.news', '999'); } catch (e) { /* хранилище недоступно */ } });
+    // один уровень: «АВТО» сразу стартует с него (без замера устройства и без смены уровня с перестройкой текстур перед замером)
+    if (tiers.length === 1) await ctx.addInitScript((t) => { try { localStorage.setItem('arta2.autoTier', t); } catch (e) { /* хранилище недоступно */ } }, tiers[0]);
     const p = await ctx.newPage();
     p.setDefaultTimeout(300000);
     p.on('pageerror', e => console.log('PAGEERROR:', e.message));
@@ -81,6 +84,8 @@ const fs = require('fs');
       return { mission: st.mission && st.mission.name, time: Math.round(st.time * 10) / 10, targets: (st.targets || []).length, aimed: bearing, night: !!(st.mission && st.mission.night), weather: (st.mission && st.mission.weather) || 'clear' };
     }, { mission: opt.mission, sim: opt.sim, seed: opt.seed, aim: opt.aim });
     for (const js of evals) await p.evaluate('(async()=>{' + js + '})()');
+    // замедление процессора (CDP), как у слабого телефона: только на время замера (загрузка идёт с обычной скоростью)
+    if (opt.throttle > 1) { const cdp = await ctx.newCDPSession(p); await cdp.send('Emulation.setCPUThrottlingRate', { rate: opt.throttle }); }
     r = await p.evaluate(async ({ tiers, frames, only }) => {
       const host = window.__dev || window.__arta;
       const e = host.engine; e.stop();
@@ -157,8 +162,56 @@ const fs = require('fs');
           phase: host.game && host.game.state ? host.game.state.phase : null,
         },
       };
-    }, { tiers, frames: Math.max(1, opt.frames | 0), only: opt.stations ? opt.stations.split(',').map((s) => s.trim()).filter(Boolean) : [] });
+    }, { tiers, frames: opt.live ? 0 : Math.max(1, opt.frames | 0), only: opt.live ? ['__none__'] : opt.stations ? opt.stations.split(',').map((s) => s.trim()).filter(Boolean) : [] });
+    // --live S: настоящий цикл кадров (рисование по требованию) — на каждом уровне и посту S с покоя и S со стрельбой
+    if (opt.live) {
+      r.live = {};
+      const liveIds = (opt.stations || 'fire,plot').split(',').map((s) => s.trim()).filter(Boolean);
+      for (const q of (tiers.length ? tiers : [r.meta.quality || 'high'])) {
+        r.live[q] = {};
+        for (const id of liveIds) {
+          for (const mode of ['idle', 'fire']) {
+            await p.evaluate(({ q, id, mode }) => {
+              const host = window.__dev || window.__arta, e = host.engine, game = host.game;
+              e.stop(); e.setQuality(q); e.gotoStation(id, { instant: true });
+              window.__perfFire && clearInterval(window.__perfFire); window.__perfFire = 0;
+              if (mode === 'fire' && game) {
+                const shoot = () => {
+                  const s = game.state, b = s.breech;
+                  if (!s.shells || !b) return;
+                  b.shell = 'he'; b.rammed = true; b.charges = Math.max(1, b.charges || 2); b.open = false; b.busy = false;
+                  s.turret.brake = true; s.fire.armed = true; if (s.shells.he < 5) s.shells.he = 20;
+                  try { game.fire(); } catch (err) { /* не выстрелило */ }
+                };
+                shoot(); window.__perfFire = setInterval(shoot, 1500);
+              }
+              e.start();
+            }, { q, id, mode });
+            await p.waitForTimeout(opt.warm || 4000);     // выдержка: смена уровня, сборка шейдеров, текстуры
+            const s0 = await p.evaluate(() => { const s = (window.__dev || window.__arta).engine.debug.stats(); return { t: performance.now(), r: s.rendered, f: s.frames || 0 }; });
+            const t0 = Date.now();
+            await p.evaluate(() => { window.__perfN = 0; const e = (window.__dev || window.__arta).engine; window.__perfOff = e.onFrame(() => { window.__perfN++; }); return 0; });
+            await p.waitForTimeout(opt.live * 1000);
+            const s1 = await p.evaluate(() => { const e = (window.__dev || window.__arta).engine, s = e.debug.stats(); try { window.__perfOff && window.__perfOff(); } catch (err) { /* нет отписки */ }
+              clearInterval(window.__perfFire); window.__perfFire = 0; e.stop(); return { t: performance.now(), r: s.rendered, n: window.__perfN, frameMs: s.frameMs, tier: s.tier }; });
+            const sec = (s1.t - s0.t) / 1000, rendered = s1.r - s0.r;
+            r.live[q][id + ':' + mode] = { renderFps: +(rendered / sec).toFixed(1), stepFps: +(s1.n / sec).toFixed(1), msPerRendered: +(sec * 1000 / Math.max(1, rendered)).toFixed(1), cpuMs: +s1.frameMs.toFixed(1), tier: s1.tier, wall: Date.now() - t0 };
+          }
+        }
+      }
+    }
   } finally { await b.close(); }
+  if (opt.live) {
+    const out = { meta: { cmd: 'node tools/perf.cjs ' + a.join(' '), w: opt.w, h: opt.h, dpr: opt.dpr, throttle: opt.throttle || 1, canvas: r.meta.canvas, gpu: r.meta.gpu, date: new Date().toISOString() }, live: r.live };
+    const lines = ['Живой цикл (' + opt.live + ' с на замер) · ' + opt.w + '×' + opt.h + ' dpr ' + opt.dpr + ' · замедление CPU ×' + (opt.throttle || 1),
+      'уровень   пост:режим        нарисовано к/с  шагов к/с  мс на нарисованный кадр  логика мс'];
+    for (const q of Object.keys(r.live)) for (const k of Object.keys(r.live[q])) { const v = r.live[q][k];
+      lines.push(String(q).padEnd(9) + ' ' + k.padEnd(16) + String(v.renderFps).padStart(14) + String(v.stepFps).padStart(11) + String(v.msPerRendered).padStart(25) + String(v.cpuMs).padStart(11)); }
+    console.log(lines.join('\n'));
+    if (opt.json) fs.writeFileSync(path.resolve(opt.json), JSON.stringify(out, null, 1) + '\n');
+    if (opt.txt) fs.writeFileSync(path.resolve(opt.txt), lines.join('\n') + '\n');
+    return;
+  }
 
   const meta = { cmd: 'node tools/perf.cjs ' + a.join(' '), dir, w: opt.w, h: opt.h, dpr: opt.dpr, frames: opt.frames, ...(r.meta.kind === 'game' ? { mission: opt.mission, sim: opt.sim, seed: opt.seed, scene } : {}), ...r.meta, date: new Date().toISOString() };
   const groups = tiers.length ? r.results : { [meta.quality || 'текущее']: r.results };

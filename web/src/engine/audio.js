@@ -1,4 +1,4 @@
-// engine.audio — синтезированный звук башни (WebAudio, без файлов). DESIGN §5.4.
+// engine.audio — звук башни (WebAudio): записи (CC0/CC-BY, static/sfx) поверх синтеза. DESIGN §5.4.
 // Контекст создаётся лениво при первом касании (unlock()). Ни одна функция не бросает исключений:
 // если звук недоступен — все вызовы тихо ничего не делают.
 //
@@ -11,6 +11,8 @@
 //   beds.js       петли фона, просчитанные в JS: тёмный шум, медленное движение, гул на сетке 12.5 Гц
 //   music.js      тема меню: один раз просчитанный буфер-петля (лениво, в очереди банка последняя)
 //   space.js      импульсный отклик «стальная комната» (0.75 с), кривая ограничителя
+//   samples.js    записанные звуки: грузятся после первого касания (static/sfx/pack*.js) и подменяют буферы банка
+//                 по тем же именам рецептов; пока записи нет — играет синтез. Записи идут почти сухими (своя комната).
 //
 // ТРАКТ: голос → вход пространства шины → { сухой → громкость шины ; посыл → ОДНА короткая свёрточная реверберация }
 //        radio: → полоса «динамика» 350–3200 Гц (без искажения);  fx, amb, music: без компрессии
@@ -29,8 +31,11 @@ import { createBank } from './audio/bank.js';
 import { createLoops } from './audio/loops.js';
 import { createAmbience } from './audio/ambience.js';
 import { createMusic } from './audio/music.js';
+import { createSamples } from './audio/samples.js';
 
-const SPACES = { in: [1, 0.4], big: [1, 0.55], out: [0.8, 0.3], ui: [1, 0.05], dry: [1, 0], intro: [1, 0.3] };
+const SPACES = { in: [1, 0.4], big: [1, 0.55], out: [0.8, 0.3], ui: [1, 0.05], dry: [1, 0], intro: [1, 0.3], rec: [1, 0.12], recOut: [0.8, 0.06] };
+// запись уже несёт своё пространство: стальной комнаты добавляем чуть-чуть
+const REC_SPACE = { in: 'rec', big: 'rec', out: 'recOut' };
 const BUSES = ['fx', 'amb', 'radio', 'music'];
 const MAX_VOICES = { high: 12, mid: 12, low: 8 };
 const FX_GAIN = 0.62;                    // шина эффектов: постоянное усиление (компрессора шины больше нет — лишняя нагрузка)
@@ -40,14 +45,15 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 /**
  * @param opts.context готовый контекст (OfflineAudioContext в tools/test-audio.cjs) — тогда unlock не нужен
- * @param opts.shared  { noise, bank, irRoom, irSea } — общие буферы для нескольких экземпляров (тест)
+ * @param opts.shared  { noise, bank, irRoom, irSea, samples } — общие буферы для нескольких экземпляров (тест)
+ * @param opts.sfxBase путь к пакетам записей (по умолчанию 'sfx/'); opts.samples === false — только синтез
  * @param opts.seed    зерно случайности (тест)
  */
 export function createAudio(opts = {}) {
   const offline = opts.context ? opts.context.length / opts.context.sampleRate : 0;
   const shared = opts.shared || {};
   const rnd = opts.seed != null ? rng(opts.seed) : Math.random;
-  let ctx = null, out = null, pre = null, noise = null, bank = null, roomConv = null, roomRet = null, tier = 'high';
+  let ctx = null, out = null, pre = null, noise = null, bank = null, rawBank = null, samples = null, roomConv = null, roomRet = null, tier = 'high';
   const vol = {};                          // шина → [сухой, посыл в комнату, посыл в море] (GainNode)
   const inputs = {};                       // 'шина/пространство' → входной узел
   const bus = { fx: 1, amb: 1, radio: 1, music: 1 };
@@ -58,7 +64,7 @@ export function createAudio(opts = {}) {
   const last = {};                         // ограничение частоты однотипных звуков
   let voices = [], garbage = [], sweeper = 0, irTimer = 0, extra = 0;
   const ready = {};                        // имя → [колбэки]: кто ждёт буфер из банка
-  let wantAmbient = false, wantAlarm = false, wantMusic = false;
+  let wantAmbient = false, wantAlarm = false, wantMusic = false, lastSrc = '';
 
   // ----- ядро для модулей -----
   const core = {
@@ -67,7 +73,10 @@ export function createAudio(opts = {}) {
     input, play, trash(nodes, end) { const bin = { end, nodes }; garbage.push(bin); return bin; },
     get tier() { return tier; },
     kit: (seed) => makeKit(ctx, { seed: seed || Math.floor(rnd() * 1e9), noise }),
-    recipeGain: (name) => (CAT[name] ? CAT[name].g : 0),
+    recipeGain: (name) => {
+      const rec = samples && samples.ready(name) ? samples.gain(name) : 1;
+      return CAT[name] ? CAT[name].g * rec : samples && samples.ready(name) ? rec : 0;
+    },
     whenReady(name, cb) { (ready[name] || (ready[name] = [])).push(cb); },
     audible: () => !!ctx && !paused && (offline || ctx.state === 'running'),
   };
@@ -114,14 +123,20 @@ export function createAudio(opts = {}) {
         if (name === 'fx') { const cg = ctx.createGain(); cg.gain.value = FX_GAIN; v[0].connect(cg); cg.connect(pre); }
         else v[0].connect(pre);
       }
-      // банк
-      bank = shared.bank || createBank(ctx, noise, {
-        onReady(name) { const list = ready[name]; if (list) { delete ready[name]; list.forEach((f) => { try { f(); } catch (e) { /* тихо */ } }); } },
-      });
+      // записи и банк: оба зовут onReady, когда у рецепта появился буфер; банк не просчитывает то, что придёт записью
+      const onReady = (name) => { const list = ready[name]; if (list) { delete ready[name]; list.forEach((f) => { try { f(); } catch (e) { /* тихо */ } }); } };
+      if (opts.samples !== false) {
+        samples = shared.samples || createSamples(ctx, { base: opts.sfxBase, onReady, onFail(names) { if (rawBank && rawBank.add) rawBank.add(names); } });
+      }
+      rawBank = shared.bank || createBank(ctx, noise, { onReady, skip: (name) => !!samples && samples.covers(name) });
+      // фасад банка: get() сперва ищет запись (петли, фон и разовые звуки берут буферы отсюда)
+      bank = Object.create(rawBank);
+      bank.get = (name, r) => (samples && samples.get(name, r)) || rawBank.get(name, r);
       if (!offline) {
         // своя страховка на сворачивание (движок делает то же самое; вызовы идемпотентны)
         if (typeof document !== 'undefined' && document.addEventListener) document.addEventListener('visibilitychange', onVis);
         setTimeout(() => { if (bank) bank.start(); }, 250);
+        setTimeout(() => { if (samples) samples.start(); }, 120);
         sweeper = setInterval(() => { try { if (ctx && ctx.state === 'running') sweep(ctx.currentTime); } catch (e) { /* тихо */ } }, 1500);
       }
       amb.set({});
@@ -187,22 +202,26 @@ export function createAudio(opts = {}) {
     if (!rec || !ctx) return 0;
     o = o || {};
     const now = ctx.currentTime, when = Math.max(0, +o.when || 0);
+    if (samples && samples.muted(name)) return 0;           // хвост уже в записи соседа
     if (rec.gap && !o.force) { if (now + when - (last[name] == null ? -9 : last[name]) < rec.gap) return 0; last[name] = now + when; }
     sweep(now);
     const live = voices.reduce((n, v) => n + (v.dying ? 0 : 1), 0);
     if (live >= MAX_VOICES[tier]) steal(now);
     const t = now + 0.005 + when;
-    const dest = o.dest || input(o.bus || rec.bus || 'fx', o.space || rec.sp || 'in');
+    const sbuf = samples && samples.get(name, rnd());
+    const sp = o.space || rec.sp || 'in';
+    const dest = o.dest || input(o.bus || rec.bus || 'fx', sbuf && REC_SPACE[sp] ? REC_SPACE[sp] : sp);
     const jit = rec.jit == null ? 0.03 : rec.jit;
     const rate = clamp((+o.rate || 1) * (1 + (rnd() * 2 - 1) * jit), 0.25, 4);
-    const gain = rec.g * (o.gain == null ? 1 : Math.max(0, +o.gain || 0)) * (0.9 + 0.1 * rnd());
+    const gain = rec.g * (sbuf ? samples.gain(name) : 1) * (o.gain == null ? 1 : Math.max(0, +o.gain || 0)) * (0.9 + 0.1 * rnd());
     const nodes = [], g = ctx.createGain(); nodes.push(g);
     let tail = g, head = g;
     if (o.pan && Math.abs(+o.pan || 0) > 0.05 && tier !== 'low' && ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = clamp(+o.pan || 0, -1, 1); g.connect(p); tail = p; nodes.push(p); }
     tail.connect(dest);
     if (o.lp) { const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = clamp(+o.lp, 60, 16000); f.Q.value = 0.5; f.connect(g); head = f; nodes.push(f); }
     const v = { nodes, g, prio: gain, end: 0 };
-    const buf = bank && bank.get(name, rnd());
+    const buf = sbuf || (rawBank && rawBank.get(name, rnd()));
+    lastSrc = sbuf ? 'rec' : buf ? 'bank' : 'live';
     if (buf) {
       const src = ctx.createBufferSource(); src.buffer = buf; src.playbackRate.value = rate; src.connect(head);
       g.gain.value = gain;
@@ -281,12 +300,16 @@ export function createAudio(opts = {}) {
     dispose() {
       clearInterval(sweeper); clearTimeout(irTimer);
       try { if (!offline && typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVis); } catch (e) { /* тихо */ }
-      try { amb.dispose(); amb.reset(); music.reset(); loops.reset(); if (bank && !shared.bank) bank.dispose(); if (ctx && !offline) ctx.close(); } catch (e) { /* тихо */ }
-      ctx = null; bank = null; voices = []; garbage = [];
+      try { amb.dispose(); amb.reset(); music.reset(); loops.reset(); if (rawBank && !shared.bank) rawBank.dispose(); if (samples && !shared.samples) samples.dispose(); if (ctx && !offline) ctx.close(); } catch (e) { /* тихо */ }
+      ctx = null; bank = rawBank = samples = null; voices = []; garbage = [];
       for (const k of Object.keys(inputs)) delete inputs[k];
     },
     /** Обещание: все звуки каталога просчитаны в буферы (игре ждать не нужно — до готовности звук играет вживую). */
-    prerender() { try { return bank ? bank.all() : Promise.resolve(); } catch (e) { return Promise.resolve(); } },
+    prerender() { try { return bank ? Promise.all([rawBank.all(), samples ? samples.all() : null]) : Promise.resolve(); } catch (e) { return Promise.resolve(); } },
+    /** Записанные звуки: { ready — сколько файлов декодировано, bytes, failed — пакеты, которые не загрузились }; null — выключены. */
+    get recordings() { return samples ? { ready: samples.count, bytes: samples.bytes, failed: samples.failed } : null; },
+    /** Рецепт сейчас звучит записью (true) или синтезом (false). */
+    recorded(name) { try { return !!(samples && (samples.ready(name) || samples.muted(name))); } catch (e) { return false; } },
     /** Сыграть рецепт каталога по имени: play('clunk', { gain, rate, pan, when, lp }). */
     play: one((name, o) => play(name, o)),
     /** Счётчики для тестов и плашки отладки. */
@@ -296,7 +319,7 @@ export function createAudio(opts = {}) {
       return {
         voices: voices.reduce((n, v) => n + (v.dying ? 0 : 1), 0), dying: voices.reduce((n, v) => n + (v.dying ? 1 : 0), 0), nodes: voices.reduce((n, v) => n + v.nodes.length, 0) + garbage.reduce((n, v) => n + v.nodes.length, 0),
         inputs: Object.keys(inputs).length, bankBytes: bank ? bank.bytes : 0, bankPending: bank ? bank.pending : 0, bankTotal: bank ? bank.total : 0,
-        bufferBytes: (bank ? bank.bytes : 0) + extra, state: ctx ? ctx.state : 'none', rate: ctx ? ctx.sampleRate : 0, paused,
+        bufferBytes: (bank ? bank.bytes : 0) + extra + (samples && !shared.samples ? samples.bytes : 0), sampleBytes: samples ? samples.bytes : 0, samples: samples ? samples.count : 0, lastSrc, state: ctx ? ctx.state : 'none', rate: ctx ? ctx.sampleRate : 0, paused,
         music: music.playing, ambient: amb.state.on, loops: loops.state(), duck: Object.assign({}, mul), tier,
       };
     },
@@ -552,7 +575,7 @@ export function createAudio(opts = {}) {
   // ----- журнал вызовов (tools/test-audio.cjs, проверка проводки звука в игре) -----
   // trace(true) — начать писать заново, trace(false) — перестать; trace() — записи [{ n: имя, t: мс (performance.now), a: [аргументы] }].
   // Пишутся вызовы самой игры, в том числе до первого касания (звука ещё нет, а вызов уже есть). Не больше 4000 последних записей.
-  const NOLOG = { debug: 1, trace: 1, prerender: 1 };
+  const NOLOG = { debug: 1, trace: 1, prerender: 1, recorded: 1 };
   const plain = (v) => (v == null || typeof v !== 'object' ? v : Array.isArray(v) ? v.slice(0, 8) : Object.assign({}, v));
   for (const k of Object.keys(api)) {
     const d = Object.getOwnPropertyDescriptor(api, k);

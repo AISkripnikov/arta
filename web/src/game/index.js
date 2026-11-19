@@ -73,6 +73,7 @@ const DETECT_FLASH = 8;       // с: батарею засекают в моме
 const HARASS_MIN = 0.6, HARASS_MAX = 2.5;      // км: куда ложатся снаряды беспокоящего огня (пока батарея не засечена)
 const HINT_MODES = ['new', 'all', 'off'];
 const QUALITY_TIERS = ['auto', 'high', 'mid', 'low'];
+const RESOLUTIONS = ['auto', 0.75, 1, 1.25, 1.5, 2];      // «ЧЁТКОСТЬ»: × CSS-пикселей (не больше плотности экрана); 'auto' — по качеству
 const FRIEND_ZONE = 0.4;      // км: свои ближе этого к точке прицеливания — «в зоне поражения»
 /** Настройки: значение по умолчанию и область допустимых значений. Логика их хранит и проверяет; применяет — интерфейс
  *  (кроме autosave и speed — их учитывает сама логика). */
@@ -89,7 +90,7 @@ const SETTINGS = {
   volFx: vol(100), volAmb: vol(50), volRadio: vol(100), volMusic: vol(60),
   // экран: quality 'auto' — движок сам снижает качество, если телефон не успевает; qualityChosen — качество выбрано игроком
   // (ставит setSetting('quality', …); без этого флага прежнее 'high' из старого сохранения при загрузке становится 'auto')
-  text: oneOf(1, TEXT_SIZES), quality: oneOf('auto', QUALITY_TIERS), qualityChosen: bool(false), fps: oneOf(60, [60, 30]), nightTint: oneOf('normal', ['normal', 'soft']), showFps: bool(false),
+  text: oneOf(1, TEXT_SIZES), quality: oneOf('auto', QUALITY_TIERS), qualityChosen: bool(false), resolution: oneOf('auto', RESOLUTIONS), fps: oneOf(60, [60, 30]), nightTint: oneOf('normal', ['normal', 'soft']), showFps: bool(false),
   shake: bool(true),
 };
 const SETTING_KEYS = Object.keys(SETTINGS);

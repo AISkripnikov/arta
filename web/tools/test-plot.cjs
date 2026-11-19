@@ -36,6 +36,13 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol + 1e-9;
       handle(id) { return this.scr(st.api.pinHandleWorld(id)); },
       sight() { const s = game.state, b = s.mission.battery, a = s.plot.alidade, r = a.bearing * Math.PI / 180; return { x: b.x + a.range * Math.sin(r), y: b.y + a.range * Math.cos(r) }; },
       ctl(name) { return st.hotspots[name].userData.control; },
+      /** Попадает ли точка экрана в плашку «ОБЗОР» / «К ВИЗИРУ» (они перехватывают касание). */
+      onPlate(x, y) {
+        const r = engine.canvas.getBoundingClientRect(), rc = new THREE.Raycaster();
+        engine.camera.updateMatrixWorld();
+        rc.setFromCamera(new THREE.Vector2(x / r.width * 2 - 1, -(y / r.height) * 2 + 1), engine.camera);
+        return ['btnOverview', 'btnToSight'].some((n) => st.hotspots[n].visible && rc.intersectObject(st.hotspots[n], true).length > 0);
+      },
       snap() {
         const s = game.state;
         return JSON.parse(JSON.stringify({ phase: s.phase, active: s.activeTarget, pins: s.plot.pins, al: s.plot.alidade, rec: s.plot.recorded, time: s.time, diff: s.difficulty,
@@ -264,6 +271,118 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol + 1e-9;
     await step(30, 0.05);
     s = await snap();
     ok(s.loupe === false && s.fov > 40, 'двойное касание под лупой — обратно', [s.loupe, s.fov]);
+  }
+
+  // ---- 2б. лупа: карту двигают пальцем ----
+  console.log('лупа: карта под пальцем');
+  {
+    const view = () => at('T.st.api.loupeView');
+    const plateShown = () => at("(() => { const o = T.st.hotspots.btnToSight; for (let q = o; q; q = q.parent) if (!q.visible) return false; return true; })()");
+    /** Пустое место листа возле центра кадра: под пальцем ни фишки, ни визира, ни линейки; путь пальца d (км) в кадре. */
+    const findEmpty = async (v, d) => {
+      for (const [ox, oy] of [[0.9, -0.5], [-0.9, -0.5], [0.9, 0.45], [-0.9, 0.45], [0.4, -0.75], [-0.4, 0.7], [1.4, 0], [-1.4, 0], [0, -0.8], [1.6, -0.6], [-1.6, 0.6]]) {
+        const q = { x: v.x + ox, y: v.y + oy };
+        if ((await at('T.st.api.pickAt(' + q.x + ',' + q.y + ')')) !== 'none') continue;
+        const sa = await at('T.chart(' + q.x + ',' + q.y + ')'), sb = await at('T.chart(' + (q.x + d.x) + ',' + (q.y + d.y) + ')');
+        if (inSafe(sa) && inSafe(sb) && !(await at('T.onPlate(' + sa.x + ',' + sa.y + ')'))) return { q, sa, sb };
+      }
+      return null;
+    };
+    /** Перетаскивание мышью с компенсацией порога (5 px «съедаются»); hold — пауза перед отпусканием (без инерции). */
+    const panBy = async (e, hold = 150, gap = 0) => {
+      const L = Math.hypot(e.sb.x - e.sa.x, e.sb.y - e.sa.y) || 1, k = (L + 5) / L;
+      const b = { x: e.sa.x + (e.sb.x - e.sa.x) * k, y: e.sa.y + (e.sb.y - e.sa.y) * k };
+      await page.mouse.move(e.sa.x, e.sa.y); await page.mouse.down();
+      for (let i = 1; i <= 8; i++) { await page.mouse.move(e.sa.x + (b.x - e.sa.x) * i / 8, e.sa.y + (b.y - e.sa.y) * i / 8); if (gap) await page.waitForTimeout(gap); }
+      if (hold) await page.waitForTimeout(hold);
+      await page.mouse.up();
+    };
+    await tap(await at("T.hot('btnLoupe')"));
+    await step(30, 0.05);
+    s = await snap();
+    const pin0 = s.pins[moving.id], al0 = s.al;
+    let v0 = await view();
+    ok(s.loupe && !v0.panned && !(await plateShown()) && near(v0.x, pin0.x, 0.01) && near(v0.y, pin0.y, 0.01), 'лупа открыта у фишки, плашки «К ВИЗИРУ» нет', [v0, pin0]);
+    // 1) перетаскивание по пустому месту двигает кадр ровно на путь пальца (по карте), фишка и алидада на месте
+    let d = { x: -0.6, y: 0.4 }, e = await findEmpty(v0, d);
+    ok(!!e, 'под лупой нашлось пустое место для пальца', v0);
+    await panBy(e);
+    await step(3);
+    let v1 = await view();
+    s = await snap();
+    ok(near(v1.x, v0.x - d.x, 0.02) && near(v1.y, v0.y - d.y, 0.02), 'карта идёт за пальцем 1:1 (сдвиг 0.72 км ±0.02)', [v0, v1, d]);
+    ok(v1.panned && (await plateShown()) && s.loupe, 'карта отведена — видна плашка «К ВИЗИРУ», лупа не снята', v1);
+    ok(s.pins[moving.id].x === pin0.x && s.pins[moving.id].y === pin0.y && s.al.bearing === al0.bearing && s.al.range === al0.range, 'фишка и алидада при этом не тронуты', [s.pins[moving.id], s.al]);
+    {
+      const tags = await at('[T.st.group.getObjectByName("chartBoard")].length');
+      if (process.env.PLOT_SHOT) { await step(2); await page.screenshot({ path: process.env.PLOT_SHOT }); }
+      ok(tags === 1, 'снимок кадра');
+    }
+    // 2) «К ВИЗИРУ» возвращает кадр к фишке активной цели
+    await tap(await at("T.hot('btnToSight')"));
+    await step(30, 0.05);
+    v1 = await view();
+    ok(!v1.panned && near(v1.x, pin0.x, 0.01) && near(v1.y, pin0.y, 0.01) && !(await plateShown()), 'плашка «К ВИЗИРУ» возвращает кадр к фишке', [v1, pin0]);
+    // 3) отвели чуть-чуть — фишку за ручку всё равно тащит палец, кадр за ней больше не едет
+    d = { x: 0.25, y: -0.2 }; e = await findEmpty(v1, d);
+    await panBy(e);
+    await step(3);
+    v0 = await view();
+    {
+      const h = await at('T.handle(' + moving.id + ')');
+      const a = await at('T.chart(10, 10)'), b = await at('T.chart(10.2, 10)'), pxKm = (b.x - a.x) / 0.2;
+      ok(inSafe(h) && v0.panned, 'фишка в кадре отведённой лупы', [h, v0]);
+      await drag(h, { x: h.x + 5.5 + pxKm * 0.2, y: h.y }, 10, 120);
+      await step(20, 0.05);
+      s = await snap();
+      v1 = await view();
+      ok(near(s.pins[moving.id].x, pin0.x + 0.2, 0.03) && near(s.pins[moving.id].y, pin0.y, 0.02), 'под отведённой лупой фишка тащится пальцем (+0.20 км), а не карта', [s.pins[moving.id], pin0]);
+      ok(v1.panned && near(v1.x, v0.x, 1e-6) && near(v1.y, v0.y, 1e-6), 'кадр отведённой лупы за фишкой не едет', [v0, v1]);
+    }
+    // 4) бросок: карта едет дальше по инерции и останавливается
+    d = { x: 0.7, y: 0 }; e = await findEmpty(v1, d);
+    await panBy(e, 0, 18);
+    const vr = await view();
+    await step(60, 0.05);
+    let v2 = await view();
+    ok(vr.flinging && !v2.flinging && v1.x - v2.x > d.x + 0.15 && near(v2.y, v1.y, 0.08), 'бросок пальцем: карта едет по инерции и останавливается', [v1, vr, v2]);
+    // 5) короткое касание пустого места кадр не двигает
+    e = await findEmpty(v2, { x: 0, y: 0 });
+    await tap(e.sa);
+    await step(4);
+    v1 = await view();
+    ok((await at('T.st.api.loupe')) && near(v1.x, v2.x, 1e-6) && near(v1.y, v2.y, 1e-6), 'касание под лупой карту не двигает', [v2, v1]);
+    await page.waitForTimeout(600);                         // не сложилось бы в двойное касание
+    // 6) вышли из лупы и вернулись — снова по центру фишки
+    await tap(await at("T.hot('btnOverview')"));
+    await step(30, 0.05);
+    await tap(await at("T.hot('btnLoupe')"));
+    await step(30, 0.05);
+    v1 = await view();
+    s = await snap();
+    ok(s.loupe && !v1.panned && near(v1.x, s.pins[moving.id].x, 0.01) && near(v1.y, s.pins[moving.id].y, 0.01), 'повторная лупа — снова у фишки', [v1, s.pins[moving.id]]);
+    // 7) край листа: кадр упирается в рамку, бросок у края гаснет
+    await tap(await at("T.hot('btnOverview')"));
+    await step(30, 0.05);
+    await page.waitForTimeout(600);
+    await doubleTap(await at('T.chart(1.3, 10)'), true);
+    await step(30, 0.05);
+    v0 = await view();
+    ok(v0.x < 2 && !v0.panned, 'двойное касание у края — лупа у края листа', v0);
+    d = { x: 1.5, y: 0 }; e = await findEmpty(v0, d);
+    await panBy(e);
+    await step(3);
+    v1 = await view();
+    ok(near(v1.x, 0, 0.005) && near(v1.y, v0.y, 0.02), 'кадр упирается в край карты', [v0, v1]);
+    e = await findEmpty(v1, { x: 1.2, y: 0 });
+    await panBy(e, 0, 18);
+    await step(40, 0.05);
+    v2 = await view();
+    ok(near(v2.x, 0, 0.005) && !v2.flinging, 'бросок к краю: кадр стоит у края', v2);
+    await tap(await at("T.hot('btnOverview')"));
+    await step(30, 0.05);
+    s = await snap();
+    ok(!s.loupe && s.fov > 40, 'лупа снята', s.fov);
   }
 
   // оболочка сама вернула основной вид (повторный gotoStation) — пост снимает лупу

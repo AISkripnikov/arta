@@ -54,7 +54,8 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
         import { makeNoise } from './src/engine/audio/kit.js';
         import { steelRoomIR } from './src/engine/audio/space.js';
         import { CAT } from './src/engine/audio/catalogue.js';
-        window.__A = { createAudio, CATALOGUE, createBank, makeNoise, steelRoomIR, CAT };`,
+        import { createSamples, SFX, packFiles, PACKS } from './src/engine/audio/samples.js';
+        window.__A = { createAudio, CATALOGUE, createBank, makeNoise, steelRoomIR, CAT, createSamples, SFX, packFiles, PACKS };`,
       resolveDir: path.resolve(__dirname, '..'), loader: 'js',
     },
     bundle: true, format: 'iife', target: ['chrome80'], outfile: path.join(outDir, 'app.js'), logLevel: 'warning',
@@ -106,15 +107,21 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
   await page.evaluate(() => {
     const A = window.__A, T = window.__T = { sets: {}, T0: 0.256 };
     const dB = (x) => (x > 1e-9 ? 20 * Math.log10(x) : -180);
+    T.SFX_BASE = '../../static/sfx/';
     T.setup = async (rate) => {
       const base = new OfflineAudioContext(1, 1, rate), t0 = performance.now();
       const noise = A.makeNoise(base, 2, rate, 7);
       const bank = A.createBank(base, noise, { idle: 0 });
       await bank.all();
       const irRoom = A.steelRoomIR(base, rate);
-      T.sets[rate] = { noise, bank, irRoom };
+      // записи: те же пакеты, что в игре (static/sfx/pack*.js), загрузка тегом <script>, декодирование, склейка петель
+      const t1 = performance.now();
+      const samples = A.createSamples(base, { base: T.SFX_BASE, idle: 0 });
+      samples.start(); await samples.all();
+      T.sets[rate] = { noise, bank, irRoom, samples };
+      T.recMs = Math.round(performance.now() - t1);
       const irBytes = irRoom.length * 2 * 4, noiseBytes = noise.length * 4;
-      return { ms: Math.round(performance.now() - t0), bankBytes: bank.bytes, irBytes, noiseBytes, total: bank.bytes + irBytes + noiseBytes, sounds: bank.total, roomSec: irRoom.duration };
+      return { recMs: T.recMs, recCount: samples.count, recFailed: samples.failed, recBytes: samples.bytes, ms: Math.round(performance.now() - t0), bankBytes: bank.bytes, irBytes, noiseBytes, total: bank.bytes + irBytes + noiseBytes, sounds: bank.total, roomSec: irRoom.duration };
     };
     const fft = T.fft = function (re, im) {
       const n = re.length;
@@ -198,7 +205,7 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
     // сыграть элемент каталога через настоящий тракт; steps — [[t, fn, args]…] действия по ходу просчёта
     T.render = async (e, rate, o = {}) => {
       const oc = new OfflineAudioContext(2, Math.ceil(((o.win || e.win) + T.T0) * rate), rate);
-      const a = A.createAudio({ context: oc, shared: T.sets[rate], seed: o.seed || 5 });
+      const a = A.createAudio({ context: oc, shared: o.synth ? Object.assign({}, T.sets[rate], { samples: null }) : T.sets[rate], seed: o.seed || 5, samples: o.synth ? false : undefined });
       if (o.before) o.before(a);
       // звук запускается не в нуле, а через T0: компрессор WebAudio первые миллисекунды жизни контекста «раскрывается» из тишины
       oc.suspend(T.T0).then(() => { if (e.pre) a[e.pre[0]](e.pre[1]); T.ret = a[e.fn](...e.args); oc.resume(); });
@@ -244,6 +251,7 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
   if (ONLY_METRICS) { await metrics(page, RATE); await browser.close(); console.log(`\n${passed} passed, ${failed} failed`); process.exit(failed ? 1 : 0); }
   console.log('  --   просчитано ' + setup.sounds + ' буферов за ' + setup.ms + ' мс; банк ' + (setup.bankBytes / 1048576).toFixed(2) + ' МБ, отклики ' + (setup.irBytes / 1048576).toFixed(2) + ' МБ, шум ' + (setup.noiseBytes / 1048576).toFixed(2) + ' МБ');
   ok(setup.total <= 12 * 1048576, 'вся память буферов ≤ 12 МБ при 48 кГц', (setup.total / 1048576).toFixed(2) + ' МБ');
+  console.log('  --   записи', JSON.stringify({ n: setup.recCount, failed: setup.recFailed, ms: setup.recMs, mb: (setup.recBytes / 1048576).toFixed(2) }));
   ok(setup.roomSec >= 0.6 && setup.roomSec <= 0.8, 'одна реверберация: отклик «стальная комната» 0.6–0.8 с (второй, длинной, нет)', setup.roomSec);
   const bankInfo = await page.evaluate((r) => {
     const A = window.__A, b = window.__T.sets[r].bank, out = [];
@@ -260,6 +268,42 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
   const heavy = ['gun', 'nearMiss', 'turretHit', 'aaShot', 'breechOpen', 'breechClose', 'ram', 'bombBurst'];
   group('у тяжёлых звуков 2–3 варианта', bankInfo.filter((r) => heavy.includes(r.name)), (r) => r.n >= 2, (r) => r.name);
 
+  // ---------- 1б. записи (static/sfx/pack*.js) ----------
+  console.log('записанные звуки');
+  const recInfo = await page.evaluate(async (rate) => {
+    const A = window.__A, T = window.__T, s = T.sets[rate].samples;
+    const files = [].concat(...A.PACKS.map((p) => A.packFiles(p)));
+    const names = Object.keys(A.SFX).filter((k) => A.SFX[k].f);
+    const notReady = names.filter((n) => !s.ready(n));
+    const oc = new OfflineAudioContext(2, rate, rate);
+    const a = A.createAudio({ context: oc, shared: T.sets[rate], seed: 3 });
+    const notRec = [];
+    for (const n of names) if (A.CAT[n]) { a.play(n, { force: true }); const src = a.debug().lastSrc; if (src !== 'rec') notRec.push(n + ':' + src); }
+    const muted = Object.keys(A.SFX).filter((k) => A.SFX[k].mute && a.play(k, { force: true }) !== 0);
+    // буферы: пик ≤ 1, без NaN; петли — шов (скачок между концом и началом) не больше обычных скачков внутри
+    const bad = [], seams = [];
+    for (const n of names) {
+      for (let v = 0; v < A.SFX[n].f.length; v++) {
+        const b = s.get(n, (v + 0.5) / A.SFX[n].f.length);
+        for (let c = 0; c < b.numberOfChannels; c++) {
+          const d = b.getChannelData(c); let pk = 0, nan = 0, mx = 0;
+          for (let i = 0; i < d.length; i++) { const x = Math.abs(d[i]); if (!(x === x)) nan++; if (x > pk) pk = x; if (i) mx = Math.max(mx, Math.abs(d[i] - d[i - 1])); }
+          if (nan || pk > 1 || pk < 0.5) bad.push([n, v, c, pk, nan]);
+          if (A.SFX[n].loop && c === 0) seams.push({ n, seam: Math.abs(d[0] - d[d.length - 1]), max: mx });
+        }
+      }
+    }
+    return { files: files.length, count: s.count, failed: s.failed, notReady, notRec, muted, bad, seams, mb: s.bytes / 1048576, ms: T.recMs };
+  }, RATE);
+  console.log('  --   ' + recInfo.count + ' файлов декодировано за ' + recInfo.ms + ' мс, ' + recInfo.mb.toFixed(2) + ' МБ в памяти');
+  ok(recInfo.count === recInfo.files && recInfo.failed.length === 0, 'все файлы записей загружены (тег <script>) и декодированы', recInfo);
+  ok(recInfo.notReady.length === 0, 'у каждого рецепта из таблицы записей готовы все варианты', recInfo.notReady);
+  ok(recInfo.notRec.length === 0, 'каждый рецепт с записью играет запись, а не синтез', recInfo.notRec);
+  ok(recInfo.muted.length === 0, 'хвост выстрела (gunTail) молчит: он уже в записи выстрела', recInfo.muted);
+  ok(recInfo.bad.length === 0, 'буферы записей: пик 0.5…1, без NaN', recInfo.bad);
+  group('петли записей склеены без щелчка (шов не больше наибольшего скачка внутри)', recInfo.seams, (r) => r.seam <= r.max, (r) => [r.n, r.seam.toFixed(4), r.max.toFixed(4)]);
+  ok(recInfo.mb <= 7, 'память записей ≤ 7 МБ', recInfo.mb.toFixed(2));
+
   // ---------- 2. каждый звук каталога через настоящий тракт ----------
   console.log('каталог через тракт (OfflineAudioContext, ' + RATE + ' Гц)');
   const cat = await page.evaluate(() => window.__A.CATALOGUE.map((e) => ({ id: e.id, cat: e.cat, win: e.win, dur: e.dur, loop: !!e.loop, fn: e.fn })));
@@ -270,7 +314,7 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
   }
   const api = await page.evaluate(() => { const a = window.__A.createAudio(); return Object.keys(a).filter((k) => typeof a[k] === 'function'); });
   const service = ['setTier', 'unlock', 'setMuted', 'setVolume', 'setBus', 'busNode', 'suspend', 'resume', 'dispose', 'prerender', 'play', 'debug', 'introVolume', 'introStop',
-    'stopper', 'lever', 'toggle', 'slew', 'nearMiss', 'ambience', 'tension', 'trace', 'duckBus'];   // служебные и вторые имена тех же звуков
+    'stopper', 'lever', 'toggle', 'slew', 'nearMiss', 'ambience', 'tension', 'trace', 'duckBus', 'recorded'];   // служебные и вторые имена тех же звуков
   const covered = new Set(cat.map((e) => e.fn));
   const missing = api.filter((k) => !covered.has(k) && !service.includes(k));
   ok(missing.length === 0, 'в каталоге есть каждая звуковая функция движка', missing);
@@ -400,6 +444,7 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
   // ---------- 6. 44.1 кГц ----------
   console.log('44.1 кГц');
   const s44 = await page.evaluate(() => window.__T.setup(44100));
+  console.log('  --   записи при 44.1 кГц', JSON.stringify({ n: s44.recCount, failed: s44.recFailed, ms: s44.recMs }));
   ok(s44.total <= 12 * 1048576, 'память буферов ≤ 12 МБ при 44.1 кГц', (s44.total / 1048576).toFixed(2));
   for (const id of ['fire', 'tick', 'ambient:storm', 'radioMsg:meteo', 'hoist', 'aaFire', 'missionWon']) {
     const r = await page.evaluate(([id, rate]) => window.__T.render(window.__A.CATALOGUE.find((q) => q.id === id), rate), [id, 44100]);
@@ -410,7 +455,7 @@ const RANK = ['gun', 'hit', 'aa', 'machine', 'control', 'amb'];
   // ---------- 7. живой контекст: запасной путь, утечки, пауза ----------
   console.log('живой AudioContext');
   const liveOk = await page.evaluate(async () => {
-    const a = window.__a = window.__A.createAudio();
+    const a = window.__a = window.__A.createAudio({ sfxBase: window.__T.SFX_BASE });
     const calls = ['tick', 'fire', 'ambient', 'alarm', 'music', 'servo'];
     let threw = 0; for (const k of calls) { try { a[k](true); } catch (e) { threw++; } }      // до unlock — тихо и без исключений
     const early = a.ready;
@@ -555,7 +600,7 @@ async function metrics(page, RATE) {
   ok(mix.crackle === 0, 'сведение всего боя через лимитер без треска', mix);
   // нагрузка: живой контекст
   const load = await page.evaluate(async () => {
-    const a = window.__A.createAudio(), N = window.__nodes, w = (ms) => new Promise((r) => setTimeout(r, ms));
+    const a = window.__A.createAudio({ sfxBase: window.__T.SFX_BASE }), N = window.__nodes, w = (ms) => new Promise((r) => setTimeout(r, ms));
     a.unlock(); await w(200);
     if (a.debug().state !== 'running') return null;
     if (a.setTier) a.setTier('high');

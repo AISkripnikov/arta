@@ -174,7 +174,10 @@ export function noiseTexture() {
   noiseTex.needsUpdate = true;
   return noiseTex;
 }
-const octFor = (q) => (!q || q.tier === 'high' ? 4 : q.tier === 'mid' ? 3 : 2);
+// октавы облаков: high 4; mid 3, а при q.seaSimple (уровень mid сейчас) — 2, как low
+const octFor = (q) => (!q || q.tier === 'high' ? 4 : q.tier === 'mid' && !q.seaSimple ? 3 : 2);
+// простое море: 2 волны без ряби — уровень low и любой с q.seaSimple
+const seaLow = (q) => !!(q && (q.tier === 'low' || q.seaSimple));
 
 /** Униформы неба (общие для неба, моря и плоскости зенитки). */
 export function createSkyUniforms() {
@@ -222,7 +225,7 @@ function skyMaterial(u, q) {
 }
 
 function seaMaterial(u, q) {
-  const lo = q && q.tier === 'low';
+  const lo = seaLow(q);
   return new THREE.ShaderMaterial({
     uniforms: u, defines: { OCT: 2, NW: lo ? 2 : 4, DETAIL: lo ? 0 : 1 }, fog: false, toneMapped: false,
     vertexShader: /* glsl */`
@@ -692,11 +695,11 @@ export function createOutside(ctx, opts) {
     const W = seaU.uWave.value;
     for (let i = 0; i < 4; i++) {
       const L = Ls[i] * (0.65 + sp / 14) * (storm ? 1.35 : 1), a = Math.atan2(wind.x, -wind.z) + rot[i];
-      const A = base * amp[i] * (i >= (q.tier === 'low' ? 2 : 4) ? 0 : 1);
+      const A = base * amp[i] * (i >= (seaLow(q) ? 2 : 4) ? 0 : 1);
       W[i].set(Math.sin(a), -Math.cos(a), 2 * Math.PI / L, A);
       sum += A;
     }
-    if (q.tier === 'low') { W[0].w += base * (amp[2] + amp[3]) * 0.6; sum += base * (amp[2] + amp[3]) * 0.6; }
+    if (seaLow(q)) { W[0].w += base * (amp[2] + amp[3]) * 0.6; sum += base * (amp[2] + amp[3]) * 0.6; }
     seaU.uAmpSum.value = sum;
     seaU.uSteep.value = storm ? 0.85 : clamp(0.25 + sp / 20, 0.25, 0.65);
     seaU.uFoam.value = storm ? 0.75 : clamp((sp - 8) / 10, 0, 0.35);

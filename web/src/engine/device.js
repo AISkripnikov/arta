@@ -4,9 +4,12 @@
 // Ошибка где угодно — 'high' (как раньше: дальше «АВТО» снизит уровень по настоящим кадрам).
 import * as THREE from 'three';
 
-// заведомо слабые GPU: Mali-4xx/T6xx/T7xx/T8xx/G31/G51/G52/G57, Adreno 3xx/4xx/50x/51x/52x/530/605/608/610/612/613,
-// PowerVR SGX/GE/GX/GM/Rogue, Vivante, Tegra 2–4, VideoCore, программная отрисовка (SwiftShader, llvmpipe)
-const WEAK_GPU = /mali-?[34]\d\d|mali-?t[678]\d\d|mali-?g(31|51|52|57|68)\b|adreno[^\d]*(3\d\d|4\d\d|50\d|51\d|52\d|530|60[58]|61[023])\b|powervr|sgx|rogue|\bge8\d\d|\bgx6\d\d|\bgm9\d\d|vivante|gc\d{3,4}|tegra [234]|videocore|swiftshader|llvmpipe|softpipe|software|microsoft basic/i;
+// заведомо слабые GPU: Mali-4xx/T6xx/T7xx/T8xx/G31/G51/G52, Adreno 3xx/4xx/50x/51x/52x/530/605/608,
+// PowerVR SGX/GE/GX/GM/Rogue, Vivante, Tegra 2–4, VideoCore, программная отрисовка (SwiftShader, llvmpipe) — low
+const WEAK_GPU = /mali-?[34]\d\d|mali-?t[678]\d\d|mali-?g(31|51|52)\b|adreno[^\d]*(3\d\d|4\d\d|50\d|51\d|52\d|530|60[58])\b|powervr|sgx|rogue|\bge8\d\d|\bgx6\d\d|\bgm9\d\d|vivante|gc\d{3,4}|tegra [234]|videocore|swiftshader|llvmpipe|softpipe|software|microsoft basic/i;
+// бюджетные GPU телефонов 2021–2025 (Redmi, Galaxy A, Realme: Mali-G57/G68, Adreno 610/612/613) при экране 2.4–2.7 Мпикс:
+// low (чёткий: плотность 1.5, без теней и обработки); mid — только если замер показал быструю заливку и быстрый процессор
+const BUDGET_GPU = /mali-?g(57|68)\b|adreno[^\d]*(61[023])\b/i;
 // средние: Mali-G71/G72/G76/G610, Adreno 616–619/620/630/640 — не ниже mid на старте
 const MID_GPU = /mali-?g(71|72|76|77|610|615)\b|adreno[^\d]*(61[5-9]|620|630|640)\b|xclipse 5/i;
 
@@ -82,7 +85,9 @@ export function probeDevice(renderer, o = {}) {
     out.screenPx = Math.round(sw * sh * dpr * dpr);
     let score = 2;                                 // 2 — high, 1 — mid, 0 — low
     const cap = (s, why) => { if (s < score) { score = s; } out.reasons.push(why); };
+    const budget = BUDGET_GPU.test(out.gpu);
     if (WEAK_GPU.test(out.gpu)) cap(0, 'слабый GPU');
+    else if (budget) cap(1, 'бюджетный GPU');
     else if (MID_GPU.test(out.gpu)) cap(1, 'средний GPU');
     if (out.memory && out.memory <= 2) cap(0, 'память ≤ 2 ГБ');
     else if (out.memory && out.memory <= 3) cap(1, 'память ≤ 3 ГБ');
@@ -96,8 +101,12 @@ export function probeDevice(renderer, o = {}) {
       if (out.gpuMs > 45) cap(0, 'медленная заливка');
       else if (out.gpuMs > 16) cap(1, 'заливка средняя');
     }
+    // бюджетный GPU: mid (60 к/с, плотность 1.75, статичные тени) — только при быстрой заливке и быстром процессоре по замеру,
+    // иначе low (30 к/с, плотность 1.5 — тоже чётко). Без замера — low.
+    if (budget && score === 1 && !(o.bench !== false && out.gpuMs > 0 && out.gpuMs <= 10 && out.cpu >= 7.5)) cap(0, 'бюджетный GPU, замер не быстрый');
     // большой экран с высокой плотностью при не самом быстром GPU — ступенью ниже (заливка растёт с пикселями)
     if (score === 2 && out.screenPx > 2.6e6 && out.gpuMs > 8) cap(1, 'много пикселей');
+    if (score === 1 && out.screenPx > 2.4e6 && out.gpuMs > 30) cap(0, 'много пикселей, заливка медленная');
     out.tier = ['low', 'mid', 'high'][score];
   } catch (e) {
     out.tier = 'high'; out.reasons.push('ошибка замера: ' + (e && e.message));

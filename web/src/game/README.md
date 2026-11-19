@@ -333,6 +333,7 @@ transport, landing, destroyer, cruiser, minelayer, howitzer, radar, fort, submar
   | `text` | 1 \| 1.15 \| 1.3 | 1 | размер надписей |
   | `quality` | `'auto'` \| `'high'` \| `'mid'` \| `'low'` | `'auto'` | качество графики; `'auto'` — движок сам снижает качество, если телефон не успевает |
   | `qualityChosen` | bool | false | игрок сам выбрал качество: `setSetting('quality', …)` (любое значение, и `'auto'`) ставит `true`; строки в настройках у флага нет |
+  | `resolution` | `'auto'` \| `0.75` \| `1` \| `1.25` \| `1.5` \| `2` | `'auto'` | «ЧЁТКОСТЬ»: плотность пикселей 3D-сцены, × CSS-пикселей (не больше плотности экрана); `'auto'` — по уровню качества (high 2, mid 1.75, low 1.5); применяет оболочка (`engine.setResolution`) |
   | `fps` | 60 \| 30 | 60 | ограничение кадров |
   | `nightTint` | `'normal'` \| `'soft'` | `'normal'` | яркость ночного красного фильтра |
   | `showFps` | bool | false | счётчик кадров |

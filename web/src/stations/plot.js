@@ -405,6 +405,13 @@ export function createPlotStation(ctx) {
   backPlate.object3D.visible = false;
   plane.add(backPlate.object3D);
   disposers.push(input.add(backPlate.object3D, { onTap() { if (loupe) { audio.loupe(); setLoupe(false); } } }, { priority: 2 }));
+  // карту под лупой отвели пальцем — плашка возвращает кадр к фишке активной цели / визиру (как при включении лупы)
+  const sightPlate = keep(ui.plate('К ВИЗИРУ', { size: 0.026, style: 'ochre', screws: false }));
+  sightPlate.object3D.scale.setScalar(1.05 * K / backPlate.w);
+  sightPlate.object3D.position.z = 0.004;
+  sightPlate.object3D.visible = false;
+  plane.add(sightPlate.object3D);
+  disposers.push(input.add(sightPlate.object3D, { onTap() { if (loupe) { audio.loupe(); recentre(); } } }, { priority: 2 }));
 
   // ------------------------------------------------------------------ вспомогательное
   const hotspots = {};
@@ -431,6 +438,10 @@ export function createPlotStation(ctx) {
   let loupe = false, zoom = 0;                             // zoom: 0 — основной вид … 1 — лупа
   const loupeC = { u: 0, v: 0 };
   let tagHold = 0;
+  // лупа отведена пальцем: кадр больше не подводится к фишке/визиру сам; fling — скорость «по инерции», м/с листа
+  let panned = false;
+  const fling = { u: 0, v: 0 };
+  const FLING = { decay: 4, min: 0.04 * K, max: 10 * K, window: 100, still: 80 };
   let pinMoved = {};                                       // id → { time, x, y } — донесение, по которому ставили фишку
   let plotRef = null;
   let drag = null, lastTap = null;
@@ -457,7 +468,20 @@ export function createPlotStation(ctx) {
     const lim = SHEET / 2 - 0.02;
     loupeC.u = clamp(u, -lim, lim); loupeC.v = clamp(v, -lim, lim);
     backPlate.object3D.position.set(loupeC.u - 1.55 * K, loupeC.v - 0.66 * K, 0.004);
+    sightPlate.object3D.position.set(loupeC.u + 1.55 * K, loupeC.v - 0.66 * K, 0.004);
     if (engine.current === 'plot') engine.setCameraPose(loupePose(), seconds);
+    engine.invalidate(seconds > 0 ? seconds : 0);
+  }
+  /** Сдвиг кадра лупы пальцем/по инерции: без перелёта камеры; центр кадра — в пределах карты 20×20 км. → упёрлись ли в край по u, v. */
+  function panLoupe(u, v) {
+    const cu = clamp(u, kmU(0), kmU(MAP)), cv = clamp(v, kmV(0), kmV(MAP));
+    centreLoupe(cu, cv, 0);
+    return { u: cu !== u, v: cv !== v };
+  }
+  function recentre() {
+    panned = false; fling.u = fling.v = 0;
+    const f = focusPoint();
+    centreLoupe(f.u, f.v, 0.4);
   }
   function focusPoint() {
     const s = state(), bat = battery(), id = s.activeTarget;
@@ -470,6 +494,7 @@ export function createPlotStation(ctx) {
     on = !!on;
     if (on === loupe && !at) return;
     loupe = on;
+    panned = false; fling.u = fling.v = 0;
     btnLoupe.setLit(on);
     if (on) { const f = at || focusPoint(); centreLoupe(f.u, f.v, 0.55); }
     else if (engine.current === 'plot') engine.setCameraPose(null, 0.5);
@@ -583,10 +608,14 @@ export function createPlotStation(ctx) {
       if (!state().mission) return;
       const p = boardPoint(e);
       if (!p) return;
+      fling.u = fling.v = 0;                               // палец остановил карту, летящую по инерции
       drag = pick(p) || { kind: 'none' };
       drag.p0 = p; drag.moved = false;
+      // под лупой пустое место листа (и знак поста — у него только касание) тащит саму карту
+      drag.pan = loupe && zoom > 0.9 && (drag.kind === 'none' || drag.kind === 'pivot');
     },
     onDrag(e) {
+      if (drag && drag.pan && e.dragging) { panDrag(e); return; }
       if (!drag || drag.kind === 'none' || drag.kind === 'pivot' || !e.dragging) return;
       const p = boardPoint(e);
       if (!p) return;
@@ -624,14 +653,15 @@ export function createPlotStation(ctx) {
         if (bearing !== plotOf(s).alidade.bearing) game.setAlidade({ bearing });
       }
     },
-    onUp() {
+    onUp(e) {
       if (!drag) return;
       const d = drag;
+      if (d.kind === 'pan') { if (d.moved) { drag = null; if (!e.cancelled) startFling(d); } return; }
       if (d.moved) {
         d.done = true;
         if (d.kind === 'pin') { d.free = null; audio.pin(); }
         if (d.kind === 'sight' || d.kind === 'ruler') trySnap();
-        if (loupe && (d.kind === 'pin' || d.kind === 'sight')) {
+        if (loupe && !panned && (d.kind === 'pin' || d.kind === 'sight')) {
           // подвести кадр к тому, что двигали
           const s = state(), bat = battery();
           const pin = d.kind === 'pin' ? plotOf(s).pins[d.id] : null;
@@ -676,6 +706,37 @@ export function createPlotStation(ctx) {
     },
   }));
 
+  // карта под лупой идёт за пальцем 1:1: точка листа, за которую взялись, остаётся под пальцем (кадр двигается сразу,
+  // без перелёта, — следующий луч уже из нового положения камеры). sens/invert маховиков сюда не относятся.
+  function panDrag(e) {
+    const d = drag, p = boardPoint(e);
+    if (!p) return;
+    if (!d.moved) {
+      d.moved = true; d.kind = 'pan'; lastTap = null; panned = true;
+      const thr = e.pointerType === 'mouse' ? 5 : 10, total = Math.hypot(e.totalDx || 0, e.totalDy || 0);
+      const k = total > thr ? thr / total : 1;               // порог «съедается» — карта не прыгает под пальцем
+      d.anchor = { u: d.p0.u + (p.u - d.p0.u) * k, v: d.p0.v + (p.v - d.p0.v) * k };
+      d.trail = [];
+    }
+    panLoupe(loupeC.u + d.anchor.u - p.u, loupeC.v + d.anchor.v - p.v);
+    const t = now();
+    d.trail.push({ t, u: loupeC.u, v: loupeC.v });
+    while (d.trail.length > 2 && t - d.trail[0].t > FLING.window) d.trail.shift();
+  }
+  function startFling(d) {
+    const tr = d.trail || [], t = now();
+    if (tr.length < 2) return;
+    const a = tr[0], b = tr[tr.length - 1], dt = (b.t - a.t) / 1000;
+    if (t - b.t > FLING.still || dt < 0.012) return;       // палец остановился перед отпусканием — без инерции
+    let fu = (b.u - a.u) / dt, fv = (b.v - a.v) / dt;
+    const sp = Math.hypot(fu, fv);
+    if (sp < FLING.min * 4) return;
+    if (sp > FLING.max) { fu *= FLING.max / sp; fv *= FLING.max / sp; }
+    fling.u = fu; fling.v = fv;
+    engine.invalidate();
+  }
+  function now() { return typeof performance !== 'undefined' ? performance.now() : Date.now(); }
+
   // ------------------------------------------------------------------ кадр
   const fmt2 = (v) => { const n = Math.round(v * 100); return (n < 1000 ? '0' : '') + (n / 100).toFixed(2); };
   const fmtB = (v) => { const n = Math.round(norm360(v) * 10) / 10; return (n < 100 ? (n < 10 ? '00' : '0') : '') + n.toFixed(1); };
@@ -693,6 +754,15 @@ export function createPlotStation(ctx) {
     if (mission !== chartMission) redrawChart(mission);
     if (s.plot !== plotRef) { plotRef = s.plot; resetLocal(); }
 
+    if (fling.u || fling.v) {
+      if (!loupe || engine.current !== 'plot') fling.u = fling.v = 0;
+      else {
+        const edge = panLoupe(loupeC.u + fling.u * dt, loupeC.v + fling.v * dt), f = Math.exp(-dt * FLING.decay);
+        fling.u = edge.u ? 0 : fling.u * f; fling.v = edge.v ? 0 : fling.v * f;       // у края листа — стоп
+        if (Math.hypot(fling.u, fling.v) < FLING.min) fling.u = fling.v = 0;
+        engine.invalidate();
+      }
+    }
     zoom += ((loupe ? 1 : 0) - zoom) * (1 - Math.exp(-dt * 7));
     if (Math.abs((loupe ? 1 : 0) - zoom) < 0.002) zoom = loupe ? 1 : 0;
     // камеру вернули к основному виду помимо поста (повторный gotoStation оболочки) — снять лупу
@@ -805,9 +875,10 @@ export function createPlotStation(ctx) {
 
     // бирки под лупой
     // под лупой над аэрофотоснимком бирки не показываем (мешают смотреть); во время перетаскивания и 2 с после — показываем
-    if (drag && drag.moved && !drag.done) tagHold = 2; else tagHold = Math.max(0, tagHold - dt);
+    if (drag && drag.moved && !drag.done && drag.kind !== 'pan') tagHold = 2; else tagHold = Math.max(0, tagHold - dt);
     const tags = zoom > 0.5 && (tagHold > 0 || !photos.covers(loupeC.u, loupeC.v));
     backPlate.object3D.visible = loupe && zoom > 0.5;
+    sightPlate.object3D.visible = backPlate.object3D.visible && panned;
     tagPin.mesh.visible = tags && !!activePin;
     if (tagPin.mesh.visible) {
       setTag(tagPin, 'X ' + fmt2(activePin.x), 'Y ' + fmt2(activePin.y));
@@ -824,7 +895,7 @@ export function createPlotStation(ctx) {
   Object.assign(hotspots, {
     bearingWheel: wheelB.object3D, rangeWheel: wheelR.object3D,
     btnXMinus: btnXm.object3D, btnXPlus: btnXp.object3D, btnYMinus: btnYm.object3D, btnYPlus: btnYp.object3D,
-    btnRecord: btnRecord.object3D, btnLoupe: btnLoupe.object3D, btnLine: btnLine.object3D, btnErase: btnErase.object3D, btnOverview: backPlate.object3D,
+    btnRecord: btnRecord.object3D, btnLoupe: btnLoupe.object3D, btnLine: btnLine.object3D, btnErase: btnErase.object3D, btnOverview: backPlate.object3D, btnToSight: sightPlate.object3D,
     chart: sheet, sight, ruler, tray: trayObj,
     counterBearing: cBearing.object3D, counterRange: cRange.object3D, counterX: cX.object3D, counterY: cY.object3D,
     lampAligned: lampAligned.object3D, lampRecorded: lampRecorded.object3D, lampNew: lampNew.object3D,
@@ -840,7 +911,7 @@ export function createPlotStation(ctx) {
     update,
     onEnter() { audio.clunk(); },
     onLeave() {
-      drag = null; lastTap = null;
+      drag = null; lastTap = null; panned = false; fling.u = fling.v = 0;
       if (loupe) { loupe = false; btnLoupe.setLit(false); }   // камеру уводит движок
     },
     hotspots,
@@ -859,6 +930,8 @@ export function createPlotStation(ctx) {
       /** Смещение ручки-диска от острия фишки, км карты (в основном виде; под лупой — × tokenScale). */
       get handleOffsetKm() { const k = tokenScale() / K; return { x: HANDLE.x * k, y: HANDLE.y * k }; },
       get loupe() { return loupe; },
+      /** Центр кадра лупы, км карты; panned — карту отвели пальцем (кадр не следует за фишкой/визиром); flinging — летит по инерции. */
+      get loupeView() { return { x: uKm(loupeC.u), y: vKm(loupeC.v), panned, flinging: !!(fling.u || fling.v) }; },
       get leadVisible() { return leadMesh.visible; },
       get photos() { return photos.shown; },
       /** id своих кораблей на аэрофотоснимке выстрела n. */
@@ -880,6 +953,8 @@ export function createPlotStation(ctx) {
       /** Видна ли фишка цели (в лотке или на карте). */
       pinVisible(id) { return !!(pins[id] && pins[id].g.visible); },
       setLoupe(b) { setLoupe(b); },
+      /** Что взял бы палец в точке карты (км): 'pin'|'sight'|'ruler'|'pivot'|'none'. */
+      pickAt(x, y) { const r = pick({ u: kmU(x), v: kmV(y) }); return r ? r.kind : 'none'; },
     },
     dispose() {
       disposers.forEach((d) => { try { d(); } catch (e) { /* уже снято */ } });
